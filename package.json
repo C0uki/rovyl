@@ -11,9 +11,11 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && node scripts/verify-radial-windowing.mjs && node scripts/verify-renderer-budget.mjs && node scripts/generate-win-icon.mjs && node scripts/generate-appx-assets.mjs",
+    "helper:build": "node scripts/build-native-helper.cjs",
+    "build": "node scripts/build-native-helper.cjs && tsc && vite build && node scripts/verify-radial-windowing.mjs && node scripts/verify-renderer-budget.mjs && node scripts/generate-win-icon.mjs && node scripts/generate-appx-assets.mjs",
     "electron": "node scripts/launch-electron.js",
-    "start": "node scripts/start-local-runtime.cjs",
+    "start": "node scripts/start-prod.cjs",
+    "start:dev": "node scripts/start-local-runtime.cjs",
     "start:runtime": "node scripts/dev-runtime.cjs",
     "dist": "npm run build && node scripts/run-electron-builder.mjs",
     "test:win32-launch": "node --test backend/win32-launch.test.cjs",
@@ -82,6 +84,7 @@
     "asar": true,
     "asarUnpack": [
       "backend/*.ps1",
+      "backend/*.exe",
       "resources/bin/**/*",
       "node_modules/sql.js/dist/sql-wasm.wasm",
       "node_modules/node-global-key-listener/bin/**/*"

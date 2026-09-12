@@ -286,7 +286,7 @@ export default function App() {
   const [minimizeNeutralCoverActive, setMinimizeNeutralCoverActive] = useState(false);
   /** Main: `prepare-radial-show` — paint before `show()` so no old texture is exposed (minimized/dashboard). */
   const [radialPreShowSolidCover, setRadialPreShowSolidCover] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(true);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   /**
    * Where Settings was open. Up here because the panel does not survive using the app.
    *

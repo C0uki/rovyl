@@ -1469,7 +1469,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
       if (!directionModeRef.current) return point;
       const { position } = stateRef.current;
       const previous = gestureSampleRef.current;
-      gestureSampleRef.current = point;
+      gestureSampleRef.current = { x: point.x, y: point.y };
 
       const getVirtualPoint = () => ({
         x: position.x + gestureVectorRef.current.x,
@@ -1682,7 +1682,6 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
     gestureConsumedRef.current = false;
 
     let rafId: number | null = null;
-    const rawPoint = { x: 0, y: 0 };
     const MOVEMENT_BUFFER_SQ = 225; // 15px * 15px
 
     const processMouseMove = () => {
@@ -1753,10 +1752,9 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
 
     const handleMouseMove = (e: MouseEvent) => {
       /** Synchronous: the highlight can wait for the next frame, the confirmation cannot. */
-      rawPoint.x = e.clientX;
-      rawPoint.y = e.clientY;
-      lastAnchorPointRef.current = rawPoint;
-      lastPointerRef.current = trackAimPoint(rawPoint);
+      const currentPoint = { x: e.clientX, y: e.clientY };
+      lastAnchorPointRef.current = currentPoint;
+      lastPointerRef.current = trackAimPoint(currentPoint);
       if (rafId === null) {
         rafId = requestAnimationFrame(processMouseMove);
       }
@@ -2547,7 +2545,9 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
      * Re-anchor at the point the hand is at NOW. The previous anchor is the last moving sample, up
      * to 90ms old: keeping it made the count start with the budget already spent.
      */
-    if (lastAnchorPointRef.current) dwellAnchorRef.current = lastAnchorPointRef.current;
+    if (lastAnchorPointRef.current) {
+      dwellAnchorRef.current = { x: lastAnchorPointRef.current.x, y: lastAnchorPointRef.current.y };
+    }
     dwellPendingRef.current = null;
     dwellTargetRef.current = pending;
     dwellStartedAtRef.current = Date.now();
@@ -2569,7 +2569,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
 
       /** The first sample after opening or after a level change only serves to set the reference. */
       if (dwellBaselineRef.current === null) {
-        dwellBaselineRef.current = point;
+        dwellBaselineRef.current = { x: point.x, y: point.y };
         /**
          * By direction this sample is NOT swallowed. You only get here after the vector has already
          * crossed the threshold (`processMouseMove` returns before that), so this is the committed
@@ -2645,7 +2645,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
        * per frame.
        */
       cancelDwell();
-      dwellAnchorRef.current = point;
+      dwellAnchorRef.current = { x: point.x, y: point.y };
       dwellPendingRef.current = next;
       dwellSettleTimerRef.current = window.setTimeout(startDwell, dwellSettleMsRef.current);
     },

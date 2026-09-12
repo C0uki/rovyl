@@ -3260,7 +3260,7 @@ function ShortcutRecorder({
           }
         }}
       >
-        {recording ? 'Press the key combination…' : 'Record new shortcut'}
+        {recording ? 'Press a key or mouse button…' : 'Record new shortcut'}
       </button>
       {note && (
         <p className={`zs-shortcut-note${note.tone === 'warn' ? ' is-warn' : ''}`} role="status">

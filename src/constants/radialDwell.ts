@@ -66,6 +66,9 @@ const DIRECTION_COMMIT_PX: Record<DirectionSensitivity, number> = {
 };
 
 export function clampDirectionSensitivity(value: unknown): DirectionSensitivity {
+  if (value === 1 || value === '1' || value === 'low') return 'low';
+  if (value === 2 || value === '2' || value === 'medium') return 'medium';
+  if (value === 3 || value === '3' || value === 'high') return 'high';
   return DIRECTION_SENSITIVITIES.includes(value as DirectionSensitivity)
     ? (value as DirectionSensitivity)
     : DIRECTION_SENSITIVITY_DEFAULT;

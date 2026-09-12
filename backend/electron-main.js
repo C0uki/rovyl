@@ -55,7 +55,7 @@ const http = require("http");
 const https = require("https");
 const url = require("url");
 
-const isDev = !app.isPackaged;
+const isDev = !app.isPackaged && process.env.NODE_ENV !== "production";
 
 /**
  * Distribution channel. The Microsoft Store forbids self-updating mechanisms — the store is what
@@ -150,6 +150,90 @@ const scheduleLogFlush = () => {
  */
 const MOUSE_TRIGGER_VK = { middle: 0x04, x1: 0x05, x2: 0x06 };
 const MOUSE_TRIGGER_BUTTONS = Object.keys(MOUSE_TRIGGER_VK);
+
+/**
+ * Parse a shortcut string to detect if it contains a mouse button trigger.
+ * Supported buttons:
+ *  - Middle (VK 0x04)
+ *  - Mouse4 / X1 (VK 0x05)
+ *  - Mouse5 / X2 (VK 0x06)
+ *  - RightClick / Right (VK 0x02, only when combined with modifiers to protect system context menu)
+ * Modifiers:
+ *  - Ctrl (bit 1, 0x01)
+ *  - Alt (bit 2, 0x02)
+ *  - Shift (bit 4, 0x04)
+ *  - Super / Win (bit 8, 0x08)
+ */
+function parseMouseShortcut(shortcutStr) {
+  if (!shortcutStr || typeof shortcutStr !== "string") return null;
+  const parts = shortcutStr
+    .split("+")
+    .map((s) => s.trim().toLowerCase().replace(/\s+/g, ""))
+    .filter(Boolean);
+  if (parts.length === 0) return null;
+
+  let modMask = 0;
+  let mouseBtn = null;
+  let vk = 0;
+  let cleanBtnName = "";
+
+  for (const part of parts) {
+    if (part === "ctrl" || part === "control") {
+      modMask |= 1;
+    } else if (part === "alt" || part === "option") {
+      modMask |= 2;
+    } else if (part === "shift") {
+      modMask |= 4;
+    } else if (
+      part === "super" ||
+      part === "win" ||
+      part === "windows" ||
+      part === "meta" ||
+      part === "cmd"
+    ) {
+      modMask |= 8;
+    } else if (part === "middle" || part === "mouse3" || part === "wheel") {
+      mouseBtn = "middle";
+      vk = 4;
+      cleanBtnName = "Middle";
+    } else if (part === "mouse4" || part === "x1" || part === "xbutton1") {
+      mouseBtn = "x1";
+      vk = 5;
+      cleanBtnName = "Mouse4";
+    } else if (part === "mouse5" || part === "x2" || part === "xbutton2") {
+      mouseBtn = "x2";
+      vk = 6;
+      cleanBtnName = "Mouse5";
+    } else if (part === "rightclick" || part === "right" || part === "mouse2") {
+      mouseBtn = "right";
+      vk = 2;
+      cleanBtnName = "RightClick";
+    }
+  }
+
+  if (!mouseBtn || !vk) return null;
+  // Disallow plain RightClick without modifier to avoid hijacking normal context menus
+  if (vk === 2 && modMask === 0) return null;
+
+  const mods = [];
+  if (modMask & 1) mods.push("Ctrl");
+  if (modMask & 2) mods.push("Alt");
+  if (modMask & 4) mods.push("Shift");
+  if (modMask & 8) mods.push("Super");
+  const normalized = [...mods, cleanBtnName].join("+");
+
+  return {
+    isMouse: true,
+    vk,
+    modMask,
+    buttonName: cleanBtnName,
+    normalized,
+  };
+}
+
+function isMouseShortcut(shortcutStr) {
+  return !!parseMouseShortcut(shortcutStr);
+}
 
 const diagLog = (msg) => {
   const line = `[${new Date().toISOString()}] ${msg}\n`;
@@ -685,19 +769,27 @@ if (process.env.ZENITH_AGGRESSIVE_GPU !== "1") {
   /** In aggressive mode `disable-features` already includes these (a repeated appendSwitch replaces the list). */
   app.commandLine.appendSwitch(
     "disable-features",
-    "CalculateNativeWinOcclusion,WindowOcclusionPrediction",
+    "CalculateNativeWinOcclusion,WindowOcclusionPrediction,Translate,AutofillServerCommunication,OptimizationHints",
   );
 }
 diagLog("[Perf] Background throttling dynamically controlled by window visibility.");
 
 // Memory optimization: prioritize low working set for an idle background launcher.
+// --lite-mode reduces V8 memory footprint by ~40% (disables JIT tiering, optimizes memory).
 // --optimize_for_size reduces V8 bytecode & code cache footprint.
-// --max-old-space-size=128 ensures GC triggers well before heap reaches multiple hundreds of MB.
+// --max-old-space-size=48 ensures GC triggers well before heap grows.
 // --expose-gc exposes global.gc() for cleanups when returning to idle.
 app.commandLine.appendSwitch(
   "js-flags",
-  "--optimize_for_size --max-old-space-size=128 --expose-gc",
+  "--lite-mode --optimize_for_size --max-old-space-size=48 --expose-gc",
 );
+// Disable shader disk cache, background networking, component updates to prevent persistent background buffers
+app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
+app.commandLine.appendSwitch("disable-background-networking");
+app.commandLine.appendSwitch("disable-component-update");
+app.commandLine.appendSwitch("disable-domain-reliability");
+app.commandLine.appendSwitch("disable-sync");
+app.commandLine.appendSwitch("renderer-process-limit", "1");
 // Cap disk and media cache sizes so Chromium does not hold tens of megabytes of offline buffers
 app.commandLine.appendSwitch("disk-cache-size", "10485760");
 app.commandLine.appendSwitch("media-cache-size", "10485760");
@@ -909,6 +1001,15 @@ let isAppQuitting = false;
  * The function lives inside `app.whenReady`; this reference is how `will-quit` reaches it.
  */
 let stopMouseHookForShutdown = () => {};
+let triggerRadialShortcut = () => {};
+let releaseRadialShortcut = () => {};
+let onNativeRecordMouse = null;
+let lastRecordedKeyboardModifiers = {
+  CTRL: false,
+  ALT: false,
+  SHIFT: false,
+  META: false,
+};
 
 let updateInstallInProgress = false;
 /** Ensures renderer runs saveFullConfigSync before exit (tray "Quit" / OS shutdown paths). */
@@ -970,23 +1071,44 @@ let keyboardListener = null;
 let recordingActive = false;
 
 function startShortcutRecording() {
+  lastRecordedKeyboardModifiers = { CTRL: false, ALT: false, SHIFT: false, META: false };
+  ensureRadialMouseBlocker();
+  writeRadialMouseBlocker("RECORD ON");
+
+  onNativeRecordMouse = (buttonName, modMask) => {
+    if (!recordingActive) return;
+    const formattedModifiers = [];
+    const ctrl = !!(modMask & 1) || lastRecordedKeyboardModifiers.CTRL;
+    const alt = !!(modMask & 2) || lastRecordedKeyboardModifiers.ALT;
+    const shift = !!(modMask & 4) || lastRecordedKeyboardModifiers.SHIFT;
+    const meta = !!(modMask & 8) || lastRecordedKeyboardModifiers.META;
+
+    if (ctrl) formattedModifiers.push("Ctrl");
+    if (alt) formattedModifiers.push("Alt");
+    if (shift) formattedModifiers.push("Shift");
+    if (meta) formattedModifiers.push("Super");
+
+    const shortcutString = [...formattedModifiers, buttonName].join("+");
+    diagLog(`[ShortcutRecord] Mouse shortcut recorded: ${shortcutString}`);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("shortcut-recorded", shortcutString);
+    }
+  };
+
   if (keyboardListener) return;
 
   keyboardListener = new GlobalKeyboardListener();
   recordingActive = true;
 
   keyboardListener.addListener((e, down) => {
-    if (e.state === "DOWN" && recordingActive) {
-      // Collect all currently pressed keys
-      const modifiers = {
-        CTRL: false,
-        ALT: false,
-        SHIFT: false,
-        META: false,
-      };
-
-      // Check modifiers using the 'down' object which tracks all pressed keys
-      // The listener provides names like "LEFT CTRL", "RIGHT SHIFT", etc.
+    if (!recordingActive) return;
+    const modifiers = {
+      CTRL: false,
+      ALT: false,
+      SHIFT: false,
+      META: false,
+    };
+    if (down && typeof down === "object") {
       Object.keys(down).forEach((keyName) => {
         if (keyName.includes("CTRL")) modifiers.CTRL = true;
         if (keyName.includes("ALT")) modifiers.ALT = true;
@@ -994,7 +1116,10 @@ function startShortcutRecording() {
         if (keyName.includes("META") || keyName.includes("WINDOWS"))
           modifiers.META = true;
       });
+    }
+    lastRecordedKeyboardModifiers = modifiers;
 
+    if (e.state === "DOWN") {
       // Extract the main key
       let key = e.name;
 
@@ -1039,6 +1164,8 @@ function startShortcutRecording() {
 
 function stopShortcutRecording() {
   recordingActive = false;
+  onNativeRecordMouse = null;
+  writeRadialMouseBlocker("RECORD OFF");
   if (keyboardListener) {
     keyboardListener.kill();
     keyboardListener = null;
@@ -1742,6 +1869,28 @@ let radialTriggerListener = null;
 /** Drag slop: below this the press was a click, not an aim. */
 const TRIGGER_PASSTHROUGH_SLOP_PX = 6;
 
+function getNativeHelperExePath() {
+  const candidates = [
+    path.join(__dirname, "rovyl-helper.exe"),
+    path.join(__dirname, "native-helper", "rovyl-helper.exe"),
+    path.join(__dirname, "..", "resources", "bin", "rovyl-helper.exe"),
+    path.join(__dirname.replace("app.asar", "app.asar.unpacked"), "rovyl-helper.exe"),
+    path.join(__dirname.replace("app.asar", "app.asar.unpacked"), "native-helper", "rovyl-helper.exe"),
+  ];
+  if (process.resourcesPath) {
+    candidates.push(path.join(process.resourcesPath, "resources", "bin", "rovyl-helper.exe"));
+    candidates.push(path.join(process.resourcesPath, "bin", "rovyl-helper.exe"));
+    candidates.push(path.join(process.resourcesPath, "app.asar.unpacked", "resources", "bin", "rovyl-helper.exe"));
+    candidates.push(path.join(process.resourcesPath, "app.asar.unpacked", "backend", "rovyl-helper.exe"));
+  }
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c)) return c;
+    } catch (_) {}
+  }
+  return null;
+}
+
 function radialMouseBlockerAssetPath() {
   const p = path.join(__dirname, "mouse-blocker.ps1");
   return isDev ? p : p.replace("app.asar", "app.asar.unpacked");
@@ -1850,22 +1999,53 @@ function releaseRadialCursor() {
 function ensureRadialMouseBlocker() {
   if (process.platform !== "win32" || radialMouseBlocker) return;
   radialMouseBlockerReady = false;
-  const child = spawn(
-    "powershell",
-    [
-      "-NoProfile",
-      "-NonInteractive",
-      "-ExecutionPolicy",
-      "RemoteSigned",
-      "-File",
-      radialMouseBlockerAssetPath(),
-      String(process.pid),
-    ],
-    { windowsHide: true },
-  );
+  const nativeHelper = getNativeHelperExePath();
+  const child = nativeHelper
+    ? (diagLog(`[RadialBlocker] Spawning native helper: ${nativeHelper}`),
+       spawn(nativeHelper, ["mouse-blocker", String(process.pid)], { windowsHide: true }))
+    : spawn(
+        "powershell",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "RemoteSigned",
+          "-File",
+          radialMouseBlockerAssetPath(),
+          String(process.pid),
+        ],
+        { windowsHide: true },
+      );
   radialMouseBlocker = child;
   child.stdout.on("data", (data) => {
     const text = data.toString();
+    const lines = text.split(/\r?\n/);
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      if (line.startsWith("RECORD_MOUSE ") && onNativeRecordMouse) {
+        const parts = line.slice("RECORD_MOUSE ".length).trim().split(" ");
+        const btnName = parts[0];
+        const modMask = parseInt(parts[1] || "0", 10);
+        try {
+          onNativeRecordMouse(btnName, modMask);
+        } catch (e) {
+          diagLog(`[RadialBlocker] record mouse: ${e.message}`);
+        }
+      } else if (line === "SHORTCUT_DOWN") {
+        try {
+          triggerRadialShortcut();
+        } catch (e) {
+          diagLog(`[RadialBlocker] shortcut down: ${e.message}`);
+        }
+      } else if (line === "SHORTCUT_UP") {
+        try {
+          releaseRadialShortcut();
+        } catch (e) {
+          diagLog(`[RadialBlocker] shortcut up: ${e.message}`);
+        }
+      }
+    }
     if (radialTriggerListener && text.includes("TRIGGER_")) {
       try {
         radialTriggerListener(text);
@@ -4466,42 +4646,64 @@ app.whenReady().then(async () => {
       showMenuAtCursor("shortcut");
     };
 
-    // MIGRATION / NORMALIZATION: 'Win' is recorded as 'Super' now, but old settings might have 'Win'
-    if (shortcut.includes("Win")) {
-      shortcut = shortcut.replace(/Win/g, "Super");
-      diagLog(
-        `[Shortcut] Normalized 'Win' to 'Super' in shortcut: ${shortcut}`,
-      );
-    }
-
-    try {
-      const registered = globalShortcut.register(shortcut, () =>
-        openRadialFromShortcut(shortcut),
-      );
-
-      if (registered) {
-        diagLog(`Global shortcut '${shortcut}' registered successfully.`);
-      } else {
-        diagLog(
-          `[Shortcut] Global shortcut '${shortcut}' not registered; it is likely already in use.${altZOverlayHint(shortcut)}`,
-        );
-        /** With no global mouse monitor, always guarantee a safe way to open the radial. */
-        const fallbackShortcut = "Alt+Shift+F9";
-        if (
-          shortcutCompactKey(shortcut) !== shortcutCompactKey(fallbackShortcut) &&
-          globalShortcut.register(fallbackShortcut, () =>
-            openRadialFromShortcut(fallbackShortcut),
-          )
-        ) {
-          diagLog(
-            `[Shortcut] Fallback '${fallbackShortcut}' registered because '${shortcut}' is taken.`,
-          );
+    triggerRadialShortcut = () => {
+      openRadialFromShortcut(currentSettings.globalShortcut || "shortcut");
+    };
+    releaseRadialShortcut = () => {
+      if (cachedRadialFlags.shortcutTriggerMode === "hold") {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("shortcut-release");
         }
       }
-    } catch (e) {
+    };
+
+    const mouseSpec = parseMouseShortcut(shortcut);
+    if (mouseSpec) {
+      ensureRadialMouseBlocker();
+      writeRadialMouseBlocker(`SHORTCUT_TRIGGER ${mouseSpec.vk} ${mouseSpec.modMask}`);
       diagLog(
-        `[Shortcut] Global shortcut '${shortcut}' registration failed: ${e.message}${altZOverlayHint(shortcut)}`,
+        `[Shortcut] Registered mouse global shortcut '${shortcut}' (VK ${mouseSpec.vk}, ModMask ${mouseSpec.modMask})`,
       );
+    } else {
+      writeRadialMouseBlocker("SHORTCUT_TRIGGER OFF");
+
+      // MIGRATION / NORMALIZATION: 'Win' is recorded as 'Super' now, but old settings might have 'Win'
+      if (shortcut.includes("Win")) {
+        shortcut = shortcut.replace(/Win/g, "Super");
+        diagLog(
+          `[Shortcut] Normalized 'Win' to 'Super' in shortcut: ${shortcut}`,
+        );
+      }
+
+      try {
+        const registered = globalShortcut.register(shortcut, () =>
+          openRadialFromShortcut(shortcut),
+        );
+
+        if (registered) {
+          diagLog(`Global shortcut '${shortcut}' registered successfully.`);
+        } else {
+          diagLog(
+            `[Shortcut] Global shortcut '${shortcut}' not registered; it is likely already in use.${altZOverlayHint(shortcut)}`,
+          );
+          /** With no global mouse monitor, always guarantee a safe way to open the radial. */
+          const fallbackShortcut = "Alt+Shift+F9";
+          if (
+            shortcutCompactKey(shortcut) !== shortcutCompactKey(fallbackShortcut) &&
+            globalShortcut.register(fallbackShortcut, () =>
+              openRadialFromShortcut(fallbackShortcut),
+            )
+          ) {
+            diagLog(
+              `[Shortcut] Fallback '${fallbackShortcut}' registered because '${shortcut}' is taken.`,
+            );
+          }
+        }
+      } catch (e) {
+        diagLog(
+          `[Shortcut] Global shortcut '${shortcut}' registration failed: ${e.message}${altZOverlayHint(shortcut)}`,
+        );
+      }
     }
 
     // Register individual app shortcuts from workspaces
@@ -4753,6 +4955,7 @@ app.whenReady().then(async () => {
   ipcMain.on("pause-global-shortcut", () => {
     console.log("[Shortcuts] Pausing global shortcuts for recording...");
     lastShortcutRegistrationSignature = null;
+    writeRadialMouseBlocker("SHORTCUT_TRIGGER OFF");
     globalShortcut.unregisterAll();
   });
 
@@ -4784,6 +4987,10 @@ app.whenReady().then(async () => {
     const accel = String(accelerator || "").trim();
     if (!accel) return { available: false, reason: "invalid" };
     const normalized = accel.includes("Win") ? accel.replace(/Win/g, "Super") : accel;
+
+    if (isMouseShortcut(normalized)) {
+      return { available: true };
+    }
 
     try {
       if (globalShortcut.isRegistered(normalized)) {
@@ -6956,11 +7163,15 @@ function foregroundFocusAssetPath() {
 function ensureForegroundFocusHelper() {
   if (process.platform !== "win32" || foregroundFocusHelper) return;
   foregroundFocusHelperReady = false;
-  const child = spawn(
-    "powershell",
-    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "RemoteSigned", "-File", foregroundFocusAssetPath()],
-    { windowsHide: true },
-  );
+  const nativeHelper = getNativeHelperExePath();
+  const child = nativeHelper
+    ? (diagLog(`[Foreground] Spawning native helper: ${nativeHelper}`),
+       spawn(nativeHelper, ["foreground-focus"], { windowsHide: true }))
+    : spawn(
+        "powershell",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "RemoteSigned", "-File", foregroundFocusAssetPath()],
+        { windowsHide: true },
+      );
   foregroundFocusHelper = child;
   /**
    * Framed by line, and matched by exact text rather than by `includes`.
@@ -7035,10 +7246,17 @@ function scheduleIdleMemoryCleanup(delayMs = 2500) {
 }
 
 function performIdleMemoryCleanup() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    diagLog("[Memory] Cleanup skipped: mainWindow not ready or destroyed");
+    return;
+  }
   // Never perform cleanup while settings or radial menu is visibly active
-  if (rendererPanelVisible) return;
+  if (rendererPanelVisible) {
+    diagLog("[Memory] Cleanup skipped: rendererPanelVisible=true");
+    return;
+  }
   if (nativeWindowSizeMode !== "small" && !mainWindow.isMinimized() && mainWindow.isVisible()) {
+    diagLog(`[Memory] Cleanup skipped: window visible (mode=${nativeWindowSizeMode})`);
     return;
   }
 
