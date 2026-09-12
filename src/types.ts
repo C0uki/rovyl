@@ -101,6 +101,10 @@ export interface UIConfig {
    * old configs (normalized to `true` on hydration). Do not expose it in settings again.
    */
   fixedPosition: boolean;
+  /** 'active-display' centers on the monitor where the cursor currently is. 'cursor' centers right under the cursor. */
+  openPositionMode?: 'active-display' | 'cursor';
+  /** Strict offline mode disables all external internet requests (weather, remote favicons, updates). */
+  strictOfflineMode?: boolean;
   /**
    * "Background dimming", 0..1. At 1 the desktop is gone: an opaque fill over the whole monitor.
    * Read it through `radialScrimAlphas` — the number is not an alpha, and how it maps to one
@@ -338,7 +342,7 @@ export interface ElectronAPI {
    * with this. `fullBleed` overrides the box entirely: the dimming reaches the edge, so the window
    * has to be the monitor (see `radialScrimNeedsFullBleed`).
    */
-  setRadialViewport?: (payload: { size: number; fixed: boolean; fullBleed?: boolean }) => void;
+  setRadialViewport?: (payload: { size: number; fixed: boolean; fullBleed?: boolean; openPositionMode?: 'active-display' | 'cursor' }) => void;
   /**
    * Click-free launching on: when the radial opens, the main stores where the cursor was, puts it
    * at the center of the wheel and returns it on close. This is what makes the pointer hideable (it

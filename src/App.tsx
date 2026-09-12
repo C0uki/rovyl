@@ -634,7 +634,8 @@ export default function App() {
     );
     window.electron.setRadialViewport({
       size,
-      fixed: true,
+      fixed: config.fixedPosition !== false,
+      openPositionMode: config.openPositionMode ?? (config.fixedPosition === false ? 'cursor' : 'active-display'),
       /**
        * Past a certain dimming the scrim no longer fades out inside that box, and a box that shows
        * its own edge has to stop being a box: main opens the radial over the whole monitor instead.
@@ -642,7 +643,7 @@ export default function App() {
        */
       fullBleed: radialScrimNeedsFullBleed(config.backdropOpacity),
     });
-  }, [config.menuRadius, config.iconSize, config.backdropOpacity]);
+  }, [config.menuRadius, config.iconSize, config.backdropOpacity, config.fixedPosition, config.openPositionMode]);
 
   /**
    * Click-free execution: the renderer is the one that knows it is on, but the one that has to park

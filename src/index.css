@@ -43,7 +43,7 @@
 
   --zn-text: rgba(255, 255, 255, .93);
   --zn-text-2: rgba(255, 255, 255, .55);
-  --zn-text-3: rgba(255, 255, 255, .34);
+  --zn-text-3: rgba(255, 255, 255, .48);
 
   /* Primary action: the same white/black pair as the radial's active item. */
   --zn-solid: #ffffff;
@@ -90,7 +90,7 @@
 
   --zn-text: rgba(0, 0, 0, .90);
   --zn-text-2: rgba(0, 0, 0, .56);
-  --zn-text-3: rgba(0, 0, 0, .38);
+  --zn-text-3: rgba(0, 0, 0, .48);
 
   --zn-solid: #101012;
   --zn-on-solid: #ffffff;

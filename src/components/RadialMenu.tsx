@@ -739,7 +739,7 @@ const RadialMenuItem = React.memo(({
                */
               /* `inset` at the top = a single light source for the whole wheel: the tiles read as objects. */
               boxShadow: isActive
-                ? `0 0 0 1px rgba(0,0,0,0.45), 0 0 0 5px ${hoverColor}24, 0 12px 28px rgba(0,0,0,0.5)`
+                ? `0 0 0 1px rgba(0,0,0,0.45), 0 0 0 4px ${hoverColor}2e, 0 0 22px ${hoverColor}38, 0 12px 28px rgba(0,0,0,0.5)`
                 : 'inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(0,0,0,0.5), 0 8px 22px rgba(0,0,0,0.42)',
             }}
           >
@@ -934,6 +934,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
   const armAndTrackDwellRef = useRef<
     (point: { x: number; y: number }, aim: { isCenter: boolean; index: number | null }) => void
   >(() => {});
+  const handleAppClickRef = useRef<(app: AppItem) => void>(() => {});
   /** One commit per arc start/cancel. Zero per frame: the animation is CSS. */
   const [dwellTick, setDwellTick] = useState<{ index: number; key: number } | null>(null);
 
@@ -2049,9 +2050,65 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
       if (launchEchoTimerRef.current !== null) return;
 
       if (e.key === 'Backspace') {
-        if (!typeAheadRef.current) return;
+        if (typeAheadRef.current) {
+          e.preventDefault();
+          setTypeAhead((current) => current.slice(0, -1));
+          return;
+        }
+        if (folderStack.length > 0) {
+          e.preventDefault();
+          setFolderStack((prev) => prev.slice(0, -1));
+          setActiveIndex(null);
+          return;
+        }
+        return;
+      }
+
+      if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        setTypeAhead((current) => current.slice(0, -1));
+        const currentItems = stateRef.current.currentLevelApps;
+        if (activeIndex !== null && currentItems[activeIndex]) {
+          handleAppClickRef.current(currentItems[activeIndex]);
+        }
+        return;
+      }
+
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const currentItems = stateRef.current.currentLevelApps;
+        const count = currentItems.length;
+        if (count === 0) return;
+        if (e.shiftKey) {
+          setActiveIndex((prev) => (prev === null ? count - 1 : (prev - 1 + count) % count));
+        } else {
+          setActiveIndex((prev) => (prev === null ? 0 : (prev + 1) % count));
+        }
+        return;
+      }
+
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        const currentItems = stateRef.current.currentLevelApps;
+        const count = currentItems.length;
+        if (count === 0) return;
+
+        let targetAngleDeg = 270;
+        if (e.key === 'ArrowUp') targetAngleDeg = 270;
+        else if (e.key === 'ArrowRight') targetAngleDeg = 0;
+        else if (e.key === 'ArrowDown') targetAngleDeg = 90;
+        else if (e.key === 'ArrowLeft') targetAngleDeg = 180;
+
+        let bestIndex = 0;
+        let minDiff = 360;
+        for (let i = 0; i < count; i++) {
+          const sliceAngleDeg = (i * (360 / count) - 90 + 360) % 360;
+          const diff = Math.abs(((sliceAngleDeg - targetAngleDeg + 180) % 360) - 180);
+          if (diff < minDiff) {
+            minDiff = diff;
+            bestIndex = i;
+          }
+        }
+        setActiveIndex(bestIndex);
         return;
       }
 
@@ -2079,6 +2136,15 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
           onWorkspaceSwitch(num - 1);
           return;
         }
+      } else if (!typeAheadRef.current && e.key >= '1' && e.key <= '8') {
+        const num = parseInt(e.key, 10);
+        const currentItems = stateRef.current.currentLevelApps;
+        const targetIdx = num - 1;
+        if (targetIdx < currentItems.length) {
+          e.preventDefault();
+          setActiveIndex(targetIdx);
+          return;
+        }
       }
 
       if (isTypedCharacter) {
@@ -2089,7 +2155,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
 
     window.addEventListener('keydown', handleKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
-  }, [isOpen, onClose, onWorkspaceSwitch]);
+  }, [isOpen, onClose, onWorkspaceSwitch, activeIndex, folderStack.length]);
 
   /**
    * "Hold" mode: the window opens with the middle button still pressed, and on Windows the mouse
@@ -2309,8 +2375,8 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
       });
     }
 
-    // Real Weather Logic (wttr.in) with 10-minute cache
-    if (config.showWeather) {
+    // Real Weather Logic (wttr.in) with 10-minute cache (disabled if strictOfflineMode)
+    if (config.showWeather && !config.strictOfflineMode) {
       const loc = config.weatherLocation || '';
       const now = Date.now();
       const cacheValid = weatherCache.data &&
@@ -2454,7 +2520,6 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
   }, [onClose, onWorkspaceSwitch, disarmDwell]);
 
   /** `handleAppClick` is not stable; the engine has to call the current render's version every time. */
-  const handleAppClickRef = useRef(handleAppClick);
   handleAppClickRef.current = handleAppClick;
 
   /**
@@ -3058,7 +3123,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                 }}
               >
                 {/* Inside a workspace its name is enough — "Rovyl" identifies the root. */}
-                {(isRoot ? ['Rovyl'] : folderStack.map((level) => level.label)).map((label, i) => (
+                {(isRoot ? [currentWorkspace?.name || 'Rovyl'] : folderStack.map((level) => level.label)).map((label, i) => (
                   <React.Fragment key={`${label}-${i}`}>
                     {i > 0 && <span className="text-[11px] leading-none text-white/25">/</span>}
                     <span

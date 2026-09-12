@@ -837,6 +837,16 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
           config.activationThreshold, 20, 120, (value) => update('activationThreshold', value), (value) => `${Math.round(value)} px`,
           1, 'activationThreshold'),
         {
+          key: 'openPositionMode', configKey: 'openPositionMode', group: 'Position', title: t('openPosition'),
+          description: t('openPositionDesc'),
+          kind: 'segmented', current: config.openPositionMode ?? 'active-display',
+          choices: [
+            { value: 'active-display', label: t('activeDisplay') },
+            { value: 'cursor', label: t('atCursor') },
+          ],
+          onChange: (value) => update('openPositionMode', value as UIConfig['openPositionMode']),
+        },
+        {
           key: 'instant', configKey: 'radialInstantActivate', group: 'Hands-free', title: 'Launch without clicking',
           /** The way OUT belongs in the description: with the pointer hidden, it is not guessable. */
           description:
@@ -985,6 +995,12 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
           description: 'Prioritize immediate response and reduce visual effects.',
           kind: 'bool', enabled: config.performanceMode,
           onToggle: () => update('performanceMode', !config.performanceMode),
+        },
+        {
+          key: 'strictOffline', configKey: 'strictOfflineMode', group: 'Performance', title: t('strictOffline'),
+          description: t('strictOfflineDesc'),
+          kind: 'bool', enabled: Boolean(config.strictOfflineMode),
+          onToggle: () => update('strictOfflineMode', !config.strictOfflineMode),
         },
         {
           key: 'game', group: 'Protection', title: 'Fullscreen protection',

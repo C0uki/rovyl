@@ -1456,12 +1456,22 @@ function showMenuAtCursor(source = "shortcut") {
   cancelIdleMemoryCleanup();
   const radialOpenStartedAt = Date.now();
 
-  /** A fixed position means truly fixed: neither the position nor the monitor follows the cursor. */
-  const targetDisplay = screen.getPrimaryDisplay();
+  /** Multi-monitor awareness: resolve the active display nearest to the cursor. */
+  const cursorPoint = screen.getCursorScreenPoint();
+  const targetDisplay = (cursorPoint && screen.getDisplayNearestPoint)
+    ? screen.getDisplayNearestPoint(cursorPoint)
+    : screen.getPrimaryDisplay();
   let radialCenter = {
     x: Math.round(targetDisplay.bounds.x + targetDisplay.bounds.width / 2),
     y: Math.round(targetDisplay.bounds.y + targetDisplay.bounds.height / 2),
   };
+  if (radialOpenPositionMode === "cursor" || radialFixedPosition === false) {
+    const margin = Math.min(180, Math.floor(radialViewportSize / 4));
+    radialCenter = {
+      x: Math.round(Math.max(targetDisplay.bounds.x + margin, Math.min(cursorPoint.x, targetDisplay.bounds.x + targetDisplay.bounds.width - margin))),
+      y: Math.round(Math.max(targetDisplay.bounds.y + margin, Math.min(cursorPoint.y, targetDisplay.bounds.y + targetDisplay.bounds.height - margin))),
+    };
+  }
   /**
    * If the monitor's real centre falls inside the Settings HWND, we keep the HWND completely still
    * (no DWM flash) and draw the wheel at that point in client coordinates. This path used to
@@ -1843,6 +1853,8 @@ let radialViewportSize = 988;
  * still has no monitor-sized layered surface to compose for the 99.9% of the time nothing is open.
  */
 let radialFullBleed = false;
+let radialOpenPositionMode = "active-display";
+let radialFixedPosition = true;
 ipcMain.on("set-radial-viewport", (_event, payload) => {
   if (!payload || typeof payload !== "object") return;
   const n = Number(payload.size);
@@ -1850,6 +1862,12 @@ ipcMain.on("set-radial-viewport", (_event, payload) => {
     radialViewportSize = Math.round(n);
   }
   radialFullBleed = !!payload.fullBleed;
+  if (payload.openPositionMode) {
+    radialOpenPositionMode = payload.openPositionMode;
+  }
+  if (typeof payload.fixed === "boolean") {
+    radialFixedPosition = payload.fixed;
+  }
 });
 
 /**
@@ -2197,17 +2215,19 @@ function radialBoundsUnionWithPanel(radialRect, displayBounds) {
   };
 }
 
-/** The radial's box is always centred on the monitor being pointed at. Free positioning is gone. */
+/** The radial's box is centred on the target point or on the monitor being pointed at. */
 function radialModeBounds(displayBounds, point) {
   const side = Math.min(
     radialViewportSize,
     displayBounds.width,
     displayBounds.height,
   );
-  const center = {
-    x: displayBounds.x + displayBounds.width / 2,
-    y: displayBounds.y + displayBounds.height / 2,
-  };
+  const center = (point && typeof point.x === "number" && typeof point.y === "number")
+    ? point
+    : {
+        x: displayBounds.x + displayBounds.width / 2,
+        y: displayBounds.y + displayBounds.height / 2,
+      };
   const half = side / 2;
   const maxX = displayBounds.x + displayBounds.width - side;
   const maxY = displayBounds.y + displayBounds.height - side;

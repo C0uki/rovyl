@@ -121,6 +121,12 @@ export const translations = {
     // Performance & Optimization
     precisionMode: 'Precision mode',
     precisionModeDesc: 'Zero-latency mode prioritizing instant input responsiveness.',
+    openPosition: 'Wheel position',
+    openPositionDesc: 'Where the wheel appears when summoned.',
+    activeDisplay: 'Screen center',
+    atCursor: 'At cursor',
+    strictOffline: 'Strict offline mode',
+    strictOfflineDesc: 'Disable external web requests (weather, favicons, updates) for 100% offline privacy.',
 
     // Alerts
     confirmReset: 'Are you sure you want to reset all settings to defaults?',
@@ -245,6 +251,12 @@ export const translations = {
     // Performance & Optimization
     precisionMode: 'وضع الدقة الفائقة',
     precisionModeDesc: 'نمط استجابة سريع بدون أي تأخير في حركة المؤشر.',
+    openPosition: 'موضع ظهور القائمة',
+    openPositionDesc: 'المكان الذي تظهر فيه العجلة الدائرية عند استدعائها.',
+    activeDisplay: 'منتصف الشاشة النشطة',
+    atCursor: 'عند مؤشر الفأرة',
+    strictOffline: 'الوضع المحلي الصارم',
+    strictOfflineDesc: 'إيقاف كافة اتصالات الإنترنت الخارجية (الطقس، الأيقونات، التحديثات) لضمان أقصى خصوصية.',
 
     // Alerts
     confirmReset: 'هل أنت متأكد من رغبتك في استعادة الإعدادات الافتراضية؟',

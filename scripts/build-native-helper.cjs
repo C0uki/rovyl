@@ -50,7 +50,11 @@ function buildNativeHelper() {
       ],
       { stdio: "inherit" },
     );
-    fs.copyFileSync(out1, out2);
+    try {
+      fs.copyFileSync(out1, out2);
+    } catch (copyErr) {
+      console.warn("[build-native-helper] Note: Could not copy to backend/ (file may be running):", copyErr.message);
+    }
     console.log("[build-native-helper] Compiled successfully:", out1);
   } catch (err) {
     console.error("[build-native-helper] Compilation failed:", err.message);

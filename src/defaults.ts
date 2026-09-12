@@ -218,6 +218,8 @@ export const DEFAULT_UI_CONFIG: UIConfig = {
   menuRadius: 140,
   iconSize: 64,
   fixedPosition: true,
+  openPositionMode: "active-display",
+  strictOfflineMode: false,
   /**
    * Not 1 any more, and not a weaker default either: 0.6 on the scale that reaches a black screen
    * paints the same alpha (0.5) that 1 painted on the scale that topped out at half. The slider
