@@ -16,9 +16,10 @@ if (!fs.existsSync(helperExe)) {
 }
 
 const env = { ...process.env, NODE_ENV: "production" };
+delete env.ELECTRON_RUN_AS_NODE;
 const electronPath = require("electron");
 
-console.log("[Rovyl] Starting Rovyl in lightweight mode (Zero DevServer, Zero Vite)...");
+console.log("[Rovyl] Starting Rovyl in ultra-lightweight mode (Zero DevServer, Zero Vite)...");
 const child = spawn(electronPath, ["."], {
   cwd: projectRoot,
   env,

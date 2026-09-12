@@ -769,7 +769,7 @@ if (process.env.ZENITH_AGGRESSIVE_GPU !== "1") {
   /** In aggressive mode `disable-features` already includes these (a repeated appendSwitch replaces the list). */
   app.commandLine.appendSwitch(
     "disable-features",
-    "CalculateNativeWinOcclusion,WindowOcclusionPrediction,Translate,AutofillServerCommunication,OptimizationHints",
+    "CalculateNativeWinOcclusion,WindowOcclusionPrediction,Translate,AutofillServerCommunication,OptimizationHints,AudioServiceOutOfProcess",
   );
 }
 diagLog("[Perf] Background throttling dynamically controlled by window visibility.");
@@ -777,11 +777,11 @@ diagLog("[Perf] Background throttling dynamically controlled by window visibilit
 // Memory optimization: prioritize low working set for an idle background launcher.
 // --lite-mode reduces V8 memory footprint by ~40% (disables JIT tiering, optimizes memory).
 // --optimize_for_size reduces V8 bytecode & code cache footprint.
-// --max-old-space-size=48 ensures GC triggers well before heap grows.
+// --max-old-space-size=32 ensures GC triggers well before heap grows.
 // --expose-gc exposes global.gc() for cleanups when returning to idle.
 app.commandLine.appendSwitch(
   "js-flags",
-  "--lite-mode --optimize_for_size --max-old-space-size=48 --expose-gc",
+  "--lite-mode --optimize_for_size --max-old-space-size=32 --expose-gc",
 );
 // Disable shader disk cache, background networking, component updates to prevent persistent background buffers
 app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
@@ -789,6 +789,7 @@ app.commandLine.appendSwitch("disable-background-networking");
 app.commandLine.appendSwitch("disable-component-update");
 app.commandLine.appendSwitch("disable-domain-reliability");
 app.commandLine.appendSwitch("disable-sync");
+app.commandLine.appendSwitch("disable-dev-shm-usage");
 app.commandLine.appendSwitch("renderer-process-limit", "1");
 // Cap disk and media cache sizes so Chromium does not hold tens of megabytes of offline buffers
 app.commandLine.appendSwitch("disk-cache-size", "10485760");
@@ -7349,12 +7350,25 @@ function performIdleMemoryCleanup() {
       if (foregroundFocusHelper && foregroundFocusHelper.pid) {
         pids.add(foregroundFocusHelper.pid);
       }
+      if (process.ppid) {
+        pids.add(process.ppid);
+      }
 
       const pidList = Array.from(pids).join(",");
       foregroundFocusHelper.stdin.write(`TRIM ${pidList}\n`);
     }
   } catch (e) {
     diagLog(`[Memory] Working set trim error: ${e.message}`);
+  }
+
+  // 6. Native Electron working set trim for all processes (Windows-only)
+  if (typeof app.trimWorkingSet === "function") {
+    try {
+      app.trimWorkingSet();
+      diagLog("[Memory] Executed app.trimWorkingSet() successfully");
+    } catch (_) {
+      /* ignore */
+    }
   }
 }
 
