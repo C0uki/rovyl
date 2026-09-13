@@ -615,35 +615,64 @@
 .zs-segmented button.is-selected:hover:not(:disabled) { background: var(--zn-pressed); box-shadow: inset 0 0 0 1px var(--zn-line-strong); }
 .zs-segmented button:disabled { color: var(--zn-text-3); cursor: not-allowed; }
 
-/* A native <select>, dressed to match the segmented control it replaced.
+/* ── Select (trigger in the row, listbox in a portal) ───────────────────── */
 
-   Native and not a custom listbox, deliberately: the shell already declares `color-scheme`, so
-   Chromium paints the popup in the right theme, and the platform gives type-ahead, arrow keys and
-   screen-reader semantics for free — all of which a div-and-role reimplementation has to earn back
-   and usually does not. The only part CSS can reach is the closed state, which is this. */
-.zs-select { position: relative; display: inline-flex; align-items: center; }
-.zs-select select {
-  height: 30px; max-width: 100%;
-  /* The chevron sits in the trailing padding: logical properties, so RTL flips it with the text. */
-  padding-block: 0; padding-inline: var(--zn-3) calc(var(--zn-3) + 16px);
-  appearance: none; -webkit-appearance: none;
+.zs-select { position: relative; display: inline-flex; align-items: center; min-width: 0; }
+/* Sized and coloured as the segmented control's resting state, because that is what it replaced
+   on this row — the control should not change weight just because the option count grew. */
+.zs-select-trigger {
+  max-width: 100%; height: 30px;
+  display: inline-flex; align-items: center; gap: var(--zn-2);
+  padding-inline: var(--zn-3);
   color: var(--zn-text); border: 1px solid var(--zn-line); border-radius: var(--zn-r-control);
   background: var(--zn-sunken); cursor: pointer;
-  font-family: inherit; font-size: 12px; font-weight: 450; line-height: 1;
-  text-overflow: ellipsis;
+  font-size: 12px; font-weight: 450; line-height: 1; white-space: nowrap;
   transition: color .15s var(--zn-ease), background .15s var(--zn-ease), box-shadow .15s var(--zn-ease);
 }
-.zs-select select:hover { background: var(--zn-hover); box-shadow: inset 0 0 0 1px var(--zn-line-strong); }
-.zs-select select:active { background: var(--zn-pressed); }
-.zs-select select:disabled { color: var(--zn-text-3); cursor: not-allowed; }
-/* The popup is the platform's, and on Windows it inherits the page font but not the page colours
-   unless they are stated on the options themselves. */
-.zs-select option { color: var(--zn-text); background: var(--zn-surface); }
-.zs-select > svg {
-  position: absolute; inset-inline-end: var(--zn-2);
-  color: var(--zn-text-3); pointer-events: none;
+.zs-select-trigger > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.zs-select-trigger > svg { flex: none; color: var(--zn-text-3); transition: rotate .18s var(--zn-ease), color .15s var(--zn-ease); }
+.zs-select-trigger:hover { background: var(--zn-hover); box-shadow: inset 0 0 0 1px var(--zn-line-strong); }
+.zs-select-trigger:hover > svg { color: var(--zn-text-2); }
+.zs-select-trigger:active { background: var(--zn-pressed); }
+/* Open is a state worth showing on the trigger too: the chevron turns to point at its own list. */
+.zs-select-trigger.is-open { background: var(--zn-raised); box-shadow: inset 0 0 0 1px var(--zn-line-strong); }
+.zs-select-trigger.is-open > svg { rotate: 180deg; color: var(--zn-text-2); }
+
+/* Transparent, full-bleed, and only there to catch the click that dismisses. */
+.zs-select-shade { position: fixed; inset: 0; z-index: 60; }
+
+.zs-select-list {
+  position: fixed; z-index: 61;
+  max-height: 320px; overflow-y: auto; overscroll-behavior: contain;
+  padding: var(--zn-1); margin: 0;
+  border-radius: var(--zn-r-panel); background: var(--zn-surface);
+  box-shadow: inset 0 0 0 1px var(--zn-line-strong), var(--zn-elev);
 }
-.zs-select select:hover + svg { color: var(--zn-text-2); }
+/* The listbox takes focus so keys reach it, but it is a container — the ring belongs on the
+   active OPTION, which `.is-active` already draws. A second ring around the whole popup would
+   only compete with it. */
+.zs-select-list:focus, .zs-select-list:focus-visible { outline: none; }
+
+.zs-select-option {
+  display: flex; align-items: center; gap: var(--zn-2);
+  min-height: 34px; padding: var(--zn-2) var(--zn-3);
+  border-radius: var(--zn-r-chip); cursor: pointer;
+  color: var(--zn-text-2);
+}
+.zs-select-option > b { min-width: 0; flex: none; color: var(--zn-text); font-size: 12.5px; font-weight: 500; }
+/* The English name is support, not a second label: it recedes, and it is the part that gives way
+   when the row runs out of width. */
+.zs-select-option > small {
+  min-width: 0; flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--zn-text-3); font-size: 11px;
+}
+.zs-select-option > svg { flex: none; margin-inline-start: auto; color: var(--zn-solid); }
+.zs-select-option.is-active { background: var(--zn-hover); }
+.zs-select-option.is-active > b { color: var(--zn-text); }
+/* Chosen is stated by the check, not by a fill — a filled row plus a highlighted row reads as two
+   selections when the keyboard has moved away from what is set. */
+.zs-select-option[aria-selected="true"] > b { color: var(--zn-text); }
 
 .zs-slider { display: flex; align-items: center; gap: var(--zn-3); }
 /* The field's vertical slack is larger than the track's: it is the thumb that overhangs

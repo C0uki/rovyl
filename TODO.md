@@ -223,10 +223,15 @@ that closed it. The section stays because §8 points into it and because a later
 
 - [x] **6.1** **i18n is live again, on the (b) terms below.** `PrecisionSettings` calls a real `t()`
   from `src/i18n/useTranslation`, and that hook is the only importer of the tables.
-- [x] **6.2** **Language selector is in the live UI** — General › Language, a `select` (seven entries
-  do not fit a segmented control). Options are labelled with each language's endonym; the group
-  name stays the English "Language" and the row carries the endonyms as search keywords, so it is
-  findable from inside a locale you cannot read.
+- [x] **6.2** **Language selector is in the live UI** — General › Language, a custom dropdown
+  (seven entries do not fit a segmented control, and a native `<select>` draws its popup from the
+  OS theme, which looked nothing like the panel around it). Options are labelled with each
+  language's endonym over its English name; the group name stays the English "Language" and the
+  row carries every endonym and every locale's own word for "language" as search keywords, so the
+  row is findable from inside a locale you cannot read.
+  Owning the popup means owning what `<select>` did for free — `aria-activedescendant`, type-ahead,
+  Home/End, Escape-cancels-versus-Tab-commits, focus restoration, edge flipping. The arithmetic
+  half of that is `src/components/selectMenu.ts`, covered by `npm run test:select-menu`.
 - [x] **6.3** **Key parity is enforced twice.** `translations.ts` ends in a
   `Record<SupportedLanguage, Record<TranslationKey, string>>` annotation, so a missing key or a
   declared-but-untabled language fails `tsc`; `npm run test:i18n` covers what a type cannot see

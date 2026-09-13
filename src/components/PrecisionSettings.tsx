@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   DWELL_MS_MAX,
@@ -54,6 +55,7 @@ import { NativeAppIcon, useInstalledApps, clearInstalledAppsMemory, type Install
 import { radialCrowding } from '../utils/workspaceRadial';
 import { startMenuAppIdToLaunchCommand } from '../utils/windowsLaunchCommand';
 import { WheelPreview } from './WheelPreview';
+import { nextTypeAheadBuffer, selectMenuPlacement, typeAheadIndex } from './selectMenu';
 import { LANGUAGES, normalizeLanguage, translations, useTranslation } from '../i18n/useTranslation';
 
 interface PrecisionSettingsProps {
@@ -1623,31 +1625,7 @@ function SettingRow({
           </div>
         )}
 
-        {item.kind === 'select' && (
-          <div className="zs-select">
-            <select
-              aria-labelledby={`${item.key}-label`}
-              aria-describedby={describedBy}
-              value={item.current}
-              onChange={(event) => item.onChange?.(event.target.value)}
-            >
-              {item.choices?.map((choice) => (
-                /**
-                 * The endonym leads and the English name trails it, because both readings have to
-                 * work: someone scanning for their own script finds it first, and a screen reader
-                 * — or anyone who has landed here by accident — still gets a name they can say.
-                 * Unless they are the same word, and then "English · English" is just noise.
-                 */
-                <option key={choice.value} value={choice.value}>
-                  {choice.hint && choice.hint !== choice.label
-                    ? `${choice.label} · ${choice.hint}`
-                    : choice.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown size={14} strokeWidth={1.9} aria-hidden="true" />
-          </div>
-        )}
+        {item.kind === 'select' && <SelectSettingControl item={item} describedBy={describedBy} />}
 
         {item.kind === 'range' && <span className="zs-readout">{item.value}</span>}
 
@@ -1737,6 +1715,242 @@ function SettingRow({
 function normalizeHexInput(value: string): string | null {
   const hex = value.trim().replace(/^#/, '');
   return /^[0-9a-f]{6}$/i.test(hex) ? `#${hex.toUpperCase()}` : null;
+}
+
+/**
+ * The panel's dropdown. One row uses it — Language — and it exists because that row outgrew the
+ * segmented control at seven options.
+ *
+ * A native `<select>` was the first version and the honest starting point: accessible,
+ * keyboard-complete and free. What it is not is ours — Chromium draws the popup from the OS theme,
+ * so it arrived as a grey Windows listbox in the middle of a panel that controls every other pixel
+ * of itself, ignoring the type scale, the radii and the surface tokens.
+ *
+ * Replacing it means owing back everything the platform was doing unpaid, which is most of the
+ * length of this component and all of the interesting parts: roving `aria-activedescendant` rather
+ * than moved focus, type-ahead with an idle reset, Home/End, Escape cancelling versus Tab
+ * committing, focus returning to the trigger on close, and the active option kept in view. Those
+ * are not embellishments on a dropdown — for anyone not using a mouse, they ARE the dropdown.
+ */
+function SelectSettingControl({ item, describedBy }: { item: SettingItem; describedBy?: string }) {
+  const reduceMotion = useReducedMotion();
+  const choices = item.choices ?? [];
+  const selectedIndex = Math.max(0, choices.findIndex((choice) => choice.value === item.current));
+  const [isOpen, setIsOpen] = useState(false);
+  /**
+   * Which option the keyboard is ON, which is not which option is CHOSEN. Arrowing must not
+   * commit: a dropdown that applied each option as the highlight passed over it would, on this
+   * row, retranslate the whole panel under the user five times on the way down to Deutsch.
+   */
+  const [activeIndex, setActiveIndex] = useState(selectedIndex);
+  const [placement, setPlacement] =
+    useState<{ left: number; top: number; width: number; drop: 'down' | 'up' }>();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const optionRefs = useRef(new Map<number, HTMLDivElement>());
+  const typeAhead = useRef({ buffer: '', at: 0 });
+  const listId = `${item.key}-listbox`;
+
+  /**
+   * Anchored to the trigger in viewport coordinates, and re-measured rather than remembered.
+   *
+   * The row lives inside `.zs-scroll`, so an absolutely positioned popup would be clipped by that
+   * scroller as soon as it was taller than the space left below the row. Fixed escapes the clip —
+   * the shell sets no transform while it is open, so nothing re-parents the containing block — but
+   * fixed also means the popup does not travel with the row, hence the listeners below.
+   */
+  const measure = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    setPlacement(
+      selectMenuPlacement(
+        trigger.getBoundingClientRect(),
+        { width: window.innerWidth, height: window.innerHeight },
+        choices.length,
+      ),
+    );
+  }, [choices.length]);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    measure();
+    const reposition = () => measure();
+    /** Capture: the scroll that moves this row is `.zs-scroll`'s, and it does not reach `window`. */
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
+  }, [isOpen, measure]);
+
+  /** Every opening starts from what is selected, not from wherever the last visit was left. */
+  useEffect(() => {
+    if (isOpen) setActiveIndex(selectedIndex);
+  }, [isOpen, selectedIndex]);
+
+  useEffect(() => {
+    if (isOpen) listRef.current?.focus({ preventScroll: true });
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen) optionRefs.current.get(activeIndex)?.scrollIntoView({ block: 'nearest' });
+  }, [isOpen, activeIndex]);
+
+  const close = useCallback((returnFocus = true) => {
+    setIsOpen(false);
+    if (returnFocus) triggerRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  const commit = useCallback(
+    (index: number) => {
+      const choice = choices[index];
+      if (choice) item.onChange?.(choice.value);
+      close();
+    },
+    [choices, item, close],
+  );
+
+  /**
+   * Type-ahead: the affordance people use without knowing they use it. `d` jumps to Deutsch.
+   *
+   * The buffer accumulates only while typing stays brisk, so `d`,`e` refines to Deutsch while a
+   * `d` a minute later starts over rather than searching for `dd`. Both rules live in
+   * `./selectMenu`, where they can be tested.
+   */
+  const jumpToTyped = useCallback(
+    (key: string) => {
+      const now = Date.now();
+      const state = typeAhead.current;
+      state.buffer = nextTypeAheadBuffer(state.buffer, key, now - state.at);
+      state.at = now;
+      const hit = typeAheadIndex(choices, activeIndex, state.buffer);
+      if (hit !== null) setActiveIndex(hit);
+    },
+    [activeIndex, choices],
+  );
+
+  const onListKeyDown = (event: React.KeyboardEvent) => {
+    const step = (delta: number) => {
+      event.preventDefault();
+      setActiveIndex((index) => Math.min(choices.length - 1, Math.max(0, index + delta)));
+    };
+    switch (event.key) {
+      case 'ArrowDown': return step(1);
+      case 'ArrowUp': return step(-1);
+      case 'PageDown': return step(5);
+      case 'PageUp': return step(-5);
+      case 'Home': event.preventDefault(); return setActiveIndex(0);
+      case 'End': event.preventDefault(); return setActiveIndex(choices.length - 1);
+      case 'Enter':
+      case ' ':
+        event.preventDefault();
+        return commit(activeIndex);
+      case 'Escape':
+        /** Stopped, or the panel's own Escape closes Settings out from behind the dropdown. */
+        event.preventDefault();
+        event.stopPropagation();
+        return close();
+      case 'Tab':
+        /** Tab commits everywhere else in this panel; leaving it a cancel here would surprise. */
+        return commit(activeIndex);
+      default:
+        if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
+          event.preventDefault();
+          jumpToTyped(event.key);
+        }
+    }
+  };
+
+  const onTriggerKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      setIsOpen(true);
+    }
+  };
+
+  const selected = choices[selectedIndex];
+  const labelOf = (choice: { label: string; hint?: string }) =>
+    choice.hint && choice.hint !== choice.label ? `${choice.label} · ${choice.hint}` : choice.label;
+
+  return (
+    <div className="zs-select">
+      <button
+        ref={triggerRef}
+        type="button"
+        className={`zs-select-trigger${isOpen ? ' is-open' : ''}`}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-controls={isOpen ? listId : undefined}
+        aria-labelledby={`${item.key}-label`}
+        aria-describedby={describedBy}
+        /**
+         * `onMouseDown`, not `onClick`, and the shade below depends on it.
+         *
+         * The shade covers the trigger while the list is open. If both used `click`, pressing the
+         * trigger to dismiss would be: mousedown closes via the shade, the shade unmounts, then
+         * mouseup lands on the now-uncovered trigger and reopens it — the dropdown flickers and
+         * never closes. Deciding on mousedown means the shade has already swallowed the gesture
+         * and the trigger never hears about it. The keyboard path is `onKeyDown` below, so nothing
+         * is lost by not having a click handler.
+         */
+        onMouseDown={() => setIsOpen((open) => !open)}
+        onKeyDown={onTriggerKeyDown}
+      >
+        <span>{selected ? labelOf(selected) : ''}</span>
+        <ChevronDown size={14} strokeWidth={1.9} aria-hidden="true" />
+      </button>
+
+      {isOpen && placement && createPortal(
+        <>
+          {/*
+            Catches the dismissing click, and nothing else.
+
+            Transparent, and covering the shell, so that closing the popup is not also a click on
+            whatever sat underneath it — dismissing a dropdown should never double as toggling the
+            switch that happened to be behind it.
+          */}
+          <div className="zs-select-shade" role="presentation" onMouseDown={() => close(false)} />
+          <motion.div
+            id={listId}
+            ref={listRef}
+            className="zs-select-list"
+            role="listbox"
+            tabIndex={-1}
+            aria-labelledby={`${item.key}-label`}
+            aria-activedescendant={`${item.key}-option-${activeIndex}`}
+            style={{ left: placement.left, top: placement.top, width: placement.width }}
+            initial={reduceMotion ? false : { opacity: 0, y: placement.drop === 'down' ? -4 : 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: reduceMotion ? 0 : 0.14, ease: [0.22, 1, 0.36, 1] }}
+            onKeyDown={onListKeyDown}
+          >
+            {choices.map((choice, index) => (
+              <div
+                key={choice.value}
+                id={`${item.key}-option-${index}`}
+                ref={(node) => {
+                  if (node) optionRefs.current.set(index, node);
+                  else optionRefs.current.delete(index);
+                }}
+                role="option"
+                aria-selected={index === selectedIndex}
+                className={`zs-select-option${index === activeIndex ? ' is-active' : ''}`}
+                /** Pointer moves the highlight; it does not move focus off the listbox. */
+                onMouseMove={() => setActiveIndex(index)}
+                onClick={() => commit(index)}
+              >
+                <b>{choice.label}</b>
+                {choice.hint && choice.hint !== choice.label && <small>{choice.hint}</small>}
+                {index === selectedIndex && <Check size={14} strokeWidth={2.2} aria-hidden="true" />}
+              </div>
+            ))}
+          </motion.div>
+        </>,
+        document.getElementById('settings-container') ?? document.body,
+      )}
+    </div>
+  );
 }
 
 function ColorSettingControl({ item, describedBy }: { item: SettingItem; describedBy?: string }) {
