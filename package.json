@@ -35,6 +35,7 @@
     "test:fullscreen-bounds": "node scripts/fullscreen-bounds-smoke.mjs",
     "test:page-title": "node scripts/page-title-smoke.mjs",
     "test:keyboard-nav": "node scripts/keyboard-nav-smoke.mjs",
+    "test:i18n": "node scripts/i18n-smoke.mjs",
     "test:trigger-gesture": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/trigger-gesture-smoke.ps1",
     "icons:tray": "node scripts/generate-tray-icons.mjs",
     "verify:radial-windowing": "node scripts/verify-radial-windowing.mjs",

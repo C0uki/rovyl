@@ -17,6 +17,9 @@
  * leaves the specifier verbatim and exits 0, shipping a stylesheet that 404s. So the fonts are
  * checked from both ends: nothing extra, and nothing missing.
  *
+ * Lastly it guards where the locale tables live — not whether they exist. They are allowed to ship
+ * now that there is a picker; they are not allowed in front of first paint.
+ *
  * Raise the budgets deliberately when a real feature needs the room — never to make a build pass.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -39,9 +42,14 @@ const MAX_CRITICAL_ICONS = 320;
 const FONT_BUDGET = 240 * 1024;
 
 /**
- * Subsets `src/fonts.css` deliberately leaves out. The UI is English and every font stack ends in a
- * generic that Windows resolves to a face covering all scripts, so these buy a nicer glyph for a
- * case that does not arise, at 92 kB.
+ * Subsets `src/fonts.css` deliberately leaves out — still left out now that the UI translates.
+ *
+ * Cyrillic is the one this costs something: Russian settings text falls back down the stack to
+ * Segoe UI, which is the system face Windows uses for its own Russian UI, so it reads correctly
+ * and natively — it simply is not Inter. Same for Arabic and Chinese, which Fontsource does not
+ * subset for these families at all. 92 kB of webfont, downloaded by every user in every language,
+ * to restyle text most of them will never display, is the wrong trade; if it ever becomes the
+ * right one, the fix is a per-script subset loaded when that language is picked, not this list.
  */
 const UNSHIPPED_FONT_SUBSETS = ["cyrillic", "greek", "vietnamese"];
 
@@ -78,23 +86,26 @@ const REQUIRED_FONT_FACES = [
 const LUCIDE_ICON_DEFINITION = /\(["'`]([A-Z][A-Za-z0-9]*)["'`]\s*,\s*\[\[/g;
 
 /**
- * One string per locale of `src/translations.ts`, each chosen because it appears nowhere else in
- * `src/` — so a hit means that table is in the bundle, not that someone wrote a word in Portuguese.
+ * One string per shipped locale of `src/i18n/translations.ts`, each chosen because it appears
+ * nowhere else in `src/` — so a hit means that table is in the chunk, not that someone happened to
+ * write a word in Portuguese.
  *
- * The table is ten languages of UI text for an app that overwrites `config.language` with `'en'` on
- * every hydration and has no language selector, and it cannot be tree-shaken because
- * `getTranslation` indexes it by a runtime key. Importing it anywhere brings all ten.
+ * The check inverted when the language selector landed, and the inversion is the point. The old
+ * rule was "no translated text anywhere", because ten locales sat in the chunk the wheel waits on
+ * for a UI that overwrote `config.language` with `'en'` on every hydration — 167 kB nobody could
+ * ever see. The rule now is about WHERE: the tables are a real, reachable feature, so they may
+ * ship, but only from the lazy settings chunk. `src/i18n/languages.ts` holds the codes so that
+ * `App.tsx` can validate a stored language without importing a single translated string, and this
+ * is what keeps that separation from quietly eroding — a `useTranslation` import added to
+ * `App.tsx` or `RadialMenu` would put every locale back in front of first paint.
  */
-const LOCALE_TEXT_THAT_MUST_NOT_SHIP = {
-  Portuguese: "Núcleo",
-  Spanish: "Buscar icono…",
-  French: "Système",
-  German: "Speichern und Schließen",
-  Italian: "Gestisci la tua identità digitale.",
-  Japanese: "アプリとスペース",
-  Chinese: "选择应用...",
-  Korean: "앱 및 공간",
-  Russian: "Приложения и Пространства",
+const LOCALES_THAT_MUST_STAY_LAZY = {
+  Spanish: "Buscar ajustes",
+  Chinese: "搜索设置",
+  Portuguese: "Buscar configurações",
+  Russian: "Поиск по настройкам",
+  German: "Einstellungen durchsuchen",
+  Arabic: "البحث في الإعدادات",
 };
 
 const problems = [];
@@ -153,21 +164,42 @@ if (totalBytes > CRITICAL_JS_BUDGET) {
 }
 
 /**
- * Every emitted chunk, not only the preloaded ones. The byte and icon budgets are rightly about
- * what the wheel waits on, but `PrecisionSettings` — the live settings panel, and the obvious place
- * a language selector would land — is a lazy chunk, so a critical-path-only probe would have been
- * blind to exactly the regression it is here to catch.
+ * Every emitted chunk, not only the preloaded ones — this is what answers "did this table ship at
+ * all", as opposed to "did it ship too early", which reads the critical scripts alone below.
  */
 const bundleSources = assetNames
   .filter((name) => name.endsWith(".js"))
   .map((name) => readFileSync(join(distDir, "assets", name), "utf8"));
 
-const shippedLocales = Object.entries(LOCALE_TEXT_THAT_MUST_NOT_SHIP)
-  .filter(([, probe]) => bundleSources.some((source) => source.includes(probe)))
+/** Same read, restricted to the critical path: where a locale table must never appear. */
+const criticalSources = uniqueScripts.map((script) => {
+  try {
+    return readFileSync(join(distDir, script), "utf8");
+  } catch {
+    return "";
+  }
+});
+
+const localesInCriticalPath = Object.entries(LOCALES_THAT_MUST_STAY_LAZY)
+  .filter(([, probe]) => criticalSources.some((source) => source.includes(probe)))
   .map(([language]) => language);
-if (shippedLocales.length) {
+if (localesInCriticalPath.length) {
   problems.push(
-    `translated UI text is back in the bundle (${shippedLocales.join(", ")}) — the live UI is English-only (src/strings.ts); importing src/translations.ts anywhere ships all ten locales`,
+    `locale tables are in the critical path (${localesInCriticalPath.join(", ")}) — something outside the lazy settings chunk now imports src/i18n/translations.ts; import src/i18n/languages.ts for codes, and reach text only through useTranslation`,
+  );
+}
+
+/**
+ * And the other half: a locale that ships nowhere at all is a language the picker offers and
+ * cannot render. Dropping a table is then a one-line change that fails no test and shows up only
+ * as a settings panel that stays English after the user picks Deutsch.
+ */
+const missingLocales = Object.entries(LOCALES_THAT_MUST_STAY_LAZY)
+  .filter(([, probe]) => !bundleSources.some((source) => source.includes(probe)))
+  .map(([language]) => language);
+if (missingLocales.length) {
+  problems.push(
+    `locales the picker offers were not emitted at all (${missingLocales.join(", ")}) — src/i18n/translations.ts lost a table, or a probe string in this file no longer matches it`,
   );
 }
 
@@ -253,5 +285,5 @@ if (problems.length) {
 }
 
 console.log(
-  `verify-renderer-budget: OK (${(totalBytes / 1024).toFixed(1)} kB critical JS in ${uniqueScripts.length} chunks, ${totalIcons} Lucide glyphs, ${(fontBytes / 1024).toFixed(1)} kB fonts in ${fontFiles.length} files, English-only)`,
+  `verify-renderer-budget: OK (${(totalBytes / 1024).toFixed(1)} kB critical JS in ${uniqueScripts.length} chunks, ${totalIcons} Lucide glyphs, ${(fontBytes / 1024).toFixed(1)} kB fonts in ${fontFiles.length} files, ${Object.keys(LOCALES_THAT_MUST_STAY_LAZY).length + 1} locales all lazy)`,
 );

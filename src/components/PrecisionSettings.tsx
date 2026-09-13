@@ -54,7 +54,7 @@ import { NativeAppIcon, useInstalledApps, clearInstalledAppsMemory, type Install
 import { radialCrowding } from '../utils/workspaceRadial';
 import { startMenuAppIdToLaunchCommand } from '../utils/windowsLaunchCommand';
 import { WheelPreview } from './WheelPreview';
-import { useTranslation } from '../i18n/useTranslation';
+import { LANGUAGES, normalizeLanguage, translations, useTranslation } from '../i18n/useTranslation';
 
 interface PrecisionSettingsProps {
   isOpen: boolean;
@@ -128,7 +128,7 @@ interface SettingItem {
   group: string;
   title: string;
   description?: string;
-  kind: 'bool' | 'range' | 'segmented' | 'open' | 'action' | 'color';
+  kind: 'bool' | 'range' | 'segmented' | 'select' | 'open' | 'action' | 'color';
   enabled?: boolean;
   value?: string;
   min?: number;
@@ -136,8 +136,17 @@ interface SettingItem {
   step?: number;
   raw?: number;
   format?: (value: number) => string;
-  choices?: Array<{ value: string; label: string }>;
+  choices?: Array<{ value: string; label: string; hint?: string }>;
   current?: string;
+  /**
+   * Extra words the search box matches, beyond title/description/group.
+   *
+   * One row actually needs this. Every other setting is findable by the words already on it, but
+   * those words are translated — so the person most in need of the Language row is the one who
+   * just picked the wrong language and can no longer read the word "Language". Listing the
+   * endonyms here means typing `Sprache`, `язык` or `语言` finds it from inside any locale.
+   */
+  keywords?: string;
   onToggle?: () => void;
   onChange?: (value: number | string) => void;
   onOpen?: () => void;
@@ -201,7 +210,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
   setNav,
   discoveryPhase = 'idle',
 }) => {
-  const { t, isRtl } = useTranslation(config.language);
+  const { t, dir } = useTranslation(config.language);
 
   const sectionsList = useMemo(() => [
     { id: 'general' as const, label: t('general'), caption: t('generalDesc'), icon: Settings },
@@ -804,10 +813,31 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
     return {
       general: [
         {
+          /**
+           * A select, not the segmented control this was while it held two languages: seven
+           * 62px-minimum buttons are ~460px of row, which is wider than the control column and
+           * would wrap into a block of chips no eye can scan.
+           *
+           * The group name stays the English "Language" on purpose — it is the one string in this
+           * panel that has to stay findable by someone who cannot read the rest of it.
+           */
           key: 'language', configKey: 'language', group: 'Language', title: t('language'),
           description: t('languageDesc'),
-          kind: 'segmented', current: config.language ?? 'en',
-          choices: [{ value: 'en', label: 'English' }, { value: 'ar', label: 'العربية' }],
+          kind: 'select', current: normalizeLanguage(config.language),
+          choices: LANGUAGES.map((entry) => ({
+            value: entry.value,
+            label: entry.label,
+            hint: entry.english,
+          })),
+          /**
+           * Both halves of "how would they look for this": the name of the language they want
+           * (`Deutsch`, `Русский`), and their own word for the word Language (`Sprache`, `语言`),
+           * which every table already carries under the `language` key.
+           */
+          keywords: [
+            ...LANGUAGES.map((entry) => `${entry.label} ${entry.english}`),
+            ...Object.values(translations).map((table) => table.language),
+          ].join(' '),
           onChange: (value) => update('language', value as UIConfig['language']),
         },
         {
@@ -1183,7 +1213,10 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
   /** Search walks every category — searching only the open one forced a guess about where a setting lives. */
   const results = useMemo(() => {
     const matches = (item: SettingItem) =>
-      !trimmedQuery || `${item.title} ${item.description ?? ''} ${item.group}`.toLowerCase().includes(trimmedQuery);
+      !trimmedQuery
+      || `${item.title} ${item.description ?? ''} ${item.group} ${item.keywords ?? ''}`
+        .toLowerCase()
+        .includes(trimmedQuery);
 
     const source = trimmedQuery
       ? sectionsList.flatMap((section) => sections[section.id].filter(matches))
@@ -1233,7 +1266,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
       id="settings-container"
       className={`zs-shell${isDismissing ? ' is-dismissing' : ''}`}
       data-zn-theme={theme}
-      dir={isRtl ? 'rtl' : 'ltr'}
+      dir={dir}
     >
       <motion.section
         className={`zs-window${isSidebarCollapsed ? ' is-sidebar-collapsed' : ''}${searchForced ? ' is-search-forced' : ''}`}
@@ -1587,6 +1620,32 @@ function SettingRow({
                 {choice.label}
               </button>
             ))}
+          </div>
+        )}
+
+        {item.kind === 'select' && (
+          <div className="zs-select">
+            <select
+              aria-labelledby={`${item.key}-label`}
+              aria-describedby={describedBy}
+              value={item.current}
+              onChange={(event) => item.onChange?.(event.target.value)}
+            >
+              {item.choices?.map((choice) => (
+                /**
+                 * The endonym leads and the English name trails it, because both readings have to
+                 * work: someone scanning for their own script finds it first, and a screen reader
+                 * — or anyone who has landed here by accident — still gets a name they can say.
+                 * Unless they are the same word, and then "English · English" is just noise.
+                 */
+                <option key={choice.value} value={choice.value}>
+                  {choice.hint && choice.hint !== choice.label
+                    ? `${choice.label} · ${choice.hint}`
+                    : choice.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={14} strokeWidth={1.9} aria-hidden="true" />
           </div>
         )}
 

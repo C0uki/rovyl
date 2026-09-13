@@ -221,20 +221,34 @@ that closed it. The section stays because §8 points into it and because a later
 
 ## 6. Internationalisation
 
-- [ ] **6.1** **i18n is effectively dead.** `PrecisionSettings` — the live settings panel — is hardcoded
-  English and never imports `getTranslation`. Only `RadialMenu` (4 strings) and `IconPicker` still
-  translate.
-- [ ] **6.2** **No language selector in the live UI** — `LANGUAGES` is referenced only by dead
-  `SettingsModal`.
-- [ ] **6.3** **Key parity is broken**: pt/en 429 keys, es 281, fr/de/it/ja/zh/ko/ru 257–258. The surplus
-  pt/en keys belong to the dead modal.
-- [x] **6.4** Decide: (a) delete `translations.ts`, ship English-only, drop 3,451 lines from the bundle, or
-  (b) re-adopt properly — a real `t()` in `PrecisionSettings`, lazy per-language chunks, parity check
-  in CI. **(a) is the honest default.**
-  **Decided (a)**, and the bundle half is done — see §3. `src/strings.ts` holds the six live strings
-  and `translations.ts` is out of every chunk. What remains is deleting the file, which has to wait
-  for §2 to delete `SettingsModal` / `SystemCenter` / `WelcomeScreen`, its only importers. The three
-  bullets above are all about that file and go with it.
+- [x] **6.1** **i18n is live again, on the (b) terms below.** `PrecisionSettings` calls a real `t()`
+  from `src/i18n/useTranslation`, and that hook is the only importer of the tables.
+- [x] **6.2** **Language selector is in the live UI** — General › Language, a `select` (seven entries
+  do not fit a segmented control). Options are labelled with each language's endonym; the group
+  name stays the English "Language" and the row carries the endonyms as search keywords, so it is
+  findable from inside a locale you cannot read.
+- [x] **6.3** **Key parity is enforced twice.** `translations.ts` ends in a
+  `Record<SupportedLanguage, Record<TranslationKey, string>>` annotation, so a missing key or a
+  declared-but-untabled language fails `tsc`; `npm run test:i18n` covers what a type cannot see
+  (empty values, keys leaking through as text, a table cloned from English, fallback for the
+  `fr`/`it`/`ja`/`ko` still in the `UIConfig` union).
+- [x] **6.4** Decided (a) — delete the table, ship English-only — and then reversed to (b) once the
+  bundle half made (b) cheap. Shipped: en, es, zh, pt, ru, de, ar at 107 keys each.
+  **The constraint that made (a) right is the one that now keeps (b) honest**: the tables must never
+  reach the chunk the wheel waits on. `src/i18n/languages.ts` holds codes and metadata only, so
+  `App.tsx` can validate a hydrated `config.language` without importing a translated string, and the
+  tables ride the lazy `PrecisionSettings` chunk. Total cost to first paint: **0.6 kB**
+  (296.3 → 296.9 kB critical JS). `scripts/verify-renderer-budget.mjs` fails the build if a locale
+  reaches the critical path — or if one stops shipping at all, which would leave the picker
+  offering a language it cannot render.
+- [ ] **6.5** **Only the settings panel translates.** The wheel itself still reads from
+  `src/strings.ts` (six English strings) and `IconPicker` is English. Both are in the critical
+  chunk, which is why they were left: reaching them means a per-language chunk fetched on demand,
+  not another static import.
+- [ ] **6.6** **No Cyrillic/Arabic/CJK webfont subset** — Russian, Arabic and Chinese settings text
+  falls down the stack to the Windows system face (Segoe UI, Microsoft YaHei). It reads natively;
+  it is not Inter. Shipping those subsets is 92 kB on every user in every language, so the fix, if
+  it is ever worth it, is a subset loaded when the language is picked.
 
 ## 7. Engineering hygiene
 

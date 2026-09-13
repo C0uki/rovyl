@@ -1,4 +1,32 @@
-export type SupportedLanguage = 'en' | 'ar';
+/**
+ * The UI text tables, and only the text — which languages exist is `./languages.ts`.
+ *
+ * History matters here, because this file is the second attempt. The first was 3,451 lines and ten
+ * locales with no selector to reach them, and every one of them sat in the chunk the radial wheel
+ * waits on — 167 kB, for a UI that hydrated `language: 'en'` over whatever the config said. TODO
+ * §6.4 called that shape the one to avoid, and it was deleted.
+ *
+ * What makes this one different is not the language count, it is where it lives: `useTranslation`
+ * is imported by `PrecisionSettings` and nothing else, and `PrecisionSettings` is `React.lazy`, so
+ * the whole table is in the settings chunk — fetched when Settings opens, never before first
+ * paint. `scripts/verify-renderer-budget.mjs` holds that line: the locales are allowed to ship,
+ * and the build fails if they reach the critical path or if the tables drift out of key parity.
+ *
+ * Adding a language means three things and no more: a `LANGUAGES` entry in `./languages.ts`, a
+ * table below with every key `en` has, and a `UIConfig['language']` member if `src/types.ts` lacks
+ * one. Miss the table and the `satisfies` at the bottom of this file fails to compile.
+ */
+import type { SupportedLanguage } from './languages';
+import { FALLBACK_LANGUAGE, normalizeLanguage } from './languages';
+
+export {
+  FALLBACK_LANGUAGE,
+  LANGUAGES,
+  directionOf,
+  isSupportedLanguage,
+  normalizeLanguage,
+  type SupportedLanguage,
+} from './languages';
 
 export const translations = {
   en: {
@@ -126,6 +154,641 @@ export const translations = {
 
     // Alerts
     confirmReset: 'Are you sure you want to reset all settings to defaults?',
+  },
+
+  es: {
+    // Navigation Groups & Tabs
+    general: 'General',
+    generalDesc: 'Comportamiento básico de Rovyl.',
+    trigger: 'Activación',
+    triggerDesc: 'Cómo y dónde aparece la rueda.',
+    appearance: 'Apariencia',
+    appearanceDesc: 'Forma, presencia y tema.',
+    wheel: 'Rueda',
+    mouse: 'Ratón',
+    shortcuts: 'Accesos directos',
+    presence: 'Presencia',
+    workspaces: 'Espacios de trabajo',
+    workspacesDesc: 'Contextos y sus accesos directos.',
+    performance: 'Rendimiento',
+    updates: 'Actualizaciones',
+    advanced: 'Avanzado',
+    advancedDesc: 'Rendimiento, protección y datos.',
+    settings: 'Ajustes',
+    searchSettings: 'Buscar ajustes',
+    language: 'Idioma',
+    languageDesc: 'Elige el idioma de la interfaz.',
+    selectedCount: 'seleccionados',
+
+    // Common Actions
+    save: 'Guardar',
+    cancel: 'Cancelar',
+    delete: 'Eliminar',
+    add: 'Añadir',
+    create: 'Crear',
+    reload: 'Recargar',
+    reset: 'Restablecer',
+    resetAll: 'Restablecer todos los ajustes',
+    resetDesc: 'Devuelve toda la configuración a sus valores predeterminados.',
+    change: 'Cambiar',
+    done: 'Listo',
+    close: 'Cerrar',
+    back: 'Atrás',
+    center: 'Centro',
+    tryAgain: 'Reintentar',
+
+    // Presence / Background
+    bgDimming: 'Atenuación del fondo',
+    bgDimmingDesc: 'Cuánto se difumina el resto de la pantalla. Al 100 % el escritorio queda cubierto por completo.',
+    persistentLabels: 'Etiquetas permanentes',
+    persistentLabelsDesc: 'Mantén visible el nombre de cada elemento de la rueda.',
+    selectionMode: 'Modo de selección',
+    selectionModeDesc: 'Cómo apunta el cursor a los sectores de la rueda.',
+    cursorAim: 'Cursor (pasar por encima)',
+    angleAim: 'Ángulo (dirección)',
+
+    // Mouse & Shortcuts
+    gestureBehavior: 'Comportamiento del gesto',
+    gestureBehaviorDesc: 'Cómo abre el menú radial el clic central.',
+    mouseClick: 'Clic para abrir',
+    mouseHold: 'Mantener para abrir',
+    shortcutBehavior: 'Comportamiento del atajo',
+    shortcutBehaviorDesc: 'Cómo activa el menú el atajo de teclado global.',
+    shortcutToggle: 'Alternar (pulsa para abrir o cerrar)',
+    shortcutHold: 'Mantener (mantén para ver, suelta para abrir)',
+    globalShortcut: 'Atajo global',
+    globalShortcutDesc: 'Atajo de teclado o ratón para abrir el menú radial en cualquier sitio.',
+    recordShortcut: 'Grabar atajo',
+    recording: 'Pulsa teclas o un botón del ratón…',
+    mouseButton: 'Botón del ratón',
+    mouseButtonDesc: 'Qué botón del ratón abre la rueda.',
+    btnMiddle: 'Botón central',
+    btnX1: 'Botón 4 del ratón (Atrás)',
+    btnX2: 'Botón 5 del ratón (Adelante)',
+    openAtLogin: 'Iniciar con Windows',
+    openAtLoginDesc: 'Abre Rovyl automáticamente al arrancar Windows.',
+
+    // Workspaces
+    yourWorkspaces: 'Tus espacios de trabajo',
+    newWorkspace: 'Nuevo espacio de trabajo',
+    newWorkspaceDesc: 'Crea otro contexto para tus accesos directos.',
+    workspaceName: 'Nombre del espacio',
+    deleteWorkspace: 'Eliminar espacio de trabajo',
+    availableOnWheel: 'Disponible en la rueda',
+    makeCurrent: 'Usar como espacio actual',
+    current: 'Actual',
+    available: 'Disponible',
+    paused: 'En pausa',
+
+    // Shortcuts Manager & App Picker
+    shortcutsTitle: 'Accesos directos',
+    addShortcut: 'Añadir acceso directo',
+    application: 'Aplicación',
+    url: 'URL',
+    folder: 'Carpeta',
+    multiSelect: 'Selección múltiple',
+    singleSelect: 'Selección única',
+    addSelected: 'Añadir selección',
+    selectAll: 'Seleccionar todo',
+    clearSelection: 'Borrar selección',
+    searchApps: 'Buscar aplicaciones instaladas',
+    chooseFile: 'Elegir archivo',
+    reloadList: 'Recargar lista',
+    loadingApps: 'Cargando aplicaciones…',
+    noAppsFound: 'No se encontraron aplicaciones.',
+    appsCount: 'aplicaciones',
+    alreadySelected: 'Ya seleccionado',
+    installedApp: 'Aplicación instalada',
+    name: 'Nombre',
+    address: 'Dirección',
+    folderPath: 'Ruta de la carpeta',
+    target: 'Destino',
+    launchMode: 'Modo de apertura',
+    launchNormal: 'Normal',
+    launchReuse: 'Reutilizar',
+    launchWarm: 'Precargado',
+
+    // HUD / Weather / Battery
+    battery: 'Batería',
+    weather: 'Tiempo',
+    clock: 'Reloj',
+
+    // Performance & Optimization
+    precisionMode: 'Modo precisión',
+    precisionModeDesc: 'Modo sin latencia que prioriza la respuesta inmediata a la entrada.',
+    strictOffline: 'Modo sin conexión estricto',
+    strictOfflineDesc: 'Desactiva las peticiones web externas (tiempo, iconos, actualizaciones) para una privacidad total.',
+
+    // Alerts
+    confirmReset: '¿Seguro que quieres restablecer todos los ajustes a sus valores predeterminados?',
+  },
+
+  zh: {
+    // Navigation Groups & Tabs
+    general: '常规',
+    generalDesc: 'Rovyl 的核心行为。',
+    trigger: '激活方式',
+    triggerDesc: '轮盘出现的方式和位置。',
+    appearance: '外观',
+    appearanceDesc: '形状、呈现方式与主题。',
+    wheel: '轮盘',
+    mouse: '鼠标',
+    shortcuts: '快捷方式',
+    presence: '呈现',
+    workspaces: '工作区',
+    workspacesDesc: '各个场景及其快捷方式。',
+    performance: '性能',
+    updates: '更新',
+    advanced: '高级',
+    advancedDesc: '性能、保护与数据。',
+    settings: '设置',
+    searchSettings: '搜索设置',
+    language: '语言',
+    languageDesc: '选择界面显示语言。',
+    selectedCount: '已选择',
+
+    // Common Actions
+    save: '保存',
+    cancel: '取消',
+    delete: '删除',
+    add: '添加',
+    create: '新建',
+    reload: '重新加载',
+    reset: '重置',
+    resetAll: '重置所有设置',
+    resetDesc: '将所有配置恢复为默认值。',
+    change: '更改',
+    done: '完成',
+    close: '关闭',
+    back: '返回',
+    center: '中心',
+    tryAgain: '重试',
+
+    // Presence / Background
+    bgDimming: '背景变暗',
+    bgDimmingDesc: '屏幕其余部分的变暗程度。100% 时桌面被完全遮盖。',
+    persistentLabels: '始终显示名称',
+    persistentLabelsDesc: '在轮盘上始终显示每个项目的名称。',
+    selectionMode: '选择方式',
+    selectionModeDesc: '光标指向轮盘扇区的方式。',
+    cursorAim: '光标（悬停选中）',
+    angleAim: '角度（方向）',
+
+    // Mouse & Shortcuts
+    gestureBehavior: '手势行为',
+    gestureBehaviorDesc: '中键点击触发径向菜单的方式。',
+    mouseClick: '点击打开',
+    mouseHold: '按住打开',
+    shortcutBehavior: '快捷键行为',
+    shortcutBehaviorDesc: '全局快捷键唤出菜单的方式。',
+    shortcutToggle: '切换（按一下开关）',
+    shortcutHold: '按住（按住查看，松开启动）',
+    globalShortcut: '全局快捷键',
+    globalShortcutDesc: '在任何位置唤出径向菜单的键盘或鼠标快捷键。',
+    recordShortcut: '录制快捷键',
+    recording: '请按下按键或鼠标按钮…',
+    mouseButton: '触发鼠标按钮',
+    mouseButtonDesc: '用哪个鼠标按钮唤出轮盘。',
+    btnMiddle: '中键',
+    btnX1: '鼠标按键 4（后退）',
+    btnX2: '鼠标按键 5（前进）',
+    openAtLogin: '开机自启动',
+    openAtLoginDesc: 'Windows 启动时自动运行 Rovyl。',
+
+    // Workspaces
+    yourWorkspaces: '你的工作区',
+    newWorkspace: '新建工作区',
+    newWorkspaceDesc: '为快捷方式创建另一个场景。',
+    workspaceName: '工作区名称',
+    deleteWorkspace: '删除工作区',
+    availableOnWheel: '在轮盘上可用',
+    makeCurrent: '设为当前工作区',
+    current: '当前',
+    available: '可用',
+    paused: '已暂停',
+
+    // Shortcuts Manager & App Picker
+    shortcutsTitle: '快捷方式',
+    addShortcut: '添加快捷方式',
+    application: '应用程序',
+    url: '网址',
+    folder: '文件夹',
+    multiSelect: '多选',
+    singleSelect: '单选',
+    addSelected: '添加所选',
+    selectAll: '全选',
+    clearSelection: '清除选择',
+    searchApps: '搜索已安装的应用',
+    chooseFile: '选择文件',
+    reloadList: '刷新列表',
+    loadingApps: '正在加载应用…',
+    noAppsFound: '未找到应用程序。',
+    appsCount: '个应用',
+    alreadySelected: '已添加',
+    installedApp: '已安装的应用',
+    name: '名称',
+    address: '地址',
+    folderPath: '文件夹路径',
+    target: '目标',
+    launchMode: '启动方式',
+    launchNormal: '普通',
+    launchReuse: '复用窗口',
+    launchWarm: '预热',
+
+    // HUD / Weather / Battery
+    battery: '电池',
+    weather: '天气',
+    clock: '时钟',
+
+    // Performance & Optimization
+    precisionMode: '精准模式',
+    precisionModeDesc: '零延迟模式，优先保证输入的即时响应。',
+    strictOffline: '严格离线模式',
+    strictOfflineDesc: '停用所有外部网络请求（天气、网站图标、更新），实现完全离线的隐私保护。',
+
+    // Alerts
+    confirmReset: '确定要将所有设置恢复为默认值吗？',
+  },
+
+  pt: {
+    // Navigation Groups & Tabs
+    general: 'Geral',
+    generalDesc: 'Comportamento básico do Rovyl.',
+    trigger: 'Ativação',
+    triggerDesc: 'Como e onde a roda aparece.',
+    appearance: 'Aparência',
+    appearanceDesc: 'Forma, presença e tema.',
+    wheel: 'Roda',
+    mouse: 'Mouse',
+    shortcuts: 'Atalhos',
+    presence: 'Presença',
+    workspaces: 'Espaços de trabalho',
+    workspacesDesc: 'Contextos e seus atalhos.',
+    performance: 'Desempenho',
+    updates: 'Atualizações',
+    advanced: 'Avançado',
+    advancedDesc: 'Desempenho, proteção e dados.',
+    settings: 'Configurações',
+    searchSettings: 'Buscar configurações',
+    language: 'Idioma',
+    languageDesc: 'Escolha o idioma da interface.',
+    selectedCount: 'selecionados',
+
+    // Common Actions
+    save: 'Salvar',
+    cancel: 'Cancelar',
+    delete: 'Excluir',
+    add: 'Adicionar',
+    create: 'Criar',
+    reload: 'Recarregar',
+    reset: 'Redefinir',
+    resetAll: 'Redefinir todas as configurações',
+    resetDesc: 'Restaura todas as configurações para os valores padrão.',
+    change: 'Alterar',
+    done: 'Concluído',
+    close: 'Fechar',
+    back: 'Voltar',
+    center: 'Centro',
+    tryAgain: 'Tentar novamente',
+
+    // Presence / Background
+    bgDimming: 'Escurecimento do fundo',
+    bgDimmingDesc: 'O quanto o resto da tela recua. Em 100% a área de trabalho fica totalmente coberta.',
+    persistentLabels: 'Rótulos sempre visíveis',
+    persistentLabelsDesc: 'Mantenha o nome de cada item visível na roda.',
+    selectionMode: 'Modo de seleção',
+    selectionModeDesc: 'Como o cursor aponta para as fatias da roda.',
+    cursorAim: 'Cursor (passar sobre o item)',
+    angleAim: 'Ângulo (direção)',
+
+    // Mouse & Shortcuts
+    gestureBehavior: 'Comportamento do gesto',
+    gestureBehaviorDesc: 'Como o clique do botão do meio abre o menu radial.',
+    mouseClick: 'Clicar para abrir',
+    mouseHold: 'Segurar para abrir',
+    shortcutBehavior: 'Comportamento do atalho',
+    shortcutBehaviorDesc: 'Como o atalho global de teclado ativa o menu.',
+    shortcutToggle: 'Alternar (pressione para abrir ou fechar)',
+    shortcutHold: 'Segurar (segure para ver, solte para abrir)',
+    globalShortcut: 'Atalho global',
+    globalShortcutDesc: 'Atalho de teclado ou mouse para chamar o menu radial em qualquer lugar.',
+    recordShortcut: 'Gravar atalho',
+    recording: 'Pressione teclas ou um botão do mouse…',
+    mouseButton: 'Botão do mouse',
+    mouseButtonDesc: 'Qual botão do mouse chama a roda.',
+    btnMiddle: 'Botão do meio',
+    btnX1: 'Botão 4 do mouse (Voltar)',
+    btnX2: 'Botão 5 do mouse (Avançar)',
+    openAtLogin: 'Iniciar com o Windows',
+    openAtLoginDesc: 'Abre o Rovyl automaticamente quando o Windows é iniciado.',
+
+    // Workspaces
+    yourWorkspaces: 'Seus espaços de trabalho',
+    newWorkspace: 'Novo espaço de trabalho',
+    newWorkspaceDesc: 'Crie outro contexto para seus atalhos.',
+    workspaceName: 'Nome do espaço de trabalho',
+    deleteWorkspace: 'Excluir espaço de trabalho',
+    availableOnWheel: 'Disponível na roda',
+    makeCurrent: 'Definir como espaço atual',
+    current: 'Atual',
+    available: 'Disponível',
+    paused: 'Pausado',
+
+    // Shortcuts Manager & App Picker
+    shortcutsTitle: 'Atalhos',
+    addShortcut: 'Adicionar atalho',
+    application: 'Aplicativo',
+    url: 'URL',
+    folder: 'Pasta',
+    multiSelect: 'Seleção múltipla',
+    singleSelect: 'Seleção única',
+    addSelected: 'Adicionar selecionados',
+    selectAll: 'Selecionar tudo',
+    clearSelection: 'Limpar seleção',
+    searchApps: 'Buscar aplicativos instalados',
+    chooseFile: 'Escolher arquivo',
+    reloadList: 'Recarregar lista',
+    loadingApps: 'Carregando aplicativos…',
+    noAppsFound: 'Nenhum aplicativo encontrado.',
+    appsCount: 'aplicativos',
+    alreadySelected: 'Já selecionado',
+    installedApp: 'Aplicativo instalado',
+    name: 'Nome',
+    address: 'Endereço',
+    folderPath: 'Caminho da pasta',
+    target: 'Destino',
+    launchMode: 'Modo de abertura',
+    launchNormal: 'Normal',
+    launchReuse: 'Reutilizar',
+    launchWarm: 'Pré-carregado',
+
+    // HUD / Weather / Battery
+    battery: 'Bateria',
+    weather: 'Clima',
+    clock: 'Relógio',
+
+    // Performance & Optimization
+    precisionMode: 'Modo precisão',
+    precisionModeDesc: 'Modo sem latência que prioriza a resposta imediata à entrada.',
+    strictOffline: 'Modo offline estrito',
+    strictOfflineDesc: 'Desativa as requisições externas (clima, favicons, atualizações) para privacidade total.',
+
+    // Alerts
+    confirmReset: 'Tem certeza de que deseja redefinir todas as configurações para os valores padrão?',
+  },
+
+  ru: {
+    // Navigation Groups & Tabs
+    general: 'Основное',
+    generalDesc: 'Базовое поведение Rovyl.',
+    trigger: 'Активация',
+    triggerDesc: 'Как и где появляется колесо.',
+    appearance: 'Внешний вид',
+    appearanceDesc: 'Форма, отображение и тема.',
+    wheel: 'Колесо',
+    mouse: 'Мышь',
+    shortcuts: 'Ярлыки',
+    presence: 'Отображение',
+    workspaces: 'Рабочие пространства',
+    workspacesDesc: 'Контексты и их ярлыки.',
+    performance: 'Производительность',
+    updates: 'Обновления',
+    advanced: 'Дополнительно',
+    advancedDesc: 'Производительность, защита и данные.',
+    settings: 'Настройки',
+    searchSettings: 'Поиск по настройкам',
+    language: 'Язык',
+    languageDesc: 'Выберите язык интерфейса.',
+    selectedCount: 'выбрано',
+
+    // Common Actions
+    save: 'Сохранить',
+    cancel: 'Отмена',
+    delete: 'Удалить',
+    add: 'Добавить',
+    create: 'Создать',
+    reload: 'Обновить',
+    reset: 'Сбросить',
+    resetAll: 'Сбросить все настройки',
+    resetDesc: 'Вернуть все параметры к значениям по умолчанию.',
+    change: 'Изменить',
+    done: 'Готово',
+    close: 'Закрыть',
+    back: 'Назад',
+    center: 'Центр',
+    tryAgain: 'Повторить',
+
+    // Presence / Background
+    bgDimming: 'Затемнение фона',
+    bgDimmingDesc: 'Насколько отступает остальной экран. При 100 % рабочий стол закрыт полностью.',
+    persistentLabels: 'Всегда показывать названия',
+    persistentLabelsDesc: 'Показывать название каждого элемента на колесе.',
+    selectionMode: 'Способ выбора',
+    selectionModeDesc: 'Как курсор указывает на секторы колеса.',
+    cursorAim: 'Курсор (наведение на элемент)',
+    angleAim: 'Угол (направление)',
+
+    // Mouse & Shortcuts
+    gestureBehavior: 'Поведение жеста',
+    gestureBehaviorDesc: 'Как нажатие средней кнопки открывает радиальное меню.',
+    mouseClick: 'Нажатие для открытия',
+    mouseHold: 'Удержание для открытия',
+    shortcutBehavior: 'Поведение сочетания клавиш',
+    shortcutBehaviorDesc: 'Как глобальное сочетание клавиш вызывает меню.',
+    shortcutToggle: 'Переключение (нажмите, чтобы открыть или закрыть)',
+    shortcutHold: 'Удержание (держите для просмотра, отпустите для запуска)',
+    globalShortcut: 'Глобальное сочетание',
+    globalShortcutDesc: 'Сочетание клавиш или кнопка мыши для вызова радиального меню в любом месте.',
+    recordShortcut: 'Записать сочетание',
+    recording: 'Нажмите клавиши или кнопку мыши…',
+    mouseButton: 'Кнопка мыши',
+    mouseButtonDesc: 'Какая кнопка мыши вызывает колесо.',
+    btnMiddle: 'Средняя кнопка',
+    btnX1: 'Кнопка мыши 4 (Назад)',
+    btnX2: 'Кнопка мыши 5 (Вперёд)',
+    openAtLogin: 'Запускать вместе с Windows',
+    openAtLoginDesc: 'Запускать Rovyl автоматически при загрузке Windows.',
+
+    // Workspaces
+    yourWorkspaces: 'Ваши рабочие пространства',
+    newWorkspace: 'Новое рабочее пространство',
+    newWorkspaceDesc: 'Создайте ещё один контекст для ярлыков.',
+    workspaceName: 'Название пространства',
+    deleteWorkspace: 'Удалить рабочее пространство',
+    availableOnWheel: 'Доступно на колесе',
+    makeCurrent: 'Сделать текущим',
+    current: 'Текущее',
+    available: 'Доступно',
+    paused: 'Приостановлено',
+
+    // Shortcuts Manager & App Picker
+    shortcutsTitle: 'Ярлыки',
+    addShortcut: 'Добавить ярлык',
+    application: 'Приложение',
+    url: 'Ссылка',
+    folder: 'Папка',
+    multiSelect: 'Множественный выбор',
+    singleSelect: 'Одиночный выбор',
+    addSelected: 'Добавить выбранное',
+    selectAll: 'Выбрать все',
+    clearSelection: 'Снять выделение',
+    searchApps: 'Поиск установленных приложений',
+    chooseFile: 'Выбрать файл',
+    reloadList: 'Обновить список',
+    loadingApps: 'Загрузка приложений…',
+    noAppsFound: 'Приложения не найдены.',
+    appsCount: 'приложений',
+    alreadySelected: 'Уже добавлено',
+    installedApp: 'Установленное приложение',
+    name: 'Название',
+    address: 'Адрес',
+    folderPath: 'Путь к папке',
+    target: 'Целевой путь',
+    launchMode: 'Режим запуска',
+    launchNormal: 'Обычный',
+    launchReuse: 'Повторное использование',
+    launchWarm: 'Предзапуск',
+
+    // HUD / Weather / Battery
+    battery: 'Батарея',
+    weather: 'Погода',
+    clock: 'Часы',
+
+    // Performance & Optimization
+    precisionMode: 'Режим точности',
+    precisionModeDesc: 'Режим без задержек: мгновенный отклик на ввод в приоритете.',
+    strictOffline: 'Строгий офлайн-режим',
+    strictOfflineDesc: 'Отключает все внешние запросы (погода, значки сайтов, обновления) ради полной приватности.',
+
+    // Alerts
+    confirmReset: 'Сбросить все настройки к значениям по умолчанию?',
+  },
+
+  de: {
+    // Navigation Groups & Tabs
+    general: 'Allgemein',
+    generalDesc: 'Grundlegendes Verhalten von Rovyl.',
+    trigger: 'Aktivierung',
+    triggerDesc: 'Wie und wo das Rad erscheint.',
+    appearance: 'Darstellung',
+    appearanceDesc: 'Form, Präsenz und Design.',
+    wheel: 'Rad',
+    mouse: 'Maus',
+    shortcuts: 'Verknüpfungen',
+    presence: 'Präsenz',
+    workspaces: 'Arbeitsbereiche',
+    workspacesDesc: 'Kontexte und ihre Verknüpfungen.',
+    performance: 'Leistung',
+    updates: 'Updates',
+    advanced: 'Erweitert',
+    advancedDesc: 'Leistung, Schutz und Daten.',
+    settings: 'Einstellungen',
+    searchSettings: 'Einstellungen durchsuchen',
+    language: 'Sprache',
+    languageDesc: 'Sprache der Benutzeroberfläche wählen.',
+    selectedCount: 'ausgewählt',
+
+    // Common Actions
+    save: 'Speichern',
+    cancel: 'Abbrechen',
+    delete: 'Löschen',
+    add: 'Hinzufügen',
+    create: 'Erstellen',
+    reload: 'Neu laden',
+    reset: 'Zurücksetzen',
+    resetAll: 'Alle Einstellungen zurücksetzen',
+    resetDesc: 'Setzt alle Einstellungen auf die Standardwerte zurück.',
+    change: 'Ändern',
+    done: 'Fertig',
+    close: 'Schließen',
+    back: 'Zurück',
+    center: 'Mitte',
+    tryAgain: 'Erneut versuchen',
+
+    // Presence / Background
+    bgDimming: 'Hintergrund abdunkeln',
+    bgDimmingDesc: 'Wie stark der restliche Bildschirm zurücktritt. Bei 100 % ist der Desktop vollständig verdeckt.',
+    persistentLabels: 'Beschriftungen dauerhaft anzeigen',
+    persistentLabelsDesc: 'Den Namen jedes Eintrags immer auf dem Rad anzeigen.',
+    selectionMode: 'Auswahlmodus',
+    selectionModeDesc: 'Wie der Zeiger auf die Segmente des Rads zielt.',
+    cursorAim: 'Zeiger (Eintrag überfahren)',
+    angleAim: 'Winkel (Richtung)',
+
+    // Mouse & Shortcuts
+    gestureBehavior: 'Gestenverhalten',
+    gestureBehaviorDesc: 'Wie ein Klick mit der mittleren Maustaste das Radialmenü öffnet.',
+    mouseClick: 'Klicken zum Öffnen',
+    mouseHold: 'Gedrückt halten zum Öffnen',
+    shortcutBehavior: 'Verhalten des Tastenkürzels',
+    shortcutBehaviorDesc: 'Wie das globale Tastenkürzel das Menü aufruft.',
+    shortcutToggle: 'Umschalten (Drücken öffnet und schließt)',
+    shortcutHold: 'Halten (halten zum Ansehen, loslassen zum Starten)',
+    globalShortcut: 'Globales Tastenkürzel',
+    globalShortcutDesc: 'Tasten- oder Mauskürzel, das das Radialmenü überall aufruft.',
+    recordShortcut: 'Kürzel aufzeichnen',
+    recording: 'Tasten oder Maustaste drücken…',
+    mouseButton: 'Auslösende Maustaste',
+    mouseButtonDesc: 'Welche Maustaste das Rad aufruft.',
+    btnMiddle: 'Mittlere Taste',
+    btnX1: 'Maustaste 4 (Zurück)',
+    btnX2: 'Maustaste 5 (Vor)',
+    openAtLogin: 'Mit Windows starten',
+    openAtLoginDesc: 'Rovyl automatisch beim Start von Windows ausführen.',
+
+    // Workspaces
+    yourWorkspaces: 'Deine Arbeitsbereiche',
+    newWorkspace: 'Neuer Arbeitsbereich',
+    newWorkspaceDesc: 'Einen weiteren Kontext für deine Verknüpfungen anlegen.',
+    workspaceName: 'Name des Arbeitsbereichs',
+    deleteWorkspace: 'Arbeitsbereich löschen',
+    availableOnWheel: 'Auf dem Rad verfügbar',
+    makeCurrent: 'Als aktuellen Arbeitsbereich festlegen',
+    current: 'Aktuell',
+    available: 'Verfügbar',
+    paused: 'Pausiert',
+
+    // Shortcuts Manager & App Picker
+    shortcutsTitle: 'Verknüpfungen',
+    addShortcut: 'Verknüpfung hinzufügen',
+    application: 'Anwendung',
+    url: 'URL',
+    folder: 'Ordner',
+    multiSelect: 'Mehrfachauswahl',
+    singleSelect: 'Einzelauswahl',
+    addSelected: 'Auswahl hinzufügen',
+    selectAll: 'Alle auswählen',
+    clearSelection: 'Auswahl aufheben',
+    searchApps: 'Installierte Anwendungen durchsuchen',
+    chooseFile: 'Datei auswählen',
+    reloadList: 'Liste neu laden',
+    loadingApps: 'Anwendungen werden geladen…',
+    noAppsFound: 'Keine Anwendungen gefunden.',
+    appsCount: 'Anwendungen',
+    alreadySelected: 'Bereits ausgewählt',
+    installedApp: 'Installierte Anwendung',
+    name: 'Name',
+    address: 'Adresse',
+    folderPath: 'Ordnerpfad',
+    target: 'Ziel',
+    launchMode: 'Startmodus',
+    launchNormal: 'Normal',
+    launchReuse: 'Wiederverwenden',
+    launchWarm: 'Vorgeladen',
+
+    // HUD / Weather / Battery
+    battery: 'Akku',
+    weather: 'Wetter',
+    clock: 'Uhr',
+
+    // Performance & Optimization
+    precisionMode: 'Präzisionsmodus',
+    precisionModeDesc: 'Latenzfreier Modus, der sofortige Eingabereaktion priorisiert.',
+    strictOffline: 'Strikter Offline-Modus',
+    strictOfflineDesc: 'Deaktiviert externe Webzugriffe (Wetter, Favicons, Updates) für vollständige Offline-Privatsphäre.',
+
+    // Alerts
+    confirmReset: 'Möchtest du wirklich alle Einstellungen auf die Standardwerte zurücksetzen?',
   },
 
   ar: {
@@ -257,7 +920,17 @@ export const translations = {
 
 export type TranslationKey = keyof typeof translations.en;
 
-export function t(key: TranslationKey, lang: SupportedLanguage = 'en'): string {
-  const currentLang = lang === 'ar' ? 'ar' : 'en';
-  return translations[currentLang][key] || translations.en[key] || key;
+/**
+ * Every declared language has a table, and every table carries the full English key set. Both are
+ * checked right here, at compile time, because the alternative is a `t()` that silently returns a
+ * raw key like `bgDimmingDesc` as UI text — which is what the old ten-locale table did, at a
+ * parity of 429/281/257 keys (TODO §6.3).
+ */
+const _tablesCoverEveryLanguage: Record<SupportedLanguage, Record<TranslationKey, string>> =
+  translations;
+void _tablesCoverEveryLanguage;
+
+export function t(key: TranslationKey, lang: SupportedLanguage = FALLBACK_LANGUAGE): string {
+  const table: Record<TranslationKey, string> = translations[normalizeLanguage(lang)];
+  return table[key] || translations.en[key] || key;
 }

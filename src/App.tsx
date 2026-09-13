@@ -15,6 +15,12 @@ import { isRemoteIconUrl, isStoredIconRef, isWebShortcutItem } from './iconRef';
 import { useIconHealing } from './hooks/useIconHealing';
 import { mirrorPersistenceToLocalStorage } from './persistenceMirror';
 import { startMenuAppIdToLaunchCommand } from './utils/windowsLaunchCommand';
+/**
+ * Codes and metadata only — never `./i18n/translations`, which would put all seven locale tables
+ * in the chunk the wheel waits on. That distinction is the whole reason `languages.ts` is its own
+ * file; `scripts/verify-renderer-budget.mjs` fails the build if it is ignored.
+ */
+import { normalizeLanguage } from './i18n/languages';
 import {
   BACKDROP_DIM_SCALE,
   legacyBackdropOpacityToDim,
@@ -239,12 +245,6 @@ function sanitizeFullPersistenceForDisk(d: {
     return null;
   }
 }
-
-/**
- * The languages `src/i18n/translations.ts` actually carries. `UIConfig['language']` still types the
- * ten the removed table had, so old configs keep parsing; this is the set that can be rendered.
- */
-const SUPPORTED_LANGUAGES = new Set<UIConfig['language']>(['en', 'ar']);
 
 export default function App() {
   /* zenith-verify:radial-handshake-renderer — radial overlays/handshake; see scripts/verify-radial-windowing.mjs */
@@ -1110,7 +1110,7 @@ export default function App() {
         }
 
         const discoverHasDemoFingerprint = hasDemoFingerprint;
-        nextConfig = { ...nextConfig, language: SUPPORTED_LANGUAGES.has(nextConfig.language) ? nextConfig.language : 'en' };
+        nextConfig = { ...nextConfig, language: normalizeLanguage(nextConfig.language) };
 
         /**
          * Startup with no previous data (reset / first install): show the overlay immediately
@@ -1248,10 +1248,10 @@ export default function App() {
        * Normalize, do not overwrite. This used to force `'en'` on every profile, because the ten
        * locales it could otherwise hydrate had no selector to reach them and no chunk worth
        * shipping. Settings has a real selector again, so a stored choice has to survive a reload —
-       * but only for a language that actually has a table. Anything else (a `pt`/`ja` left in an
-       * old config by the table that is gone) still normalizes to English.
+       * but only for a language that actually has a table. `UIConfig['language']` still types four
+       * that do not (`fr`, `it`, `ja`, `ko`), so a config carrying one still lands on English.
        */
-      nextConfig = { ...nextConfig, language: SUPPORTED_LANGUAGES.has(nextConfig.language) ? nextConfig.language : 'en' };
+      nextConfig = { ...nextConfig, language: normalizeLanguage(nextConfig.language) };
 
       hydratedFromPersistenceRef.current =
         !!(finalData || loadedFromLocalStorageMigration);

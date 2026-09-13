@@ -1,16 +1,16 @@
 /**
- * Every string the live UI shows that is not the user's own text.
+ * Every string the RADIAL WHEEL shows that is not the user's own text.
  *
- * There are six. `src/translations.ts` carries 429 keys in ten languages, and all ten sat in the
- * chunk the wheel waits on — 167 kB of it, measured — because `getTranslation` indexes the table by
- * a runtime key and nothing can be shaken out of it. Six strings did not justify that, and the ten
- * languages were never reachable anyway: `App.tsx` writes `language: 'en'` over every config it
- * hydrates, and the last language selector left the tree with the dead `SettingsModal` (TODO §2).
+ * There are six, and they are still English in every locale. That is a scope line, not an
+ * oversight (TODO §6.5). The wheel renders from the critical chunk — the JS parsed before the
+ * first frame — and `src/i18n/translations.ts` cannot be tree-shaken, because `t()` indexes it by a
+ * runtime key. Six strings do not justify putting seven locale tables in front of first paint; the
+ * settings panel, with 107 keys' worth and a lazy chunk of its own, does.
  *
- * So this is not a decision to drop i18n — it is recording the one this app already made. If real
- * translation comes back it should come back properly (see TODO §6): a per-language chunk loaded on
- * demand, a `t()` the settings panel actually calls, and a key-parity check in CI. A table of ten
- * locales that only ever renders English is the shape to avoid, not the shape to restore.
+ * So the split is by chunk, not by conviction: `useTranslation` for anything inside
+ * `PrecisionSettings`, this file for anything the wheel paints. Translating these six properly
+ * means a per-language chunk fetched when the language is picked — and until that exists, an i18n
+ * import here would fail `scripts/verify-renderer-budget.mjs`, which is exactly the point.
  *
  * Keys stay in the `namespace.key` form the old table used, so a future `t()` is a drop-in.
  */
