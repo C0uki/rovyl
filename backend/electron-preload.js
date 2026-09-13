@@ -167,7 +167,7 @@ contextBridge.exposeInMainWorld("electron", {
   minimizeWindow: () => ipcRenderer.send("minimize-window"),
   toggleMaximize: () => ipcRenderer.send("toggle-maximize"),
   quitApp: () => ipcRenderer.send("quit-app"),
-  selectFile: () => ipcRenderer.invoke("select-file"),
+  selectFile: (options) => ipcRenderer.invoke("select-file", options),
   selectFolder: () => ipcRenderer.invoke("select-folder"),
   selectImage: () => ipcRenderer.invoke("select-image"),
   removeManagedCustomIcon: (urlOrPath) =>

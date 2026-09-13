@@ -30,7 +30,15 @@ export interface AppItem {
   customIconUrl?: string; // Supports base64 images or URLs
   direction?: string;
   command: string;
-  commandType?: "app" | "url" | "folder"; // New: distinguishes if command is an app path, a web URL, or a folder
+  /**
+   * What `command` is, so the main process does not have to guess.
+   *
+   * `file` is a document and not a program: it is handed to `shell.openPath`, which opens it in
+   * whatever Windows has registered for that extension. It is deliberately not `app` — the app
+   * ladder builds `<terminal> /c <line>`, and a `.pdf` down that route opens a console window or
+   * nothing at all.
+   */
+  commandType?: "app" | "url" | "folder" | "file";
   description: string;
   shortcut?: string;
   children?: AppItem[];
@@ -274,7 +282,7 @@ export interface UpdateState {
 export interface ElectronAPI {
   executeCommand: (
     command: string,
-    commandType: "app" | "url" | "folder",
+    commandType: "app" | "url" | "folder" | "file",
     options?: { openTerminal?: boolean; terminalCommands?: string[]; workingDirectory?: string; launchMode?: "normal" | "reuse" | "prewarm" },
   ) => Promise<LaunchResult>;
   hideWindow: () => void;
@@ -444,7 +452,12 @@ export interface ElectronAPI {
     callback: (state: "maximized" | "windowed") => void,
   ) => () => void;
   onSwitchWorkspace: (callback: (index: number) => void) => () => void;
-  selectFile: () => Promise<string | null>;
+  /**
+   * Native open dialog. Defaults to the executable filter (`.exe`/`.lnk`/`.bat`/`.cmd`) that the
+   * Application picker has always used; `{ mode: "any" }` opens it on every file, for shortcuts
+   * that point at a document rather than a program.
+   */
+  selectFile: (options?: { mode?: "executable" | "any" }) => Promise<string | null>;
   selectFolder: () => Promise<string | null>;
   selectImage: () => Promise<string | null>;
   /** Removes a file only if it lives under userData/custom-icons (safe no-op otherwise). */

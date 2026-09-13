@@ -2397,7 +2397,7 @@ export default function App() {
 
   const executeAction = (
     command: string,
-    commandType: "app" | "url" | "folder",
+    commandType: "app" | "url" | "folder" | "file",
     itemForFault?: AppItem,
     options?: { openTerminal?: boolean; terminalCommands?: string[]; workingDirectory?: string; launchMode?: 'normal' | 'reuse' | 'prewarm' }
   ) => {

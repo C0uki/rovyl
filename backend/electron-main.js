@@ -6805,8 +6805,14 @@ const missingTargetFailure = (trimmedCommand, resolvedCommand, commandType) => {
 
   let target;
   try {
+    /**
+     * Folders and files are stored as a bare path, so they are only unquoted. Only `app` carries a
+     * command LINE, where the executable has to be split off the arguments — and running that
+     * splitter over `C:\Reports\Q3 plan.xlsx` would probe `C:\Reports\Q3` and report a document
+     * that is sitting right there as missing.
+     */
     target =
-      commandType === "folder"
+      commandType === "folder" || commandType === "file"
         ? line.replace(/^"([\s\S]*)"$/, "$1")
         : win32Launch.splitWin32SpawnExeAndArgs(line).exe;
   } catch (e) {
@@ -6894,12 +6900,36 @@ const runExecuteCommand = async (command, commandType, options = {}) => {
 
   // CRITICAL: Resolve GUIDs to real paths FIRST, before any detection logic
   let resolvedCommand = resolveShellPath(trimmedCommand);
-  resolvedCommand = normalizeAumidIdeCommands(resolvedCommand);
+
+  /**
+   * A bare path is not a launch LINE, and everything below rewrites lines.
+   *
+   * `canonicalizeWin32LaunchCommand` exists so a command survives `cmd`/`spawn`, and it delivers
+   * that by quoting any token holding a space. Over a file target it fires: measured,
+   * `D:\Reports\Q3 plan.xlsx` comes back as `"D:\Reports\Q3 plan.xlsx"`, quotes and all. That
+   * string does still open — `ShellExecuteEx`, under `shell.openPath`, tolerates a quoted `lpFile`,
+   * checked against Electron 28 — so this is not a repair of a broken launch. It is the removal of
+   * a rewrite that has no addressee: a file never touches `cmd`, the only rung it gets takes a
+   * PATH, and what the quotes buy instead is a dependency on that tolerance, a `[Exec]
+   * Canonicalized launch line` entry in the log for every single file launch, and two probes
+   * downstream (`missingTargetFailure` and the one in the branch) that have to unquote before they
+   * can stat anything.
+   *
+   * Folders come along because the same reasoning covers them. They were never quoted, but only
+   * because the splitter demands `isFile()` before it claims a token whole — a directory has been
+   * safe by accident, which is not a property worth continuing to rely on.
+   */
+  const isBarePathTarget = commandType === "file" || commandType === "folder";
+  if (!isBarePathTarget) {
+    resolvedCommand = normalizeAumidIdeCommands(resolvedCommand);
+  }
   const prefersProcessReuse = options?.launchMode === "reuse" || options?.launchMode === "prewarm";
-  resolvedCommand = prefersProcessReuse
-    ? removeIdeNewWindowFlag(resolvedCommand)
-    : addIdeNewWindowFlag(resolvedCommand);
-  if (process.platform === "win32") {
+  if (!isBarePathTarget) {
+    resolvedCommand = prefersProcessReuse
+      ? removeIdeNewWindowFlag(resolvedCommand)
+      : addIdeNewWindowFlag(resolvedCommand);
+  }
+  if (process.platform === "win32" && !isBarePathTarget) {
     try {
       const canon = win32Launch.canonicalizeWin32LaunchCommand(resolvedCommand);
       if (canon !== resolvedCommand) {
@@ -7349,6 +7379,67 @@ const runExecuteCommand = async (command, commandType, options = {}) => {
       await tryExecution("shell.openPath", resolvedCommand);
       diagLog(
         `\n✓✓✓ EXEC_SUCCESS: Opened Folder with 'shell.openPath' ✓✓✓\n`,
+      );
+      return launchOk("shell.openPath");
+    }
+
+    /**
+     * A document, opened the way a double-click in Explorer opens it.
+     *
+     * `shell.openPath` and nothing else: it asks Windows which program owns the extension, which is
+     * the entire point of the type. The app ladder below is not a fallback here — `exec_direct`
+     * wraps the line in `<terminal> /c`, so a `.pdf` down that route either flashes a console or,
+     * for a `.ps1`/`.bat` the user only meant to OPEN, runs it. A file shortcut must never become
+     * an execution, so this branch answers with its own failure instead of falling through.
+     */
+    if (commandType === "file") {
+      diagLog("  → Detected: Explicit File (from commandType)");
+
+      const gone = missingTargetFailure(trimmedCommand, resolvedCommand, commandType);
+      if (gone) return gone;
+
+      try {
+        await tryExecution("shell.openPath", resolvedCommand);
+      } catch (err) {
+        /**
+         * Honest, not convenient: the probe above only has an opinion about a drive-letter path, so
+         * a UNC target stays `null` rather than claiming the file is there. `src/launchFailure.ts`
+         * reads this to tell "the file moved" apart from "nothing opens this kind of file".
+         */
+        let onDisk = null;
+        try {
+          const target = String(resolvedCommand || "").trim().replace(/^"([\s\S]*)"$/, "$1");
+          if (/^[A-Za-z]:[\\/]/.test(target)) onDisk = fs.existsSync(target);
+        } catch (e) {
+          /* no opinion */
+        }
+        const shown =
+          resolvedCommand.length > 50
+            ? `${resolvedCommand.substring(0, 50)}...`
+            : resolvedCommand;
+        return launchFailed(
+          `Failed to run "${shown}". Error: ${err?.message || "Unknown"}`,
+          {
+            command: trimmedCommand,
+            resolvedCommand,
+            commandType,
+            method: "shell.openPath",
+            errorCode: err?.code ?? null,
+            exeExists: onDisk,
+            raw: String(err?.message || "").slice(0, 4000),
+          },
+        );
+      }
+
+      /** Legacy configs can still carry these; `extractTerminalWorkingDir` turns a file into its folder. */
+      await runAutoCommands(
+        options.terminalCommands,
+        resolvedCommand,
+        options?.openTerminal,
+        options?.workingDirectory,
+      );
+      diagLog(
+        `\n✓✓✓ EXEC_SUCCESS: Opened File with 'shell.openPath' ✓✓✓\n`,
       );
       return launchOk("shell.openPath");
     }
@@ -8701,16 +8792,27 @@ ipcMain.on("quit-app", () => {
   }
 });
 
-// IPC: Select File (Executable)
-ipcMain.handle("select-file", async () => {
+/**
+ * IPC: Select File.
+ *
+ * Two callers, two filters. The Application picker wants a program, so the executable filter comes
+ * first and the dialog opens on `.exe`/`.lnk`/`.bat`/`.cmd`. The File picker wants a document, and
+ * there the executable filter is actively wrong — it hides every `.pdf` and `.xlsx` in the folder
+ * behind a dropdown. `{ mode: "any" }` flips the order; no argument keeps the old behaviour, which
+ * is what every existing call site sends.
+ */
+ipcMain.handle("select-file", async (_event, options = {}) => {
   try {
     const targetWin = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+    const anyFile = options && options.mode === "any";
     const result = await dialog.showOpenDialog(targetWin, {
       properties: ["openFile"],
-      filters: [
-        { name: "Executables", extensions: ["exe", "lnk", "bat", "cmd"] },
-        { name: "All Files", extensions: ["*"] },
-      ],
+      filters: anyFile
+        ? [{ name: "All Files", extensions: ["*"] }]
+        : [
+            { name: "Executables", extensions: ["exe", "lnk", "bat", "cmd"] },
+            { name: "All Files", extensions: ["*"] },
+          ],
     });
     if (!result.canceled && result.filePaths.length > 0) {
       return result.filePaths[0];

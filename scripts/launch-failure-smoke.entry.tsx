@@ -242,6 +242,57 @@ export function collect() {
   );
 
   /**
+   * A file shortcut whose document has moved. Its whole launch is one `shell.openPath`, so it can
+   * never be told to "pick the app’s .exe" — there is no executable behind a spreadsheet.
+   */
+  const deletedFile = humanizeExecutionError(
+    'Failed to run "D:\\Reports\\Q3 plan.xlsx". Error: Windows cannot find the file specified: D:\\Reports\\Q3 plan.xlsx',
+    {
+      command: "D:\\Reports\\Q3 plan.xlsx",
+      resolvedCommand: "D:\\Reports\\Q3 plan.xlsx",
+      commandType: "file",
+      method: "exists-probe",
+      errorCode: "ENOENT",
+      exeExists: false,
+      raw: "Rovyl checked the path before launching it and Windows reports no such file:" + String.fromCharCode(10) + "D:\\Reports\\Q3 plan.xlsx",
+    },
+    "Q3 plan",
+  );
+
+  /** The file is there; nothing on this PC claims the extension. A different fix, so a different code. */
+  const fileWithoutHandler = humanizeExecutionError(
+    'Failed to run "C:\\Models\\bracket.step". Error: No application is associated with the specified file for this operation.',
+    {
+      command: "C:\\Models\\bracket.step",
+      resolvedCommand: "C:\\Models\\bracket.step",
+      commandType: "file",
+      method: "shell.openPath",
+      errorCode: null,
+      exeExists: true,
+      raw: "No application is associated with the specified file for this operation.",
+    },
+    "bracket",
+  );
+
+  /**
+   * A file whose opener refused for some other reason. The probe says the file is present, so this
+   * must NOT claim it is gone — that was the failure mode the branch exists to prevent.
+   */
+  const filePresentButRefused = humanizeExecutionError(
+    'Failed to run "C:\\Docs\\notes.one". Error: Failed to open path',
+    {
+      command: "C:\\Docs\\notes.one",
+      resolvedCommand: "C:\\Docs\\notes.one",
+      commandType: "file",
+      method: "shell.openPath",
+      errorCode: null,
+      exeExists: true,
+      raw: "Failed to open path",
+    },
+    "notes",
+  );
+
+  /**
    * A Start menu entry that is no longer registered — CapCut pins its version into its own AppID
    * (`…apps.9.5.0.4045.capcut.exe`), so updating the app is enough to strand the shortcut.
    *
@@ -284,6 +335,9 @@ export function collect() {
     missingBrazilian,
     preflightMissingApp,
     preflightMissingFolder,
+    deletedFile,
+    fileWithoutHandler,
+    filePresentButRefused,
     flood,
   ];
 
@@ -300,6 +354,17 @@ export function collect() {
     preflightMissingAppTitle: preflightMissingApp.title,
     preflightMatchesUninstalled: preflightMissingApp.message === uninstalled.message,
     preflightMissingFolderCode: preflightMissingFolder.code,
+
+    /**
+     * The file type. A missing document must not borrow the executable copy (which sends the user
+     * to Application → Choose file), a present one must not be declared gone, and a registration
+     * miss has to stay its own answer because the remedy is not the same.
+     */
+    deletedFileCode: deletedFile.code,
+    deletedFileSaysNothingAboutExes: !`${deletedFile.message} ${deletedFile.hint ?? ""}`.includes(".exe"),
+    fileWithoutHandlerCode: fileWithoutHandler.code,
+    filePresentButRefusedCode: filePresentButRefused.code,
+    filePresentIsNotCalledGone: !filePresentButRefused.message.toLowerCase().includes("does not exist"),
 
     // The screenshot names the real cause, and names the app the way the user does.
     telegramCode: telegram.code,

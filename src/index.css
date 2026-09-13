@@ -803,7 +803,9 @@
 .zs-workspace-shortcuts { min-width: 0; }
 .zs-workspace-section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--zn-4); margin-bottom: var(--zn-3); }
 .zs-workspace-section-head h3 { margin: 0; color: var(--zn-text); font-size: 13px; font-weight: 600; }
-.zs-add-actions { display: flex; gap: var(--zn-1); }
+/* Wraps because the row grew a fourth type (File): four chips do not fit the narrow
+   settings column, and without this the last one was clipped instead of moving down. */
+.zs-add-actions { display: flex; flex-wrap: wrap; gap: var(--zn-1); }
 .zs-add-actions button {
   height: 28px; display: inline-flex; align-items: center; gap: 6px; padding-inline: 9px;
   color: var(--zn-text-2); border: 1px solid var(--zn-line); border-radius: var(--zn-r-chip); background: transparent; cursor: pointer;

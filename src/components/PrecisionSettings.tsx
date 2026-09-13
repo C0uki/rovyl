@@ -17,6 +17,7 @@ import {
   EyeOff,
   ChevronUp,
   ChevronRight,
+  File as FileGlyph,
   FilePlus2,
   FolderOpen,
   Globe2,
@@ -1973,7 +1974,7 @@ function SettingsEditor({
 }
 
 
-type WorkspaceAddMode = 'app' | 'url' | 'folder' | null;
+type WorkspaceAddMode = 'app' | 'url' | 'folder' | 'file' | null;
 
 const APPS_PAGE_SIZE = 40;
 
@@ -1981,6 +1982,7 @@ function itemTypeLabel(item: AppItem) {
   if (item.type === 'folder') return 'Group';
   if (item.commandType === 'url') return 'URL';
   if (item.commandType === 'folder') return 'Folder';
+  if (item.commandType === 'file') return 'File';
   return 'Application';
 }
 
@@ -2085,6 +2087,7 @@ function isPathLikeCommand(command: string): boolean {
 function itemFallbackIcon(item: AppItem) {
   if (item.type === 'folder' || item.commandType === 'folder') return 'Folder';
   if (item.commandType === 'url') return 'Globe';
+  if (item.commandType === 'file') return item.iconName || 'File';
   return item.iconName || 'AppWindow';
 }
 
@@ -2346,6 +2349,8 @@ function WorkspaceManager({
   const [urlTitleLoading, setUrlTitleLoading] = useState(false);
   const [folderPath, setFolderPath] = useState('');
   const [folderLabel, setFolderLabel] = useState('');
+  const [filePath, setFilePath] = useState('');
+  const [fileLabel, setFileLabel] = useState('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [isIconPickerOpen, setIsIconPickerOpen] = useState(false);
   const [editingIconForIndex, setEditingIconForIndex] = useState<number | null>(null);
@@ -2390,6 +2395,8 @@ function WorkspaceManager({
     setUrlTitleLoading(false);
     setFolderPath('');
     setFolderLabel('');
+    setFilePath('');
+    setFileLabel('');
     setEditingIndex(openEditor ? newIndex : null);
   };
 
@@ -2548,6 +2555,37 @@ function WorkspaceManager({
       id: crypto.randomUUID(), type: 'app', label: folderLabel.trim() || 'Folder',
       iconName: 'Folder', iconSource: 'lucide', command: folderPath,
       commandType: 'folder', description: 'Folder shortcut',
+    });
+  };
+
+  /** `Quarterly report.xlsx` → `Quarterly report`. The icon already says which kind of file it is. */
+  const fileNameLabel = (value: string) =>
+    value.split(/[/\\]/).filter(Boolean).pop()?.replace(/\.[^.\s]+$/, '') || 'File';
+
+  const chooseDocumentFile = async () => {
+    /** `any` — the Application picker's `.exe`/`.lnk` filter would hide every document in the folder. */
+    const path = await window.electron?.selectFile?.({ mode: 'any' });
+    if (!path) return;
+    setFilePath(path);
+    if (!fileLabel) setFileLabel(fileNameLabel(path));
+  };
+
+  /**
+   * A file shortcut wears the icon Windows gives its type, extracted the same way an app's is: the
+   * shell hands back the default handler's document icon, so a `.psd` looks like a Photoshop file
+   * rather than one more identical page glyph. The Lucide fallback covers extraction failing — and
+   * `iconSource` is only set to 'native' when there is something to show, or the healing pass would
+   * spend its retries chasing an icon that never existed.
+   */
+  const addFile = async () => {
+    const cleanPath = filePath.trim();
+    if (!cleanPath) return;
+    let customIconUrl: string | undefined;
+    try { customIconUrl = (await window.electron?.getFileIcon?.(cleanPath)) || undefined; } catch { /* use fallback */ }
+    addItem({
+      id: crypto.randomUUID(), type: 'app', label: fileLabel.trim() || fileNameLabel(cleanPath),
+      iconName: 'File', iconSource: customIconUrl ? 'native' : 'lucide', customIconUrl,
+      command: cleanPath, commandType: 'file', description: 'File shortcut',
     });
   };
 
@@ -2832,6 +2870,7 @@ function WorkspaceManager({
             <button type="button" className={addMode === 'app' ? 'is-active' : ''} onClick={() => setAddMode(addMode === 'app' ? null : 'app')}><Monitor size={14} /> Application</button>
             <button type="button" className={addMode === 'url' ? 'is-active' : ''} onClick={() => setAddMode(addMode === 'url' ? null : 'url')}><Globe2 size={14} /> URL</button>
             <button type="button" className={addMode === 'folder' ? 'is-active' : ''} onClick={() => setAddMode(addMode === 'folder' ? null : 'folder')}><FolderOpen size={14} /> Folder</button>
+            <button type="button" className={addMode === 'file' ? 'is-active' : ''} onClick={() => setAddMode(addMode === 'file' ? null : 'file')}><FileGlyph size={14} /> File</button>
           </div>
         </div>
 
@@ -2984,6 +3023,17 @@ function WorkspaceManager({
                   <button type="button" className="zs-btn is-primary" disabled={!folderPath} onClick={addFolder}><Plus size={14} /> Add folder</button>
                 </div>
               )}
+              {addMode === 'file' && (
+                <div className="zs-add-form">
+                  <button type="button" className="zs-folder-picker" onClick={chooseDocumentFile}>
+                    <FileGlyph size={20} />
+                    <div><b>{filePath ? filePath.split(/[/\\]/).filter(Boolean).pop() : 'Select a file'}</b><small>{filePath || 'Opens with whatever Windows uses for that file type'}</small></div>
+                    <ChevronRight size={15} />
+                  </button>
+                  <label className="zs-field"><span>Name</span><input value={fileLabel} onChange={(event) => setFileLabel(event.target.value)} placeholder="Name shown on the wheel" /></label>
+                  <button type="button" className="zs-btn is-primary" disabled={!filePath} onClick={() => void addFile()}><Plus size={14} /> Add file</button>
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -3067,10 +3117,35 @@ function WorkspaceManager({
                     tells nobody anything and only fills half a line. URL and folder stay editable
                     — there the value is readable and is the only way to fix the target.
                   */}
-                  {item.type !== 'folder' && item.commandType !== 'app' && (
+                  {item.type !== 'folder' && item.commandType !== 'app' && item.commandType !== 'file' && (
                     <label className="zs-field">
                       <span>{item.commandType === 'url' ? 'URL' : 'Folder path'}</span>
                       <input value={item.command} onChange={(event) => updateItem(index, { command: event.target.value })} />
+                    </label>
+                  )}
+                  {/*
+                    A file keeps the picker next to the field, because that is how the target got
+                    there and because a re-pick is the whole repair when the document has moved.
+                    The path stays typeable: correcting one folder name beats walking a dialog.
+                  */}
+                  {item.type !== 'folder' && item.commandType === 'file' && (
+                    <label className="zs-field is-with-action">
+                      <span>File path</span>
+                      <div className="zs-field-row">
+                        <input
+                          value={item.command}
+                          spellCheck={false}
+                          onChange={(event) => updateItem(index, { command: event.target.value })}
+                        />
+                        <button
+                          type="button"
+                          className="zs-btn"
+                          onClick={async () => {
+                            const picked = await window.electron?.selectFile?.({ mode: 'any' });
+                            if (picked) updateItem(index, { command: picked });
+                          }}
+                        ><FolderOpen size={13} /> Change</button>
+                      </div>
                     </label>
                   )}
                   {item.type !== 'folder' && item.commandType === 'app' && isPathLikeCommand(item.command) && (
@@ -3093,7 +3168,12 @@ function WorkspaceManager({
                       </div>
                     </label>
                   )}
-                  {item.type !== 'folder' && item.commandType !== 'folder' && (
+                  {/*
+                    No launch mode for files, same reason folders have none: every one of the three
+                    describes what to do with a PROCESS, and a document has none — Windows picks the
+                    program, and `shell.openPath` is the only rung the launch ever gets.
+                  */}
+                  {item.type !== 'folder' && item.commandType !== 'folder' && item.commandType !== 'file' && (
                     <div className="zs-launch-options">
                       <div>
                         <b>Launch mode</b>

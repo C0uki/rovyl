@@ -23,7 +23,7 @@
 export interface ExecutionErrorDetails {
   command?: string;
   resolvedCommand?: string;
-  commandType?: 'app' | 'url' | 'folder';
+  commandType?: 'app' | 'url' | 'folder' | 'file';
   /** Last rung of the ladder (`exec_direct`, `shell.openPath`, …) — the one that produced the error. */
   method?: string | null;
   /** Node's `err.code`: a string for `spawn` (`ENOENT`), a number (the exit code) for `exec`. */
@@ -44,6 +44,8 @@ export type LaunchFailureCode =
   | 'permission'
   | 'no-handler'
   | 'folder-missing'
+  | 'file-missing'
+  | 'file-no-handler'
   | 'missing-file'
   | 'start-app-gone'
   | 'unlaunchable-app-id'
@@ -335,6 +337,47 @@ export function humanizeExecutionError(
       'That folder is gone',
       'The folder this shortcut opens does not exist any more — it was moved, renamed, or deleted.',
       'Edit the shortcut in Settings and pick the folder again.',
+      raw,
+      details,
+    );
+  }
+
+  /**
+   * A file shortcut gets one rung and one rung only — `shell.openPath` — so every failure it can
+   * produce is a file answer, and none of them may fall through to the copy below. That copy says
+   * "the program file this shortcut points to is gone — re-add it with Application → Choose file",
+   * which is the wrong instruction for someone whose spreadsheet moved.
+   *
+   * Two outcomes worth separating, because the fix differs. Windows reports a registration miss in
+   * prose ("no application is associated"), while a target that is simply not there has already
+   * been caught by the probe in main and arrives as `ENOENT` with `exeExists: false`.
+   */
+  if (commandType === 'file') {
+    if (noHandler) {
+      return build(
+        'file-no-handler',
+        'No app opens this file',
+        'The file is still here, but Windows has nothing registered to open this kind of file.',
+        'Install an app for this file type, or set a default with Open with in File Explorer.',
+        raw,
+        details,
+      );
+    }
+    if (exeExists === false || missing) {
+      return build(
+        'file-missing',
+        'That file is gone',
+        'The file this shortcut opens does not exist any more — it was moved, renamed, or deleted.',
+        'Edit the shortcut in Settings and pick the file again.',
+        raw,
+        details,
+      );
+    }
+    return build(
+      'unknown',
+      `Could not open ${subject}`,
+      'The file is there, but Windows would not open it.',
+      'Open Details to see exactly what Windows reported.',
       raw,
       details,
     );

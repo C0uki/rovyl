@@ -82,6 +82,13 @@ try {
     preflightMatchesUninstalled: true,
     preflightMissingFolderCode: "folder-missing",
 
+    // A file shortcut: one rung, three distinguishable answers, and never the .exe instruction.
+    deletedFileCode: "file-missing",
+    deletedFileSaysNothingAboutExes: true,
+    fileWithoutHandlerCode: "file-no-handler",
+    filePresentButRefusedCode: "unknown",
+    filePresentIsNotCalledGone: true,
+
     bodyIsSingleLine: true,
     bodyExcludesStderr: true,
     bodyIsCapped: true,
