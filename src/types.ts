@@ -111,6 +111,8 @@ export interface UIConfig {
    * chose a POINT, which is the part that is gone.
    */
   fixedPosition: boolean;
+  /** Strict offline mode disables all external internet requests (weather, remote favicons, updates). */
+  strictOfflineMode?: boolean;
   /**
    * Which monitor the wheel is born on.
    * 'primary' — always the main screen, wherever the hand is (default, and what shipped).
@@ -214,12 +216,14 @@ export interface UIConfig {
   enableMouseTrigger: boolean;
   /** click: an MMB click opens and leaves the radial open; hold: holding opens, releasing runs the selection. */
   mouseTriggerMode?: 'click' | 'hold';
+  /** toggle: pressing shortcut opens/closes; hold: holding shortcut opens, releasing runs selection or closes. */
+  shortcutTriggerMode?: 'toggle' | 'hold';
   /**
    * Physical button that opens the wheel. Left and right are off the table: watching them
    * globally would collide with the primary click and the system context menu.
    */
   mouseTriggerButton?: 'middle' | 'x1' | 'x2';
-  language: "pt" | "en" | "es" | "fr" | "de" | "it" | "ja" | "zh" | "ko" | "ru";
+  language: "en" | "ar" | "pt" | "es" | "fr" | "de" | "it" | "ja" | "zh" | "ko" | "ru";
   performanceMode: boolean; // New: Strict performance mode for zero-lag
   /**
    * Start Menu discovery already ran or Main was saved with custom apps — do not import shortcuts again at startup.
@@ -349,6 +353,8 @@ export interface ElectronAPI {
       mode: "small" | "fullscreen" | "windowed";
     }) => void,
   ) => () => void;
+  onCleanMemory?: (callback: () => void) => () => void;
+  onShortcutRelease?: (callback: () => void) => () => void;
   setWindowSize: (
     mode: "small" | "fullscreen" | "windowed",
     /** Screen coordinates (e.g. cursor) — which monitor should receive the fullscreen/small overlay */

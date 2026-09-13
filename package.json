@@ -11,9 +11,11 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && node scripts/verify-radial-windowing.mjs && node scripts/verify-renderer-budget.mjs && node scripts/generate-win-icon.mjs && node scripts/generate-appx-assets.mjs",
+    "helper:build": "node scripts/build-native-helper.cjs",
+    "build": "node scripts/build-native-helper.cjs && tsc && vite build && node scripts/verify-radial-windowing.mjs && node scripts/verify-renderer-budget.mjs && node scripts/generate-win-icon.mjs && node scripts/generate-appx-assets.mjs",
     "electron": "node scripts/launch-electron.js",
-    "start": "node scripts/start-local-runtime.cjs",
+    "start": "node scripts/start-prod.cjs",
+    "start:dev": "node scripts/start-local-runtime.cjs",
     "start:runtime": "node scripts/dev-runtime.cjs",
     "dist": "npm run build && node scripts/run-electron-builder.mjs",
     "test:win32-launch": "node --test backend/win32-launch.test.cjs",
@@ -31,6 +33,7 @@
     "test:foreground-snapshot": "node scripts/foreground-snapshot-smoke.mjs",
     "test:fullscreen-bounds": "node scripts/fullscreen-bounds-smoke.mjs",
     "test:page-title": "node scripts/page-title-smoke.mjs",
+    "test:keyboard-nav": "node scripts/keyboard-nav-smoke.mjs",
     "test:trigger-gesture": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/trigger-gesture-smoke.ps1",
     "icons:tray": "node scripts/generate-tray-icons.mjs",
     "verify:radial-windowing": "node scripts/verify-radial-windowing.mjs",
@@ -83,8 +86,10 @@
     "asar": true,
     "asarUnpack": [
       "backend/*.ps1",
+      "backend/*.exe",
       "resources/bin/**/*",
-      "node_modules/sql.js/dist/sql-wasm.wasm"
+      "node_modules/sql.js/dist/sql-wasm.wasm",
+      "node_modules/node-global-key-listener/bin/**/*"
     ],
     "directories": {
       "output": "build-out"

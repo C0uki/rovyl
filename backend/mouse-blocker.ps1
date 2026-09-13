@@ -78,6 +78,23 @@ public static class ZenithRadialMouseBlocker {
     private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr handle);
+    [DllImport("user32.dll")]
+    private static extern short GetKeyState(int nVirtKey);
+
+    private const int VK_SHIFT = 0x10;
+    private const int VK_CONTROL = 0x11;
+    private const int VK_MENU = 0x12;
+    private const int VK_LWIN = 0x5B;
+    private const int VK_RWIN = 0x5C;
+
+    private static int GetCurrentModifierMask() {
+        int mask = 0;
+        if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) mask |= 1;
+        if ((GetKeyState(VK_MENU) & 0x8000) != 0) mask |= 2;
+        if ((GetKeyState(VK_SHIFT) & 0x8000) != 0) mask |= 4;
+        if (((GetKeyState(VK_LWIN) & 0x8000) != 0) || ((GetKeyState(VK_RWIN) & 0x8000) != 0)) mask |= 8;
+        return mask;
+    }
 
     private static readonly ConcurrentQueue<string> Commands = new ConcurrentQueue<string>();
     private static readonly ConcurrentQueue<int> Passthroughs = new ConcurrentQueue<int>();
@@ -88,6 +105,11 @@ public static class ZenithRadialMouseBlocker {
     private static volatile bool Blocking;
     private static int Left, Top, Right, Bottom;
     private static int MonitorLeft, MonitorTop, MonitorRight, MonitorBottom;
+
+    private static volatile bool RecordingMode;
+    private static volatile int ShortcutTriggerButton;
+    private static volatile int ShortcutTriggerModMask;
+    private static volatile bool ShortcutTriggerActive;
 
     /**
      * Offsets of the fields the hook needs to read. `Marshal.PtrToStructure` boxed the whole
@@ -220,8 +242,10 @@ public static class ZenithRadialMouseBlocker {
 
         int trigger = TriggerButton;
         bool blocking = Blocking;
+        int shortcutTrigger = ShortcutTriggerButton;
+        bool recording = RecordingMode;
         /** With no trigger armed and no blocking active there is no decision at all to make. */
-        if (trigger == 0 && !blocking) return CallNextHookEx(Hook, nCode, wParam, lParam);
+        if (trigger == 0 && !blocking && shortcutTrigger == 0 && !recording) return CallNextHookEx(Hook, nCode, wParam, lParam);
 
         ulong extraInfo = IntPtr.Size == 8
             ? (ulong)Marshal.ReadInt64(lParam, OffsetExtraInfo)
@@ -230,6 +254,64 @@ public static class ZenithRadialMouseBlocker {
         /** Our own handed-back clicks go through without being reinterpreted. */
         if ((uint)extraInfo == SYNTHETIC_TAG) {
             return CallNextHookEx(Hook, nCode, wParam, lParam);
+        }
+
+        if (recording) {
+            if (message == WM_MBUTTONDOWN || message == WM_XBUTTONDOWN || message == WM_RBUTTONDOWN) {
+                string btnName = null;
+                if (message == WM_MBUTTONDOWN) {
+                    btnName = "Middle";
+                } else if (message == WM_XBUTTONDOWN) {
+                    uint mouseData = (uint)Marshal.ReadInt32(lParam, OffsetMouseData);
+                    int xwhich = (int)((mouseData >> 16) & 0xFFFF);
+                    btnName = (xwhich == 2 ? "Mouse5" : "Mouse4");
+                } else if (message == WM_RBUTTONDOWN) {
+                    int mods = GetCurrentModifierMask();
+                    if (mods != 0) btnName = "RightClick";
+                }
+
+                if (btnName != null) {
+                    int mods = GetCurrentModifierMask();
+                    Emit("RECORD_MOUSE " + btnName + " " + mods);
+                    return new IntPtr(1);
+                }
+            }
+        }
+
+        if (shortcutTrigger != 0) {
+            bool isDown = false;
+            bool isUp = false;
+            int which = 0;
+            if (message == WM_MBUTTONDOWN || message == WM_MBUTTONUP) {
+                which = 4;
+                isDown = (message == WM_MBUTTONDOWN);
+                isUp = (message == WM_MBUTTONUP);
+            } else if (message == WM_XBUTTONDOWN || message == WM_XBUTTONUP) {
+                uint mouseData = (uint)Marshal.ReadInt32(lParam, OffsetMouseData);
+                int xwhich = (int)((mouseData >> 16) & 0xFFFF);
+                which = (xwhich == 2 ? 6 : 5);
+                isDown = (message == WM_XBUTTONDOWN);
+                isUp = (message == WM_XBUTTONUP);
+            } else if (message == WM_RBUTTONDOWN || message == WM_RBUTTONUP) {
+                which = 2;
+                isDown = (message == WM_RBUTTONDOWN);
+                isUp = (message == WM_RBUTTONUP);
+            }
+
+            if (which == shortcutTrigger) {
+                if (isDown) {
+                    int mods = GetCurrentModifierMask();
+                    if (mods == ShortcutTriggerModMask) {
+                        ShortcutTriggerActive = true;
+                        Emit("SHORTCUT_DOWN");
+                        return new IntPtr(1);
+                    }
+                } else if (isUp && ShortcutTriggerActive) {
+                    ShortcutTriggerActive = false;
+                    Emit("SHORTCUT_UP");
+                    return new IntPtr(1);
+                }
+            }
         }
 
         int px = Marshal.ReadInt32(lParam, OffsetPoint);
@@ -371,9 +453,9 @@ public static class ZenithRadialMouseBlocker {
         }
     }
 
-    /** The hook stays while there is a reason: radial blocking OR trigger button capture. */
+    /** The hook stays while there is a reason: radial blocking, trigger button, shortcut trigger, or recording. */
     private static void ReleaseHookIfIdle() {
-        if (Blocking || TriggerButton != 0) return;
+        if (Blocking || TriggerButton != 0 || ShortcutTriggerButton != 0 || RecordingMode) return;
         if (Hook != IntPtr.Zero) {
             UnhookWindowsHookEx(Hook);
             Hook = IntPtr.Zero;
@@ -446,6 +528,35 @@ public static class ZenithRadialMouseBlocker {
                 TriggerButton = Hook != IntPtr.Zero ? vk : 0;
                 Emit(TriggerButton != 0 ? "TRIGGER_READY" : "TRIGGER_FAILED");
             }
+        } else if (parts[0] == "RECORD") {
+            if (parts.Length >= 2 && parts[1] == "ON") {
+                RecordingMode = true;
+                InstallHook();
+                Emit("RECORD_READY");
+            } else {
+                RecordingMode = false;
+                ReleaseHookIfIdle();
+                Emit("RECORD_OFF");
+            }
+        } else if (parts[0] == "SHORTCUT_TRIGGER") {
+            if (parts.Length >= 2 && parts[1] == "OFF") {
+                ShortcutTriggerButton = 0;
+                ShortcutTriggerModMask = 0;
+                ShortcutTriggerActive = false;
+                ReleaseHookIfIdle();
+                Emit("SHORTCUT_TRIGGER_OFF");
+                return;
+            }
+            int vk, modMask;
+            if (parts.Length >= 3 &&
+                int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out vk) &&
+                int.TryParse(parts[2], NumberStyles.Integer, CultureInfo.InvariantCulture, out modMask)) {
+                ShortcutTriggerButton = vk;
+                ShortcutTriggerModMask = modMask;
+                ShortcutTriggerActive = false;
+                InstallHook();
+                Emit(Hook != IntPtr.Zero ? "SHORTCUT_TRIGGER_READY" : "SHORTCUT_TRIGGER_FAILED");
+            }
         } else if (parts.Length == 3 && parts[0] == "WARP") {
             /**
              * Park the pointer (launch with no click). `SetCursorPos` skips the hook and injects no
@@ -460,6 +571,10 @@ public static class ZenithRadialMouseBlocker {
         } else if (parts[0] == "EXIT") {
             ReleaseInjectedButton();
             TriggerButton = 0;
+            ShortcutTriggerButton = 0;
+            ShortcutTriggerModMask = 0;
+            ShortcutTriggerActive = false;
+            RecordingMode = false;
             DisableBlocking();
             context.ExitThread();
         }

@@ -745,7 +745,7 @@ const RadialMenuItem = React.memo(({
                */
               /* `inset` at the top = a single light source for the whole wheel: the tiles read as objects. */
               boxShadow: isActive
-                ? `0 0 0 1px rgba(0,0,0,0.45), 0 0 0 5px ${hoverColor}24, 0 12px 28px rgba(0,0,0,0.5)`
+                ? `0 0 0 1px rgba(0,0,0,0.45), 0 0 0 4px ${hoverColor}2e, 0 0 22px ${hoverColor}38, 0 12px 28px rgba(0,0,0,0.5)`
                 : 'inset 0 1px 0 rgba(255,255,255,0.08), 0 0 0 1px rgba(0,0,0,0.5), 0 8px 22px rgba(0,0,0,0.42)',
             }}
           >
@@ -906,6 +906,9 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
    * open (and per level), instead of a spring per icon on every frame.
    */
   const [bloom, setBloom] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
+  const exitingRef = useRef(false);
+  const isMenuBloom = isOpen && bloom && !isExiting;
 
   /**
    * Dwell aim engine.
@@ -938,6 +941,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
   const armAndTrackDwellRef = useRef<
     (point: { x: number; y: number }, aim: { isCenter: boolean; index: number | null }) => void
   >(() => {});
+  const handleAppClickRef = useRef<(app: AppItem) => void>(() => {});
   /** One commit per arc start/cancel. Zero per frame: the animation is CSS. */
   const [dwellTick, setDwellTick] = useState<{ index: number; key: number } | null>(null);
 
@@ -993,6 +997,39 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
     paintReadyAtRef.current = null;
     quarantineUntilRef.current = 0;
   }, [disarmDwell]);
+
+  const exitTimerRef = useRef<number | null>(null);
+
+  const dismissWithAnimation = useCallback(() => {
+    if (exitingRef.current) return;
+    exitingRef.current = true;
+    closingRef.current = true;
+    cancelDwell();
+    setIsExiting(true);
+    setBloom(false);
+
+    if (exitTimerRef.current !== null) {
+      window.clearTimeout(exitTimerRef.current);
+    }
+    exitTimerRef.current = window.setTimeout(() => {
+      exitTimerRef.current = null;
+      stateRef.current.onClose(null);
+    }, 130);
+  }, [cancelDwell]);
+
+  useEffect(() => {
+    if (isOpen) {
+      exitingRef.current = false;
+      setIsExiting(false);
+      closingRef.current = false;
+    }
+    return () => {
+      if (exitTimerRef.current !== null) {
+        window.clearTimeout(exitTimerRef.current);
+        exitTimerRef.current = null;
+      }
+    };
+  }, [isOpen]);
 
   /**
    * Launch echo target: the index of the confirmed slice, or `-1` for the hub. `null` while
@@ -1440,32 +1477,35 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
       if (!directionModeRef.current) return point;
       const { position } = stateRef.current;
       const previous = gestureSampleRef.current;
-      gestureSampleRef.current = point;
+      gestureSampleRef.current = { x: point.x, y: point.y };
 
-      const virtual = () => ({
+      const getVirtualPoint = () => ({
         x: position.x + gestureVectorRef.current.x,
         y: position.y + gestureVectorRef.current.y,
       });
+
+      const landDx = point.x - position.x;
+      const landDy = point.y - position.y;
+      const landDistSq = landDx * landDx + landDy * landDy;
+      const parkLandingSq = PARK_LANDING_PX * PARK_LANDING_PX;
 
       /**
        * The signature of our own `SetCursorPos`: a large jump that LANDS on the wheel's centre. The
        * two halves together describe no hand at all — a hand that crosses 120px in a single event
        * does not stop on top of the centre — so this identifies the teleport by what it is, and not
        * by us expecting it.
-       *
-       * It has to be unconditional. The `WARP` is queued while the PowerShell helper starts up
-       * (`writeRadialCursorCommand` holds it until READY), and a session's first radial can open
-       * before that: the "parking pending" flag expires after `PARK_TIMEOUT_MS` and the jump
-       * arrived AFTER, by then being added to the vector as if it were gesture — the wheel jumping
-       * to the opposite side from the hand halfway through an aim.
        */
-      const teleported =
-        !!previous &&
-        Math.hypot(point.x - previous.x, point.y - previous.y) >= PARK_JUMP_PX &&
-        Math.hypot(point.x - position.x, point.y - position.y) <= PARK_LANDING_PX;
-      if (teleported) {
-        gestureParkAtRef.current = 0;
-        return virtual();
+      if (previous) {
+        const jumpDx = point.x - previous.x;
+        const jumpDy = point.y - previous.y;
+        const jumpDistSq = jumpDx * jumpDx + jumpDy * jumpDy;
+        const teleported =
+          jumpDistSq >= PARK_JUMP_PX * PARK_JUMP_PX &&
+          landDistSq <= parkLandingSq;
+        if (teleported) {
+          gestureParkAtRef.current = 0;
+          return getVirtualPoint();
+        }
       }
 
       if (gestureParkAtRef.current !== 0) {
@@ -1474,33 +1514,37 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
          * delta dies here. Discarding everything until the landing ate the start of the movement,
          * which is precisely where high sensitivity is decided.
          */
-        if (Math.hypot(point.x - position.x, point.y - position.y) <= PARK_LANDING_PX) {
+        if (landDistSq <= parkLandingSq) {
           gestureParkAtRef.current = 0;
-          return virtual();
+          return getVirtualPoint();
         }
         /** No landing — no helper, or another system: the gesture carries on without parking. */
         if (Date.now() - gestureParkAtRef.current > PARK_TIMEOUT_MS) {
           gestureParkAtRef.current = 0;
         } else {
-          return virtual();
+          return getVirtualPoint();
         }
       }
 
       if (previous) {
-        const next = {
-          x: gestureVectorRef.current.x + (point.x - previous.x),
-          y: gestureVectorRef.current.y + (point.y - previous.y),
-        };
+        const nextX = gestureVectorRef.current.x + (point.x - previous.x);
+        const nextY = gestureVectorRef.current.y + (point.y - previous.y);
         /**
          * The vector's ceiling. Only the direction counts — the virtual pointer never needs to
          * reach the icon ring, because by direction the aim is the sector and not the icon.
          */
         const clamp = directionCommitRef.current * DIRECTION_CLAMP_FACTOR;
-        const length = Math.hypot(next.x, next.y);
-        gestureVectorRef.current =
-          length > clamp
-            ? { x: (next.x / length) * clamp, y: (next.y / length) * clamp }
-            : next;
+        const lengthSq = nextX * nextX + nextY * nextY;
+        const clampSq = clamp * clamp;
+        if (lengthSq > clampSq) {
+          const length = Math.sqrt(lengthSq);
+          gestureVectorRef.current = {
+            x: (nextX / length) * clamp,
+            y: (nextY / length) * clamp,
+          };
+        } else {
+          gestureVectorRef.current = { x: nextX, y: nextY };
+        }
       }
 
       /**
@@ -1514,13 +1558,13 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
           160,
           Math.min(width, height) / 2 - PARK_STRAY_MARGIN_PX,
         );
-        if (Math.hypot(point.x - position.x, point.y - position.y) > strayRadius) {
+        if (landDistSq > strayRadius * strayRadius) {
           gestureParkAtRef.current = Date.now();
           window.electron.parkRadialCursor();
         }
       }
 
-      return virtual();
+      return getVirtualPoint();
     },
     [],
   );
@@ -1548,55 +1592,42 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
 
       const deltaX = point.x - position.x;
       const deltaY = point.y - position.y;
-      if (Math.hypot(deltaX, deltaY) < aimGateRef.current) {
+      const aimGate = aimGateRef.current;
+      if (deltaX * deltaX + deltaY * deltaY < aimGate * aimGate) {
         return { isCenter: true, index: null };
       }
       if (currentLevelApps.length === 0) return { isCenter: false, index: null };
 
       const sliceAngle = 360 / currentLevelApps.length;
 
-      /**
-       * Cursor mode: the target is the icon UNDER the pointer, not the direction it lies in.
-       *
-       * With angle aiming, being on the right of the screen lights the right-hand item even with
-       * the cursor hundreds of pixels from it — fast for anyone who already knows where things are,
-       * and disorienting for anyone who does not. Here nothing lights outside the icon's radius,
-       * and releasing while over none of them opens nothing.
-       *
-       * It does not apply to the clickless launch, and that exception is the whole feature: there
-       * is no pointer on screen to rest on top of anything. There the wheel is a pie of EQUAL
-       * sectors — with two items, half a screen each; with four, a quadrant each — and pointing the
-       * right way is enough, however far the hand travels. Letting the aim setting decide here left
-       * the user hunting an icon with a cursor they cannot see.
-       */
-      if (config.radialSelectionMode === 'cursor' && !directionModeRef.current) {
-        const hitRadius = Math.max(actualIconSize * 0.85, 22);
-        let nearest: number | null = null;
-        let nearestDistance = Infinity;
-        for (let i = 0; i < currentLevelApps.length; i += 1) {
-          const itemRad = ((i * sliceAngle) - 90) * (Math.PI / 180);
-          const distance = Math.hypot(
-            deltaX - actualMenuRadius * Math.cos(itemRad),
-            deltaY - actualMenuRadius * Math.sin(itemRad),
-          );
-          if (distance < nearestDistance) {
-            nearestDistance = distance;
-            nearest = i;
-          }
-        }
-        return { isCenter: false, index: nearestDistance <= hitRadius ? nearest : null };
-      }
-
-      /**
-       * No distance limit: aiming is giving a direction, and the slice stays the target with the
-       * cursor at the other end of the screen. Anyone who wants out uses the centre or Escape.
-       */
       let angle = Math.atan2(deltaY, deltaX) * (180 / Math.PI) + 90;
       if (angle < 0) angle += 360;
       const index = Math.floor(((angle + sliceAngle / 2) % 360) / sliceAngle);
+      const candidateIndex = index >= 0 && index < currentLevelApps.length ? index : null;
+
+      /**
+       * Cursor mode: the target is the icon UNDER the pointer, not the direction it lies in.
+       * Uses O(1) Voronoi sector candidate matching followed by a single hitRadius distance check.
+       */
+      if (config.radialSelectionMode === 'cursor' && !directionModeRef.current) {
+        if (candidateIndex === null) return { isCenter: false, index: null };
+        const hitRadius = Math.max(actualIconSize * 0.85, 22);
+        const itemRad = ((candidateIndex * sliceAngle) - 90) * (Math.PI / 180);
+        const targetX = actualMenuRadius * Math.cos(itemRad);
+        const targetY = actualMenuRadius * Math.sin(itemRad);
+        const diffX = deltaX - targetX;
+        const diffY = deltaY - targetY;
+        const distSq = diffX * diffX + diffY * diffY;
+        return { isCenter: false, index: distSq <= hitRadius * hitRadius ? candidateIndex : null };
+      }
+
+      /**
+       * Direction mode: aiming is giving a direction, and the slice stays the target with the
+       * cursor anywhere in the sector.
+       */
       return {
         isCenter: false,
-        index: index >= 0 && index < currentLevelApps.length ? index : null,
+        index: candidateIndex,
       };
     },
     [],
@@ -1659,6 +1690,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
     gestureConsumedRef.current = false;
 
     let rafId: number | null = null;
+    const MOVEMENT_BUFFER_SQ = 225; // 15px * 15px
 
     const processMouseMove = () => {
       rafId = null;
@@ -1673,16 +1705,17 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
 
       const deltaX = aimPoint.x - position.x;
       const deltaY = aimPoint.y - position.y;
-      const distance = Math.hypot(deltaX, deltaY);
-      const MOVEMENT_BUFFER = 15;
+      const distSq = deltaX * deltaX + deltaY * deltaY;
+      const aimGate = aimGateRef.current;
+      const aimGateSq = aimGate * aimGate;
 
       if (currentLevelApps.length === 0) {
         /** Empty level: there is no slice to launch, and `resolveAimAtPoint` returns a null index. */
         cancelDwell();
-        if (!hasMoved && distance > MOVEMENT_BUFFER) {
+        if (!hasMoved && distSq > MOVEMENT_BUFFER_SQ) {
           setHasMoved(true);
         }
-        if (distance < aimGateRef.current) {
+        if (distSq < aimGateSq) {
           if (activeIndex !== null) setActiveIndex(null);
           if (!stateRef.current.isCenterActive) setIsCenterActive(true);
         } else {
@@ -1692,11 +1725,11 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
         return;
       }
 
-      if (!hasMoved && distance > MOVEMENT_BUFFER) {
+      if (!hasMoved && distSq > MOVEMENT_BUFFER_SQ) {
         setHasMoved(true);
       }
 
-      if (distance < aimGateRef.current) {
+      if (distSq < aimGateSq) {
         /** Coming back to the hub is the gesture for giving up: it kills the count, not the right to start over. */
         cancelDwell();
         if (activeIndex !== null) setActiveIndex(null);
@@ -1727,9 +1760,9 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
 
     const handleMouseMove = (e: MouseEvent) => {
       /** Synchronous: the highlight can wait for the next frame, the confirmation cannot. */
-      const raw = { x: e.clientX, y: e.clientY };
-      lastAnchorPointRef.current = raw;
-      lastPointerRef.current = trackAimPoint(raw);
+      const currentPoint = { x: e.clientX, y: e.clientY };
+      lastAnchorPointRef.current = currentPoint;
+      lastPointerRef.current = trackAimPoint(currentPoint);
       if (rafId === null) {
         rafId = requestAnimationFrame(processMouseMove);
       }
@@ -1900,17 +1933,13 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
       if (e.button === 2) {
         e.preventDefault();
         e.stopPropagation();
-        closingRef.current = true;
-        cancelDwell();
-        stateRef.current.onClose(null);
+        dismissWithAnimation();
       }
     };
 
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
-      closingRef.current = true;
-      cancelDwell();
-      onClose(null);
+      dismissWithAnimation();
     };
 
     /** See `handleMouseDown`: the trigger toggling to closed is a cancellation like any other. */
@@ -2015,10 +2044,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
           setTypeAhead('');
           return;
         }
-        /** See `handleMouseDown`: cancelling has to silence the timer before React unmounts. */
-        closingRef.current = true;
-        cancelDwell();
-        onClose(null);
+        dismissWithAnimation();
         return;
       }
 
@@ -2031,9 +2057,65 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
       if (launchEchoTimerRef.current !== null) return;
 
       if (e.key === 'Backspace') {
-        if (!typeAheadRef.current) return;
+        if (typeAheadRef.current) {
+          e.preventDefault();
+          setTypeAhead((current) => current.slice(0, -1));
+          return;
+        }
+        if (folderStack.length > 0) {
+          e.preventDefault();
+          setFolderStack((prev) => prev.slice(0, -1));
+          setActiveIndex(null);
+          return;
+        }
+        return;
+      }
+
+      if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        setTypeAhead((current) => current.slice(0, -1));
+        const currentItems = stateRef.current.currentLevelApps;
+        if (activeIndex !== null && currentItems[activeIndex]) {
+          handleAppClickRef.current(currentItems[activeIndex]);
+        }
+        return;
+      }
+
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const currentItems = stateRef.current.currentLevelApps;
+        const count = currentItems.length;
+        if (count === 0) return;
+        if (e.shiftKey) {
+          setActiveIndex((prev) => (prev === null ? count - 1 : (prev - 1 + count) % count));
+        } else {
+          setActiveIndex((prev) => (prev === null ? 0 : (prev + 1) % count));
+        }
+        return;
+      }
+
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+        const currentItems = stateRef.current.currentLevelApps;
+        const count = currentItems.length;
+        if (count === 0) return;
+
+        let targetAngleDeg = 270;
+        if (e.key === 'ArrowUp') targetAngleDeg = 270;
+        else if (e.key === 'ArrowRight') targetAngleDeg = 0;
+        else if (e.key === 'ArrowDown') targetAngleDeg = 90;
+        else if (e.key === 'ArrowLeft') targetAngleDeg = 180;
+
+        let bestIndex = 0;
+        let minDiff = 360;
+        for (let i = 0; i < count; i++) {
+          const sliceAngleDeg = (i * (360 / count) - 90 + 360) % 360;
+          const diff = Math.abs(((sliceAngleDeg - targetAngleDeg + 180) % 360) - 180);
+          if (diff < minDiff) {
+            minDiff = diff;
+            bestIndex = i;
+          }
+        }
+        setActiveIndex(bestIndex);
         return;
       }
 
@@ -2061,6 +2143,15 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
           onWorkspaceSwitch(num - 1);
           return;
         }
+      } else if (!typeAheadRef.current && e.key >= '1' && e.key <= '8') {
+        const num = parseInt(e.key, 10);
+        const currentItems = stateRef.current.currentLevelApps;
+        const targetIdx = num - 1;
+        if (targetIdx < currentItems.length) {
+          e.preventDefault();
+          setActiveIndex(targetIdx);
+          return;
+        }
       }
 
       if (isTypedCharacter) {
@@ -2071,7 +2162,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
 
     window.addEventListener('keydown', handleKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
-  }, [isOpen, onClose, onWorkspaceSwitch]);
+  }, [isOpen, onClose, onWorkspaceSwitch, activeIndex, folderStack.length]);
 
   /**
    * "Hold" mode: the window opens with the middle button still pressed, and on Windows the mouse
@@ -2236,6 +2327,45 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
     };
   }, [isOpen, triggerSource, onWorkspaceSwitch]);
 
+  // Shortcut Release Logic (Hold shortcut to Open -> Release to Execute / Close)
+  useEffect(() => {
+    if (!isOpen || triggerSource !== 'shortcut' || config.shortcutTriggerMode !== 'hold') return;
+    let delayedReleaseTimer: number | undefined;
+
+    const handleShortcutRelease = () => {
+      const elapsed = Date.now() - openingTimeRef.current;
+      const GRACE_PERIOD_MS = 200;
+
+      const executeClose = () => {
+        if (gestureConsumedRef.current || !stateRef.current.isOpen) return;
+        gestureConsumedRef.current = true;
+        dismissWithAnimation();
+      };
+
+      const { hasMoved } = stateRef.current;
+      if (!hasMoved && elapsed < GRACE_PERIOD_MS) {
+        delayedReleaseTimer = window.setTimeout(executeClose, GRACE_PERIOD_MS - elapsed);
+      } else {
+        executeClose();
+      }
+    };
+
+    const handleWindowKeyUp = () => {
+      handleShortcutRelease();
+    };
+
+    window.addEventListener('keyup', handleWindowKeyUp);
+    const cleanupIpc = window.electron?.onShortcutRelease?.(handleShortcutRelease);
+
+    return () => {
+      window.removeEventListener('keyup', handleWindowKeyUp);
+      cleanupIpc?.();
+      if (delayedReleaseTimer !== undefined) window.clearTimeout(delayedReleaseTimer);
+    };
+  }, [isOpen, triggerSource, config.shortcutTriggerMode, onWorkspaceSwitch]);
+
+
+
   const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
   const [weather, setWeather] = useState<{ temp: number; condition: string } | null>(null);
 
@@ -2261,8 +2391,8 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
       });
     }
 
-    // Real Weather Logic (wttr.in) with 10-minute cache
-    if (config.showWeather) {
+    // Real Weather Logic (wttr.in) with 10-minute cache (disabled if strictOfflineMode)
+    if (config.showWeather && !config.strictOfflineMode) {
       const loc = config.weatherLocation || '';
       const now = Date.now();
       const cacheValid = weatherCache.data &&
@@ -2406,7 +2536,6 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
   }, [onClose, onWorkspaceSwitch, disarmDwell]);
 
   /** `handleAppClick` is not stable; the engine has to call the current render's version every time. */
-  const handleAppClickRef = useRef(handleAppClick);
   handleAppClickRef.current = handleAppClick;
 
   /**
@@ -2497,7 +2626,9 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
      * Re-anchor at the point the hand is at NOW. The previous anchor is the last moving sample, up
      * to 90ms old: keeping it made the count start with the budget already spent.
      */
-    if (lastAnchorPointRef.current) dwellAnchorRef.current = lastAnchorPointRef.current;
+    if (lastAnchorPointRef.current) {
+      dwellAnchorRef.current = { x: lastAnchorPointRef.current.x, y: lastAnchorPointRef.current.y };
+    }
     dwellPendingRef.current = null;
     dwellTargetRef.current = pending;
     dwellStartedAtRef.current = Date.now();
@@ -2519,7 +2650,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
 
       /** The first sample after opening or after a level change only serves to set the reference. */
       if (dwellBaselineRef.current === null) {
-        dwellBaselineRef.current = point;
+        dwellBaselineRef.current = { x: point.x, y: point.y };
         /**
          * By direction this sample is NOT swallowed. You only get here after the vector has already
          * crossed the threshold (`processMouseMove` returns before that), so this is the committed
@@ -2595,7 +2726,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
        * per frame.
        */
       cancelDwell();
-      dwellAnchorRef.current = point;
+      dwellAnchorRef.current = { x: point.x, y: point.y };
       dwellPendingRef.current = next;
       dwellSettleTimerRef.current = window.setTimeout(startDwell, dwellSettleMsRef.current);
     },
@@ -2691,11 +2822,10 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
   return (
     <div
       data-zenith-radial-modal="true"
-      className={`fixed inset-0 z-[70] ${config.performanceMode ? 'zn-radial--fast' : ''} ${isOpen ? '' : 'zn-radial--closing'} ${directionMode ? 'zn-radial--nocursor' : ''}`}
+      className={`fixed inset-0 z-[70] ${config.performanceMode ? 'zn-radial--fast' : ''} ${isOpen && !isExiting ? '' : 'zn-radial--closing'} ${directionMode ? 'zn-radial--nocursor' : ''}`}
       style={{
-        /* No delay on close — otherwise the radial HUD stayed visible over/behind the compact island. */
-        visibility: isOpen ? 'visible' : 'hidden',
-        pointerEvents: isOpen ? 'auto' : 'none',
+        visibility: (isOpen || isExiting) ? 'visible' : 'hidden',
+        pointerEvents: (isOpen && !isExiting) ? 'auto' : 'none',
       }}
     >
         <>
@@ -2703,10 +2833,10 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
           <div
             className={`zn-radial-scrim fixed inset-0 z-[2]${echoActive ? ' zn-launch-scrim' : ''}`}
             style={{
-              pointerEvents: isOpen && !echoActive ? 'auto' : 'none',
+              pointerEvents: isOpen && !isExiting && !echoActive ? 'auto' : 'none',
               background: overlayDim,
-              ['--zn-op' as string]: isOpen && bloom ? 1 : 0,
-              ['--zn-dur-op' as string]: isOpen ? '150ms' : '100ms',
+              ['--zn-op' as string]: isOpen && !isExiting && bloom ? 1 : 0,
+              ['--zn-dur-op' as string]: (isOpen && !isExiting) ? '180ms' : '120ms',
               willChange: 'opacity',
               ...echoStyle,
             }}
@@ -2714,7 +2844,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
 
           <RadialHud
             /** Clock, battery and weather leave with the rest of the wheel — the echo leaves only the icon on screen. */
-            isOpen={isOpen && bloom && !echoActive}
+            isOpen={isOpen && !isExiting && bloom && !echoActive}
             config={config}
             batteryLevel={batteryLevel}
             weather={weather}
@@ -2874,7 +3004,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                 boxShadow: isCenterActive
                   ? `0 0 22px ${radialHoverColor}3d, 0 8px 22px rgba(0,0,0,0.55)`
                   : '0 1px 3px rgba(0,0,0,0.55), 0 8px 20px rgba(0,0,0,0.5)',
-                ['--zn-tf' as string]: `translate(-50%, -50%) scale(${bloom ? (isCenterActive ? 1.06 : 1) : 0.82})`,
+                ['--zn-tf' as string]: `translate(-50%, -50%) scale(${bloom && !isExiting ? (isCenterActive ? 1.06 : 1) : 0.82})`,
                 /**
                  * A slice launching fades the hub, just as it fades the other slices: the echo
                  * isolates what was chosen, and the hub is the part of the wheel that would compete
@@ -2882,8 +3012,8 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                  * IT that launches, `zn-launch-pop-center`'s animation rules and this opacity never
                  * gets read.
                  */
-                ['--zn-op' as string]: echoActive && !centerFired ? 0 : bloom ? 1 : 0,
-                ['--zn-dur' as string]: '130ms',
+                ['--zn-op' as string]: echoActive && !centerFired ? 0 : bloom && !isExiting ? 1 : 0,
+                ['--zn-dur' as string]: isExiting ? '120ms' : '160ms',
                 ...(echoActive && !centerFired ? { ['--zn-dur-op' as string]: '140ms' } : null),
                 ...(centerFired ? { ['--zn-echo-ms' as string]: `${launchEchoMs}ms` } : null),
               }}
@@ -2995,7 +3125,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                   actualMenuRadius + actualIconSize * 0.75 + 34,
                 )}px, 0)`,
                 /** Where you are in the wheel stops being information the moment you leave it. */
-                ['--zn-op' as string]: isOpen && bloom && !echoActive ? 1 : 0,
+                ['--zn-op' as string]: isOpen && !isExiting && bloom && !echoActive ? 1 : 0,
                 ...(echoActive ? { ['--zn-dur-op' as string]: '130ms' } : null),
               }}
             >
@@ -3009,7 +3139,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                 }}
               >
                 {/* Inside a workspace its name is enough — "Rovyl" identifies the root. */}
-                {(isRoot ? ['Rovyl'] : folderStack.map((level) => level.label)).map((label, i) => (
+                {(isRoot ? [currentWorkspace?.name || 'Rovyl'] : folderStack.map((level) => level.label)).map((label, i) => (
                   <React.Fragment key={`${label}-${i}`}>
                     {i > 0 && <span className="text-[11px] leading-none text-white/25">/</span>}
                     <span
@@ -3062,7 +3192,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                     showLabels={config.showLabels}
                     alwaysShowAppLabels={config.alwaysShowAppLabels ?? false}
                     folderStackLength={folderStack.length}
-                    bloom={isOpen && bloom}
+                    bloom={isOpen && !isExiting && bloom}
                     shortcutHint={shortcutHint}
                     /** `undefined` on every other tile — their `React.memo` is not invalidated. */
                     dwellMs={dwellTick && dwellTick.index === index ? dwellRunMsRef.current : undefined}

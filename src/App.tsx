@@ -240,6 +240,12 @@ function sanitizeFullPersistenceForDisk(d: {
   }
 }
 
+/**
+ * The languages `src/i18n/translations.ts` actually carries. `UIConfig['language']` still types the
+ * ten the removed table had, so old configs keep parsing; this is the set that can be rendered.
+ */
+const SUPPORTED_LANGUAGES = new Set<UIConfig['language']>(['en', 'ar']);
+
 export default function App() {
   /* zenith-verify:radial-handshake-renderer — radial overlays/handshake; see scripts/verify-radial-windowing.mjs */
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -336,6 +342,12 @@ export default function App() {
   useEffect(() => {
     if (!isDashboardOpen && !isSettingsOpen) {
       setPanelChromeDismissedForIsland(false);
+      import('./components/installedApps').then((m) => m.clearInstalledAppsMemory?.()).catch(() => {});
+      if (typeof (window as any).gc === 'function') {
+        try {
+          (window as any).gc();
+        } catch (_) {}
+      }
     }
   }, [isDashboardOpen, isSettingsOpen]);
 
@@ -1098,7 +1110,7 @@ export default function App() {
         }
 
         const discoverHasDemoFingerprint = hasDemoFingerprint;
-        nextConfig = { ...nextConfig, language: 'en' };
+        nextConfig = { ...nextConfig, language: SUPPORTED_LANGUAGES.has(nextConfig.language) ? nextConfig.language : 'en' };
 
         /**
          * Startup with no previous data (reset / first install): show the overlay immediately
@@ -1232,8 +1244,14 @@ export default function App() {
 
       if (cancelled) return;
 
-      /** Apply English to every profile, including previously persisted configurations. */
-      nextConfig = { ...nextConfig, language: 'en' };
+      /**
+       * Normalize, do not overwrite. This used to force `'en'` on every profile, because the ten
+       * locales it could otherwise hydrate had no selector to reach them and no chunk worth
+       * shipping. Settings has a real selector again, so a stored choice has to survive a reload —
+       * but only for a language that actually has a table. Anything else (a `pt`/`ja` left in an
+       * old config by the table that is gone) still normalizes to English.
+       */
+      nextConfig = { ...nextConfig, language: SUPPORTED_LANGUAGES.has(nextConfig.language) ? nextConfig.language : 'en' };
 
       hydratedFromPersistenceRef.current =
         !!(finalData || loadedFromLocalStorageMigration);
@@ -2171,6 +2189,17 @@ export default function App() {
         lastWindowState.current = m;
       });
 
+    const cleanupCleanMemory = window.electron?.onCleanMemory?.(() => {
+      import('./components/installedApps').then((m) => m.clearInstalledAppsMemory?.()).catch(() => {});
+      if (typeof (window as any).gc === 'function') {
+        try {
+          (window as any).gc();
+        } catch (_) {
+          /* ignore */
+        }
+      }
+    });
+
     return () => {
       cleanupMenu?.();
       cleanupPrepareRadial?.();
@@ -2182,6 +2211,7 @@ export default function App() {
       cleanupWindowHidToTray?.();
       cleanupMainWindowMinimized?.();
       cleanupNativeDisplayRestored?.();
+      cleanupCleanMemory?.();
     };
   }, []);
 
