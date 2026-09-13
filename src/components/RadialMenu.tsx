@@ -1000,7 +1000,28 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
 
   const exitTimerRef = useRef<number | null>(null);
 
-  const dismissWithAnimation = useCallback(() => {
+  /**
+   * The RAW close, behind a ref. `dismissWithAnimation` dispatches through this rather than
+   * `stateRef.current.onClose` because the wrapped `onClose` sends its own cancellations BACK here:
+   * going through it with `'__CENTER__'` would re-enter this function, hit the `exitingRef` guard
+   * and leave the wheel exiting forever, never closing.
+   */
+  const onCloseNowRef = useRef(onCloseNow);
+  onCloseNowRef.current = onCloseNow;
+
+  /**
+   * Cancelling: the wheel collapses back into the hub, and only then does App get to close.
+   *
+   * The delay is not decoration. Closing hands the window back to `small` — a shrink to the island
+   * point that the DWM composites by reusing the surface's last texture, so whatever the wheel was
+   * still painting gets dragged across the screen with it. Emptying the surface first is what makes
+   * that invisible; dispatching on the click frame is what made it a visible lurch.
+   *
+   * `selectedId` is what App is told once the wave is over — `null` for the gestures that cancel
+   * from outside, `'__CENTER__'` for a hub that is configured to launch nothing. Both cancel; they
+   * differ only in what App does with the panel underneath.
+   */
+  const dismissWithAnimation = useCallback((selectedId: string | null = null) => {
     if (exitingRef.current) return;
     exitingRef.current = true;
     closingRef.current = true;
@@ -1013,7 +1034,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
     }
     exitTimerRef.current = window.setTimeout(() => {
       exitTimerRef.current = null;
-      stateRef.current.onClose(null);
+      onCloseNowRef.current(selectedId);
     }, 130);
   }, [cancelDwell]);
 
@@ -1073,7 +1094,15 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
          * echo over a launch that did not happen would be a confirmation telling a lie.
          */
         const centerType = stateRef.current.config.centerButton?.type;
-        if (!centerType || centerType === 'cancel' || centerType === 'none') return void fireNow();
+        /**
+         * A hub that launches nothing is a cancellation, so it leaves the way every other
+         * cancellation does — collapsing into the centre first. It used to be the one that did not:
+         * it dispatched on the click frame, and App shrank the window out from under a wheel still
+         * at full bloom.
+         */
+        if (!centerType || centerType === 'cancel' || centerType === 'none') {
+          return void dismissWithAnimation(selectedId);
+        }
         index = -1;
       } else {
         index = stateRef.current.currentLevelApps.findIndex((item) => item.id === selectedId);
@@ -1097,7 +1126,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
         fireNow();
       }, launchEchoMs);
     },
-    [onCloseNow, cancelDwell, launchEchoMs],
+    [onCloseNow, cancelDwell, launchEchoMs, dismissWithAnimation],
   );
 
   /**
