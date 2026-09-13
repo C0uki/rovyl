@@ -13,7 +13,20 @@ const {
   session,
   protocol,
 } = require("electron");
-const { autoUpdater } = require("electron-updater");
+/**
+ * Loaded on first use, not at module scope.
+ *
+ * The destructure that used to live here fired `electron-updater`'s `autoUpdater` getter during
+ * module evaluation — before `app.whenReady` — which constructs an `NsisUpdater` and eagerly pulls
+ * in the package's whole closure: 80 modules, ~9.5 MB of RSS and ~86 ms, including four updaters
+ * that can never run on Windows. `configureAutoUpdates` then declines to use any of it on
+ * unpackaged and Store builds, having already paid in full.
+ */
+let electronUpdaterModule = null;
+const getAutoUpdater = () => {
+  if (!electronUpdaterModule) electronUpdaterModule = require("electron-updater");
+  return electronUpdaterModule.autoUpdater;
+};
 const { createIconStore, ICON_SCHEME } = require("./icon-store.cjs");
 
 /**
@@ -567,7 +580,20 @@ function normalizeRecentlyOpenedPathsList(raw) {
   return [];
 }
 
+/**
+ * Reads one IDE's MRU list out of its `state.vscdb`.
+ *
+ * `new SQL.Database(buf)` hands the buffer to emscripten's MEMFS with `canOwn`, so the whole file
+ * stays pinned in the WASM heap — which is process-lifetime — until the handle is closed. Cursor's
+ * is 175 MB on a real install, and without the close below three drill-ins took the main process
+ * from 35 MB to 545 MB of RSS with forced GC reclaiming none of it.
+ *
+ * The close has to sit in `finally`: the key-missing path returns early and the catch swallows
+ * throws, so anything appended before the happy-path return would miss both. `db` is declared out
+ * here because the ctor itself can throw on a truncated file.
+ */
 async function loadRecentlyOpenedPathsFromVscdb(vscdbPath) {
+  let db = null;
   try {
     const initSqlJs = require("sql.js");
     const distDir = path.dirname(require.resolve("sql.js"));
@@ -578,7 +604,7 @@ async function loadRecentlyOpenedPathsFromVscdb(vscdbPath) {
         : distDir;
     const SQL = await initSqlJs({ locateFile: (f) => path.join(wasmDir, f) });
     const buf = fs.readFileSync(vscdbPath);
-    const db = new SQL.Database(buf);
+    db = new SQL.Database(buf);
     const res = db.exec(
       "SELECT value FROM ItemTable WHERE key = 'history.recentlyOpenedPathsList'",
     );
@@ -588,6 +614,12 @@ async function loadRecentlyOpenedPathsFromVscdb(vscdbPath) {
   } catch (e) {
     diagLog(`[Recents] state.vscdb read failed (${vscdbPath}): ${e.message}`);
     return [];
+  } finally {
+    try {
+      db?.close();
+    } catch (e) {
+      diagLog(`[Recents] state.vscdb close failed (${vscdbPath}): ${e.message}`);
+    }
   }
 }
 
@@ -1718,15 +1750,26 @@ function showMenuAtCursor(source = "shortcut", panelAlreadyVacated = false) {
    */
   const prepTimeoutMs = wasMinimized ? 200 : 72;
   const prepPromise = new Promise((resolve) => {
-    const t = setTimeout(resolve, prepTimeoutMs);
-    ipcMain.once("radial-prep-paint-done", () => {
+    /**
+     * The listener has to come off on every exit, not just the acknowledged one. `ipcMain` lives as
+     * long as the process, so a timed-out prep used to leave its closure attached forever — and
+     * `vacatePanelSurfaceThenOpen` listens on this same channel, so a late ack could satisfy the
+     * wrong waiter.
+     */
+    const onPaintDone = () => {
       clearTimeout(t);
       resolve();
-    });
+    };
+    const t = setTimeout(() => {
+      ipcMain.removeListener("radial-prep-paint-done", onPaintDone);
+      resolve();
+    }, prepTimeoutMs);
+    ipcMain.once("radial-prep-paint-done", onPaintDone);
     try {
       wc.send("prepare-radial-show");
     } catch (e) {
       clearTimeout(t);
+      ipcMain.removeListener("radial-prep-paint-done", onPaintDone);
       resolve();
     }
   });
@@ -3270,6 +3313,8 @@ function configureAutoUpdates() {
     return;
   }
 
+  /** Past the guards, so this is the first point the module is genuinely needed. */
+  const autoUpdater = getAutoUpdater();
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
 
@@ -6263,8 +6308,18 @@ function removeIdeNewWindowFlag(cmd) {
   return cmd.replace(/\s+(?:-n|--new-window)(?=\s|$)/i, "");
 }
 
-/** A small working set kept in RAM; Windows also keeps these pages in the file cache. */
-const prewarmedExecutableBuffers = new Map();
+/**
+ * Scratch space for the prewarm read below, reused across every app and every pass.
+ *
+ * This used to be a Map holding up to 8 x 8 MB of executable bytes for the life of the session —
+ * and nothing ever read from it. It could not have helped: `CreateProcess` maps the image from a
+ * section object on the file, never from a copy sitting in our heap, so the only thing warming the
+ * launch is the OS file cache the read itself populates. Retaining the bytes was worse than
+ * useless, since 64 MB of extra commit makes Windows likelier to evict the standby pages the
+ * feature exists to keep warm.
+ */
+const PREWARM_SCRATCH_BYTES = 512 * 1024;
+let prewarmScratch = null;
 let prewarmAppsSignature = "";
 ipcMain.on("prewarm-apps", async (_event, rawCommands) => {
   const commands = Array.isArray(rawCommands)
@@ -6273,7 +6328,6 @@ ipcMain.on("prewarm-apps", async (_event, rawCommands) => {
   const signature = commands.slice().sort().join("\u0000");
   if (signature === prewarmAppsSignature) return;
   prewarmAppsSignature = signature;
-  prewarmedExecutableBuffers.clear();
 
   const MAX_APPS = 8;
   const MAX_BYTES_PER_APP = 8 * 1024 * 1024;
@@ -6294,10 +6348,19 @@ ipcMain.on("prewarm-apps", async (_event, rawCommands) => {
       const length = Math.min(stat.size, MAX_BYTES_PER_APP);
       const handle = await fs.promises.open(exe, "r");
       try {
-        const buffer = Buffer.allocUnsafe(length);
-        const { bytesRead } = await handle.read(buffer, 0, length, 0);
-        prewarmedExecutableBuffers.set(exe.toLowerCase(), buffer.subarray(0, bytesRead));
-        diagLog(`[Prewarm] Cached ${(bytesRead / 1024 / 1024).toFixed(1)} MB from ${exe}`);
+        if (!prewarmScratch) prewarmScratch = Buffer.allocUnsafe(PREWARM_SCRATCH_BYTES);
+        /**
+         * Looped through the scratch buffer rather than read whole: touching the pages is the
+         * entire point, and holding them afterwards is what this used to get wrong.
+         */
+        let total = 0;
+        while (total < length) {
+          const want = Math.min(prewarmScratch.length, length - total);
+          const { bytesRead } = await handle.read(prewarmScratch, 0, want, total);
+          if (bytesRead <= 0) break;
+          total += bytesRead;
+        }
+        diagLog(`[Prewarm] Touched ${(total / 1024 / 1024).toFixed(1)} MB of ${exe}`);
       } finally {
         await handle.close();
       }
@@ -7473,7 +7536,7 @@ const runUpdateCheck = async () => {
 
   pendingUpdateCheck = (async () => {
     try {
-      const result = await autoUpdater.checkForUpdates();
+      const result = await getAutoUpdater().checkForUpdates();
       const version = result?.updateInfo?.version;
       if (version && version !== app.getVersion()) {
         /** `update-available` has already set the state; return what it became, not what was expected. */
@@ -7526,7 +7589,7 @@ const installUpdateNow = () => {
    * `isForceRunAfter: true` — without this NSIS installs and does NOT relaunch the app, forcing the
    * user to open it by hand. An app that lives in the tray simply vanished after updating.
    */
-  autoUpdater.quitAndInstall(false, true);
+  getAutoUpdater().quitAndInstall(false, true);
 };
 
 ipcMain.on("install-update-now", installUpdateNow);
@@ -8561,6 +8624,22 @@ ipcMain.handle("get-website-favicon-data-url", async (_event, pageUrl) => {
       return null;
     }
     if (!hostname) return null;
+    /**
+     * A hostname has to look resolvable before it is worth a round trip to two third parties.
+     *
+     * The healing pass re-asks as the user types, so every prefix of a URL in progress — `g`,
+     * `gi`, `git`, ... — used to become a lookup: up to 50 outbound TLS requests for one address,
+     * each one handing a keystroke-by-keystroke reconstruction of what is being typed to Google and
+     * DuckDuckGo. Requiring a dot and a plausible TLD costs nothing and stops both.
+     *
+     * `xn--` is spelled out because a punycode TLD (.рф encodes as `xn--p1ai`) carries digits and a
+     * hyphen, which a letters-only pattern rejects. An IP literal or a single-label intranet host
+     * falls out here too, and should: neither upstream can return a favicon for one.
+     */
+    if (!/\.(?:[a-z]{2,}|xn--[a-z0-9-]{2,})$/i.test(hostname)) {
+      diagLog(`[Favicon] skipping incomplete hostname: ${hostname}`);
+      return null;
+    }
     const hostKey = hostname.toLowerCase();
     if (faviconDataUrlCache.has(hostKey)) {
       const cached = faviconDataUrlCache.get(hostKey);
@@ -8753,6 +8832,8 @@ ipcMain.handle("get-website-page-title", async (_event, pageUrl) => {
 // compiling the interop shim). A picker showing dozens of rows would otherwise
 // spawn dozens of them at once and thrash the machine.
 const ICON_EXTRACTION_CONCURRENCY = 4;
+/** Ceiling on one extraction. ~12x a measured run; only a wedged shell call should ever reach it. */
+const ICON_EXTRACTION_TIMEOUT_MS = 8000;
 let activeIconExtractions = 0;
 const iconExtractionQueue = [];
 
@@ -8811,6 +8892,7 @@ ipcMain.handle("get-file-icon", async (event, filePath) => {
     if (inFlightIconRequests.has(filePath)) {
       return inFlightIconRequests.get(filePath);
     }
+
     const pending = extractIconUncached(filePath).finally(() =>
       inFlightIconRequests.delete(filePath),
     );
@@ -8900,13 +8982,35 @@ async function extractIconUncached(filePath) {
         ["-NoProfile", "-ExecutionPolicy", "RemoteSigned", "-File", psScript, "-Target", resolvedPath],
         { windowsHide: true },
       );
+      /**
+       * This promise used to settle only on 'close' or 'error'. IShellItemImageFactory against a
+       * disconnected share or a wedged shell extension never returns, and the queue slot it holds
+       * is never given back — four such targets stall the whole pipeline for the life of the tray
+       * process. The three other spawn sites in this file all guard; this one did not. 8 s is ~12x
+       * a measured extraction.
+       */
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(watchdog);
+        resolve(value);
+      };
+      const watchdog = setTimeout(() => {
+        diagLog(`[IconRequest] PowerShell extraction timed out for ${resolvedPath}`);
+        try {
+          child.kill();
+        } catch {}
+        finish(null);
+      }, ICON_EXTRACTION_TIMEOUT_MS);
+      watchdog.unref?.();
       child.stdout.on("data", (d) => chunks.push(d));
       child.stderr.on("data", (d) =>
         diagLog(`[IconRequest] PowerShell stderr: ${String(d).trim()}`),
       );
       child.on("error", (err) => {
         diagLog(`[IconRequest] PowerShell spawn error: ${err.message}`);
-        resolve(null);
+        finish(null);
       });
       child.on("close", (code) => {
         if (code !== 0) {
@@ -8915,7 +9019,7 @@ async function extractIconUncached(filePath) {
         const stdout = Buffer.concat(chunks).toString("utf8");
         const lines = stdout.trim().split(/\r?\n/);
         const dataLine = lines.find((line) => line.startsWith("data:image"));
-        resolve(dataLine || null);
+        finish(dataLine || null);
       });
     }));
 

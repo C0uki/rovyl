@@ -2018,7 +2018,7 @@ function launchModeRisk(commandType: AppItem['commandType'], mode: 'normal' | 'r
       ? 'Reuses the browser already running: the page can land in an existing window or tab group instead of a new one, and profile or private windows may be ignored.'
       : 'Reuses the process already running: an IDE can switch the project open in the current window instead of opening another. Apps without support fall back to a normal launch.';
   }
-  return 'Keeps executable data in memory, so RAM stays in use in the background even after you close the app. Some apps show a splash or a second instance when reused, and unsupported ones fall back to a normal launch.';
+  return 'Reads the executable once so Windows keeps it cached, which can shorten the first launch. Some apps show a splash or a second instance when reused, and unsupported ones fall back to a normal launch.';
 }
 
 /**
@@ -2915,7 +2915,7 @@ function WorkspaceManager({
                           {item.commandType === 'url' && (item.launchMode ?? 'normal') === 'reuse'
                             ? 'Uses the existing default browser process when available.'
                             : (item.launchMode ?? 'normal') === 'prewarm'
-                            ? 'Caches executable data in Windows memory and reuses an existing process when supported.'
+                            ? 'Warms the Windows file cache for this app and reuses an existing process when supported.'
                             : (item.launchMode ?? 'normal') === 'reuse'
                               ? 'Prefers the existing IDE, app, or browser process.'
                               : 'Uses the standard Windows launch behavior.'}

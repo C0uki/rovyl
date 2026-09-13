@@ -10,9 +10,20 @@ const PERSISTENCE_MIRROR_KEYS = ["zenith_user", "zenith_apps", "zenith_config"] 
 /** Reported once per session: a full quota is a standing condition, not an event worth repeating. */
 let mirrorFailureReported = false;
 
+/**
+ * What the three keys were last known to hold.
+ *
+ * The mirror is rewritten on every debounced save *and* every wheel close, which meant
+ * re-stringifying ~26 kB of workspace tree roughly twice per close on the renderer's main thread —
+ * for a cache that is read only when the real file comes back empty. Comparing first turns the
+ * common case, where nothing changed, into three string compares.
+ */
+let lastMirrored: { user: string; apps: string; config: string } | null = null;
+
 /** Test seam — resets the once-per-session report so a suite can assert on it more than once. */
 export function resetMirrorFailureReportingForTests(): void {
   mirrorFailureReported = false;
+  lastMirrored = null;
 }
 
 export type MirrorOutcome = "ok" | "dropped";
@@ -39,12 +50,31 @@ export interface PersistenceMirrorPayload {
 export function mirrorPersistenceToLocalStorage(
   payload: PersistenceMirrorPayload,
 ): MirrorOutcome {
-  const write = () => {
-    localStorage.setItem("zenith_user", JSON.stringify(payload.user));
-    localStorage.setItem("zenith_apps", JSON.stringify(payload.apps));
-    localStorage.setItem("zenith_config", JSON.stringify(payload.config));
+  const next = {
+    user: JSON.stringify(payload.user),
+    apps: JSON.stringify(payload.apps),
+    config: JSON.stringify(payload.config),
+  };
+
+  /**
+   * Skipping an unchanged key cannot tear the mirror: what storage already holds for it is exactly
+   * what this call would write. `force` exists for the retry below, which runs after `clear()` has
+   * emptied all three and so must rewrite all three.
+   */
+  const write = (force: boolean) => {
+    if (force || lastMirrored?.user !== next.user) {
+      localStorage.setItem("zenith_user", next.user);
+    }
+    if (force || lastMirrored?.apps !== next.apps) {
+      localStorage.setItem("zenith_apps", next.apps);
+    }
+    if (force || lastMirrored?.config !== next.config) {
+      localStorage.setItem("zenith_config", next.config);
+    }
+    lastMirrored = next;
   };
   const clear = () => {
+    lastMirrored = null;
     for (const key of PERSISTENCE_MIRROR_KEYS) {
       try {
         localStorage.removeItem(key);
@@ -54,15 +84,24 @@ export function mirrorPersistenceToLocalStorage(
     }
   };
 
+  if (
+    lastMirrored !== null &&
+    lastMirrored.user === next.user &&
+    lastMirrored.apps === next.apps &&
+    lastMirrored.config === next.config
+  ) {
+    return "ok";
+  }
+
   try {
-    write();
+    write(false);
     return "ok";
   } catch {
     clear();
   }
 
   try {
-    write();
+    write(true);
     return "ok";
   } catch (err) {
     clear();

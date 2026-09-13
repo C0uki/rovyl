@@ -4,6 +4,19 @@ import { isRemoteIconUrl, isWebShortcutItem, isStoredIconRef } from '../iconRef'
 import { resolveWebsiteIconFields } from '../siteFavicon';
 
 /**
+ * Attempts a single target gets across the session before it is left alone. Enough for a transient
+ * miss (a busy extraction queue, a drive still mounting), few enough that a target which can never
+ * resolve stops spawning PowerShell on every settings keystroke.
+ */
+const MAX_HEAL_FAILURES_PER_TARGET = 2;
+
+/**
+ * Quiet period before a pass starts. Long enough to swallow a typing burst in the settings editor,
+ * short enough that a newly added shortcut still gets its icon while the user is looking at it.
+ */
+const HEAL_DEBOUNCE_MS = 500;
+
+/**
  * Re-fetches shortcut icons that are missing, and retries the ones that failed.
  *
  * Lifted out of `App.tsx` whole — 241 lines of the 2,861 that file had, and the largest piece of it
@@ -25,6 +38,19 @@ export function useIconHealing({
 }): void {
   /** Prevents broken/missing shell targets from spawning PowerShell after every settings edit. */
   const iconHealingAttemptedRef = useRef(new Set<string>());
+  /**
+   * Per-target failure count, and the thing that actually delivers the guarantee above.
+   *
+   * The attempted-set alone could not: every failure arm deletes the target's mark to hand back a
+   * retry, so the set only ever suppressed targets that had already *succeeded*. The effect re-runs
+   * on `config.workspaces` identity, which the settings editor rebuilds per keystroke, so one
+   * permanently-unresolvable shortcut spawned a fresh ~650 ms PowerShell for every character typed
+   * in any field — including an unrelated workspace's name.
+   *
+   * Two attempts still covers the transient failures the delete exists for (a busy queue, a drive
+   * still mounting). Keyed on the command, so correcting a bad path starts a fresh budget.
+   */
+  const iconHealingFailuresRef = useRef(new Map<string, number>());
   /** Some icons failed to resolve this pass — worth a retry in a moment. */
   const healingHadFailuresRef = useRef(false);
   /** Retry ceiling: two. Without this, a permanently invalid target spun forever. */
@@ -39,7 +65,11 @@ export function useIconHealing({
     let cancelled = false;
     const healingKey = (item: AppItem) =>
       `${isWebShortcutItem(item) ? 'web' : 'native'}:${item.id ?? ''}:${item.command?.trim().toLowerCase() ?? ''}`;
-    const canAttempt = (item: AppItem) => !iconHealingAttemptedRef.current.has(healingKey(item));
+    const canAttempt = (item: AppItem) => {
+      const key = healingKey(item);
+      if (iconHealingAttemptedRef.current.has(key)) return false;
+      return (iconHealingFailuresRef.current.get(key) ?? 0) < MAX_HEAL_FAILURES_PER_TARGET;
+    };
     const rememberAttempt = (item: AppItem) => {
       const attempted = iconHealingAttemptedRef.current;
       attempted.add(healingKey(item));
@@ -48,6 +78,25 @@ export function useIconHealing({
         const oldest = attempted.values().next().value as string | undefined;
         if (!oldest) break;
         attempted.delete(oldest);
+      }
+    };
+    /**
+     * Failing gives the turn back — the mark is dropped so the next pass may retry — but it also
+     * spends one of this target's two attempts, so a target that can never resolve stops costing.
+     */
+    const rememberFailure = (item: AppItem) => {
+      const key = healingKey(item);
+      const failures = iconHealingFailuresRef.current;
+      iconHealingAttemptedRef.current.delete(key);
+      healingHadFailuresRef.current = true;
+      /** Re-inserted rather than mutated in place, so the bound below evicts oldest-first. */
+      const next = (failures.get(key) ?? 0) + 1;
+      failures.delete(key);
+      failures.set(key, next);
+      while (failures.size > 512) {
+        const oldest = failures.keys().next().value as string | undefined;
+        if (!oldest) break;
+        failures.delete(oldest);
       }
     };
 
@@ -133,8 +182,7 @@ export function useIconHealing({
                    * like that stayed marked as a spent attempt — the shortcut only got its icon
                    * the next session. Same rule as the native path: failing gives the turn back.
                    */
-                  iconHealingAttemptedRef.current.delete(healingKey(item));
-                  healingHadFailuresRef.current = true;
+                  rememberFailure(item);
                 }
               } else if (
                 item.iconSource === 'native' &&
@@ -160,12 +208,10 @@ export function useIconHealing({
                      * the app was restarted. Dropping the mark on failure gives it a second
                      * chance on the next pass.
                      */
-                    iconHealingAttemptedRef.current.delete(healingKey(item));
-                    healingHadFailuresRef.current = true;
+                    rememberFailure(item);
                   }
                 } catch (e) {
-                  iconHealingAttemptedRef.current.delete(healingKey(item));
-                  healingHadFailuresRef.current = true;
+                  rememberFailure(item);
                   console.warn(`[Icon Healing] Failed for ${item.label}`);
                 }
               }
@@ -256,19 +302,32 @@ export function useIconHealing({
     );
 
     let retryTimer: number | undefined;
-    void heal().then(() => {
-      window.electron?.savePersistenceLog?.(
-        `[IconHealing] pass ${iconHealingPass} finished | changed=${hasUpdatesLog.value} failures=${healingHadFailuresRef.current}`,
-      );
-      /** There were failures and nothing else will touch the config: schedule a retry. */
-      if (cancelled || !healingHadFailuresRef.current) return;
-      healingHadFailuresRef.current = false;
-      if (healingRetriesRef.current >= 2) return;
-      healingRetriesRef.current += 1;
-      retryTimer = window.setTimeout(() => setIconHealingPass((pass) => pass + 1), 4000);
-    });
+    /**
+     * Debounced, because this effect's dependency is `config.workspaces` by identity and the
+     * settings editor rebuilds that array on every keystroke — so typing a Target used to start a
+     * fresh extraction pass per character, each one a ~650 ms PowerShell spawn against a path that
+     * was still half-written. The cleanup below clears this, so only the last edit in a burst ever
+     * reaches `heal()`, and it is evaluated against the finished command rather than a prefix.
+     *
+     * `findMissingIcons` above still runs per keystroke, which is wanted: it is an in-memory walk,
+     * and it is what decides there is nothing to do at all.
+     */
+    const startTimer = window.setTimeout(() => {
+      void heal().then(() => {
+        window.electron?.savePersistenceLog?.(
+          `[IconHealing] pass ${iconHealingPass} finished | changed=${hasUpdatesLog.value} failures=${healingHadFailuresRef.current}`,
+        );
+        /** There were failures and nothing else will touch the config: schedule a retry. */
+        if (cancelled || !healingHadFailuresRef.current) return;
+        healingHadFailuresRef.current = false;
+        if (healingRetriesRef.current >= 2) return;
+        healingRetriesRef.current += 1;
+        retryTimer = window.setTimeout(() => setIconHealingPass((pass) => pass + 1), 4000);
+      });
+    }, HEAL_DEBOUNCE_MS);
     return () => {
       cancelled = true;
+      window.clearTimeout(startTimer);
       if (retryTimer !== undefined) window.clearTimeout(retryTimer);
     };
   }, [isLoaded, config.workspaces, iconHealingPass]); // Re-run after hydration, on workspace changes, and on retry.
