@@ -282,11 +282,14 @@
 .zs-page-head h1 { margin: 0 0 var(--zn-1); color: var(--zn-text); font-size: 21px; font-weight: 600; line-height: 1.15; letter-spacing: -.022em; }
 .zs-page-head p { margin: 0; color: var(--zn-text-2); font-size: 12.5px; line-height: 1.45; }
 
-.zs-group + .zs-group { margin-top: var(--zn-6); }
+.zs-group + .zs-group { margin-top: var(--zn-8); }
 /* Group label: set apart from the description (11.5px/400) by weight, not by caps or tracking. */
 .zs-group-title { margin: 0 0 var(--zn-2); color: var(--zn-text-2); font-size: 12px; font-weight: 600; letter-spacing: -.005em; }
 
-/* Continuous composition: dividers separate, not boxes. */
+/* One rule per group, under its title, and none between the rows.
+   A divider under every row turned a five-setting group into six horizontal lines and the page
+   into a ruled pad; the group's title and the space around it already say where it begins and
+   ends. Rows are separated by their own padding — proximity, not ink. */
 .zs-rows { border-top: 1px solid var(--zn-line); }
 
 /* ── Reveal in place ────────────────────────────────────────────────────────
@@ -358,7 +361,7 @@
   margin: var(--zn-2) 0 0; color: var(--zn-text-3); font-size: 10.5px; line-height: 1.4;
 }
 
-.zs-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--zn-6); padding-block: var(--zn-3); border-bottom: 1px solid var(--zn-line); }
+.zs-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--zn-6); padding-block: var(--zn-3); }
 .zs-row.is-openable { cursor: pointer; }
 .zs-row-copy { min-width: 0; }
 .zs-row-copy b { display: block; color: var(--zn-text); font-size: 13px; font-weight: 500; line-height: 1.35; letter-spacing: -.008em; }
@@ -986,13 +989,16 @@
    wash into place while the form underneath eased open read as two separate things happening to
    the same row. (The border's own 1px is not in the list: width has no in-between worth easing.) */
 .zs-workspace-item {
-  border-bottom: 1px solid var(--zn-line);
+  border-bottom: 1px solid transparent;
   transition: margin var(--zn-collapse) var(--zn-ease),
               padding-inline var(--zn-collapse) var(--zn-ease),
               border-color var(--zn-collapse) var(--zn-ease),
               border-radius var(--zn-collapse) var(--zn-ease),
               background var(--zn-collapse) var(--zn-ease);
 }
+/* With no divider under each row, the hover wash is what marks the row's extent — the same
+   affordance the installed-apps list beside it already uses. */
+.zs-workspace-item:not(.is-editing):hover { background: var(--zn-hover); }
 /* While editing the row becomes a card. Before it was only a full-width background wash: a
    rectangle with no outline that butted against the neighbouring rows and did not say where
    the editable zone started or ended. The 4px inner inset adds to the header's and the
@@ -1122,7 +1128,8 @@
 .zs-ide-options-head { border-bottom: 1px solid var(--zn-line); background: var(--zn-sunken); }
 .zs-ide-options-head b, .zs-ide-toggle-row b, .zs-ide-commands-head b { display: block; color: var(--zn-text); font-size: 11.5px; font-weight: 550; }
 .zs-ide-options-head small, .zs-ide-toggle-row small, .zs-ide-commands-head small { display: block; margin-top: 2px; color: var(--zn-text-3); font-size: 9.5px; line-height: 1.4; }
-.zs-ide-toggle-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--zn-3); border-bottom: 1px solid var(--zn-line); }
+.zs-ide-toggle-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--zn-3); }
+.zs-ide-toggle-row + .zs-ide-commands { border-top: 1px solid var(--zn-line); }
 .zs-ide-commands-head { display: flex; align-items: center; justify-content: space-between; gap: var(--zn-3); }
 .zs-command-row { display: grid; grid-template-columns: minmax(0, 1fr) 28px; gap: 4px; margin-top: var(--zn-2); }
 .zs-command-row input { min-width: 0; height: 30px; padding: 0 var(--zn-2); color: var(--zn-text); border: 1px solid var(--zn-line); border-radius: var(--zn-r-chip); background: var(--zn-sunken); font: 450 10.5px/1 var(--font-ui); outline: 0; }
