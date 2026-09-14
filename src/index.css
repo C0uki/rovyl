@@ -235,10 +235,12 @@
   height: var(--zn-ctl); display: flex; align-items: center; gap: var(--zn-2);
   padding-inline: var(--zn-2) var(--zn-1);
   color: var(--zn-text-3); border: 1px solid var(--zn-line); border-radius: var(--zn-r-control); background: var(--zn-surface);
-  transition: border-color .15s var(--zn-ease);
 }
-.zs-search:focus-within { border-color: var(--zn-line-strong); }
 .zs-search input { min-width: 0; flex: 1; height: 100%; color: var(--zn-text); border: 0; outline: 0; background: transparent; font-size: 12.5px; }
+/* The field is the box, not the input: the input is transparent and square, so the shell-wide
+ * focus halo drew a rectangle across the rounded box around it. The caret carries the focus. */
+.zs-search input:focus,
+.zs-search input:focus-visible { outline: 0; box-shadow: none; }
 .zs-search input::placeholder { color: var(--zn-text-3); }
 .zs-search button { width: 22px; height: 22px; display: grid; place-items: center; padding: 0; color: var(--zn-text-3); border: 0; border-radius: var(--zn-r-chip); background: transparent; cursor: pointer; }
 .zs-search button:hover { color: var(--zn-text); background: var(--zn-raised); }
@@ -889,8 +891,6 @@
 .zs-add-panel { margin-bottom: var(--zn-3); padding: var(--zn-3); border: 1px solid var(--zn-line); border-radius: var(--zn-r-control); background: var(--zn-sunken); }
 .zs-add-panel-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--zn-2); margin-bottom: var(--zn-2); }
 .zs-search.is-manager-search { flex: 1 1 180px; min-width: 140px; background: var(--zn-surface); }
-.zs-search.is-manager-search input:focus,
-.zs-search.is-manager-search input:focus-visible { outline: 0; box-shadow: none; }
 .zs-installed-apps { min-height: 132px; max-height: min(320px, 38vh); overflow-y: auto; padding-right: 2px; scrollbar-gutter: stable; overscroll-behavior: contain; }
 .zs-installed-apps > button {
   width: 100%; min-height: 42px; display: grid; grid-template-columns: 28px minmax(0, 1fr) 20px; align-items: center; gap: var(--zn-2); padding: 5px var(--zn-2);
