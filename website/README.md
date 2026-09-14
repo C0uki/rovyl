@@ -31,8 +31,11 @@ with the icons the app extracted from the Start Menu - so the wheel on the page
 is the wheel on the machine. The same file drives the workspace cards further
 down and the settings panel, which is not a screenshot: `settings.js` rebuilds
 all five sections with the app's own groups, titles, descriptions and
-conditional rows, and controls that actually move. Flipping Rovyl surfaces to
-White repaints the window with the app's light token set; the Appearance sliders
+conditional rows, and controls that actually move - including the panel's own
+language dropdown rather than a native `<select>`, whose popup Chromium draws
+from the OS theme, and the revert arrow that appears beside a row once it leaves
+its default. Flipping Rovyl surfaces to White
+repaints the window with the app's light token set; the Appearance sliders
 drive a live wheel preview for the same reason the app has one, which is that
 radius, icon size, spacing and dimming had no visible effect until the panel was
 closed and the wheel triggered. Nothing persists, and nothing is wired to

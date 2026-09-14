@@ -27,6 +27,20 @@
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
+  /* The seven the app ships, in the app's order, each under its own name for itself.
+     Someone stranded in a UI they cannot read is looking for the row that LOOKS like
+     their language, and "Russian" does not look like Русский. The English name rides
+     along as support, as it does in `src/i18n/languages.ts`. */
+  const LANGUAGES = [
+    ['en', 'English', 'English'],
+    ['es', 'Español', 'Spanish'],
+    ['zh', '简体中文', 'Chinese (Simplified)'],
+    ['pt', 'Português', 'Portuguese'],
+    ['ru', 'Русский', 'Russian'],
+    ['de', 'Deutsch', 'German'],
+    ['ar', 'العربية', 'Arabic'],
+  ];
+
   /* ── State ──────────────────────────────────────────────────────────────
      Seeded from the real config so the panel opens on what is actually set. */
   const S = {
@@ -56,6 +70,9 @@
     taskbarOverlay: false,
     taskbarStart: false,
     taskbarApps: false,
+    taskbarTray: false,
+    taskbarClock: false,
+    taskbarTransparent: false,
 
     performanceMode: false,
     strictOfflineMode: false,
@@ -63,6 +80,37 @@
     gameScope: 'all',
 
     section: 'trigger',
+  };
+
+  /* ── Defaults ───────────────────────────────────────────────────────────
+     What `DEFAULT_UI_CONFIG` holds for the keys the panel offers a revert on.
+     Only these: the app derives the revert from `configKey`, and a row without one
+     (the shortcut, Precision mode, Fullscreen protection) is never offered it. One
+     rule for every row, so a row that stops matching cannot go on claiming it is at
+     its default. */
+  const DEFAULTS = {
+    language: 'en',
+    openAtLogin: true,
+    workspaceSwitchMode: 'picker',
+    shortcutTriggerMode: 'toggle',
+    enableMouseTrigger: true,
+    mouseTriggerButton: 'middle',
+    mouseTriggerMode: 'click',
+    radialMonitor: 'primary',
+    activationThreshold: 60,
+    radialInstantActivate: 'off',
+    radialInstantSensitivity: 'medium',
+    radialInstantDwellMs: 400,
+    appearanceTheme: 'black',
+    menuRadius: 140,
+    iconSize: 64,
+    appSpacing: 10,
+    radialHoverColor: '#FFFFFF',
+    radialSelectionMode: 'angle',
+    alwaysShowAppLabels: false,
+    backdropOpacity: 0.6,
+    taskbarOverlay: false,
+    strictOfflineMode: false,
   };
 
   const SECTIONS = [
@@ -82,9 +130,13 @@
 
   function rowsFor(id) {
     if (id === 'general') return [
+      /* A select, not the segmented control this was while it held two languages:
+         seven buttons are wider than the control column and would wrap into a block
+         of chips no eye can scan. The group name stays the English "Language" on
+         purpose - it is the one string in this panel that has to stay findable by
+         someone who cannot read the rest of it. */
       { group: 'Language', title: 'Language', desc: 'The language of this panel and the wheel.',
-        kind: 'select', key: 'language',
-        choices: [['en', 'English'], ['pt', 'Portugues'], ['es', 'Espanol'], ['de', 'Deutsch'], ['fr', 'Francais'], ['ar', 'Arabic']] },
+        kind: 'select', key: 'language', choices: LANGUAGES },
       { group: 'Startup', title: 'Start with Windows', desc: 'Rovyl is ready as soon as you sign in to Windows.',
         kind: 'bool', key: 'openAtLogin' },
       { group: 'Workspaces', title: 'Workspace switching', desc: 'Use the visual wheel picker or number keys.',
@@ -93,7 +145,7 @@
 
     if (id === 'trigger') return [
       { group: 'Keyboard', title: 'Global shortcut', desc: 'Open the wheel over any application.',
-        kind: 'keys', value: S.globalShortcut },
+        kind: 'open', value: S.globalShortcut },
       { group: 'Keyboard', title: 'Shortcut behavior', desc: 'Press once to open and again to close, or hold it open.',
         kind: 'seg', key: 'shortcutTriggerMode', choices: [['toggle', 'Toggle'], ['hold', 'Hold']] },
       { group: 'Mouse', title: 'Mouse trigger', desc: 'Open Rovyl with a mouse button instead of the keyboard.',
@@ -156,6 +208,15 @@
           kind: 'bool', key: 'taskbarStart' },
         { group: 'Presence', title: 'Keep pinned and open apps', desc: 'The app buttons, and anything else docked beside them.',
           kind: 'bool', key: 'taskbarApps' },
+        { group: 'Presence', title: 'Keep the notification area', desc: 'Tray icons and the chevron that holds the rest.',
+          kind: 'bool', key: 'taskbarTray' },
+        { group: 'Presence', title: 'Keep the clock', desc: 'The time and date at the end of the bar.',
+          kind: 'bool', key: 'taskbarClock' },
+        /* The caveat belongs in the row, not in a release note: this is the only part
+           of Rovyl that changes something about Windows it cannot put back exactly. */
+        { group: 'Presence', title: 'Make the bar transparent',
+          desc: 'The bar itself goes, and whatever you kept above still shows. Windows does not report how the bar was painted before, so its background is restored to the standard look - which can differ slightly from a custom theme.',
+          kind: 'bool', key: 'taskbarTransparent' },
       ] : []),
     ];
 
@@ -176,7 +237,11 @@
         kind: 'action', label: 'Export', icon: 'i-up' },
       { group: 'Data', title: 'Import settings', kind: 'action', label: 'Import', icon: 'i-down' },
       { group: 'Data', title: 'Restore defaults', desc: 'Erase local settings and start over.',
-        kind: 'action', label: 'Restore', danger: true },
+        kind: 'action', label: 'Restore', key: 'reset',
+        confirm: {
+          body: 'Every workspace, shortcut, icon and preference on this PC is deleted and Rovyl restarts. This cannot be undone - use Export settings first if you want a copy.',
+          cta: 'Erase everything',
+        } },
     ];
   }
 
@@ -232,20 +297,7 @@
       return wrap;
     }
 
-    if (row.kind === 'select') {
-      const wrap = el('span', 'select');
-      const select = el('select');
-      select.setAttribute('aria-label', row.title);
-      for (const [value, label] of row.choices) {
-        const option = el('option', '', label);
-        option.value = value;
-        if (S[row.key] === value) option.selected = true;
-        select.append(option);
-      }
-      select.addEventListener('change', () => set(row.key, select.value));
-      wrap.append(select, glyph('i-chevron'));
-      return wrap;
-    }
+    if (row.kind === 'select') return selectControl(row);
 
     if (row.kind === 'color') {
       const wrap = el('span', 'color-control');
@@ -258,23 +310,237 @@
       return wrap;
     }
 
-    if (row.kind === 'keys') {
-      const wrap = el('span', 'kbd-set');
-      for (const key of row.value.split('+')) wrap.append(el('kbd', '', key.trim()));
-      return wrap;
-    }
-
-    if (row.kind === 'action') {
-      const button = el('button', `btn${row.danger ? ' is-danger' : ''}`, row.label);
+    /* A value that opens an editor of its own - the shortcut recorder. The value
+       reads as the row's answer and the chevron says there is more behind it; the
+       whole row is the hit target, which is what `.is-openable` marks. */
+    if (row.kind === 'open') {
+      const button = el('button', 'btn is-value');
       button.type = 'button';
-      if (row.icon) button.prepend(glyph(row.icon));
-      /* Deliberately inert: this is a tour of the panel, not a copy of the app
-         that could write to anything. */
+      button.setAttribute('aria-label', row.title);
+      button.append(el('b', '', row.value), glyph('i-chevron'));
       button.addEventListener('click', () => flash(button));
       return button;
     }
 
+    if (row.kind === 'action') {
+      const button = el('button', 'btn', row.label);
+      button.type = 'button';
+      if (row.icon) button.prepend(glyph(row.icon));
+      /* Deliberately inert: this is a tour of the panel, not a copy of the app
+         that could write to anything. */
+      button.addEventListener('click', () => (row.confirm ? askAgain(row) : flash(button)));
+      return button;
+    }
+
     return null;
+  }
+
+  /* ── Select ─────────────────────────────────────────────────────────────
+     The app's own listbox rather than a native `<select>`, and the reason is the
+     reason it is not one there either: Chromium draws that popup from the OS theme,
+     so it arrives as a grey Windows listbox in the middle of a panel that controls
+     every other pixel of itself.
+
+     Replacing it means owing back what the platform was doing unpaid - arrow keys,
+     Home/End, type-ahead, Escape cancelling against Tab committing, focus back on
+     the trigger, the active option kept in view. For anyone not using a mouse those
+     are not embellishments on a dropdown, they ARE the dropdown. See
+     `SelectSettingControl`. */
+
+  /* Mirrors the CSS, and has to be kept in step with it by hand. These numbers only
+     decide whether the popup flips, so drift shows up as a list that opens downward
+     into a space it does not quite fit, never as a broken layout. */
+  const MENU_ROW = 32;
+  const MENU_PAD = 8;
+  const MENU_MAX = 244;
+  const MENU_MIN_W = 208;
+  const MENU_GAP = 6;
+  const MENU_MARGIN = 8;
+
+  /** The one open listbox, so a click elsewhere - or a re-render - can close it. */
+  let openSelect = null;
+
+  function closeSelect(returnFocus) {
+    if (!openSelect) return;
+    const { list, shade, trigger } = openSelect;
+    openSelect = null;
+    list.remove();
+    shade.remove();
+    trigger.classList.remove('is-open');
+    trigger.setAttribute('aria-expanded', 'false');
+    if (returnFocus) trigger.focus({ preventScroll: true });
+  }
+
+  /* Down unless down does not fit and up fits better - "better", not "at all",
+     because a window short enough to squeeze both should still take the roomier
+     side. Measured against `.win`, which is also what the list is painted on: the
+     row itself sits in a scroller that would clip the list the moment it was taller
+     than the space beneath it. */
+  function place(trigger, count) {
+    const rect = trigger.getBoundingClientRect();
+    const box = win.getBoundingClientRect();
+    const height = Math.min(count * MENU_ROW + MENU_PAD, MENU_MAX);
+    const width = Math.max(rect.width, MENU_MIN_W);
+    const below = box.bottom - rect.bottom - (MENU_GAP + MENU_MARGIN);
+    const above = rect.top - box.top - (MENU_GAP + MENU_MARGIN);
+    const down = below >= height || below >= above;
+    const minLeft = box.left + MENU_MARGIN;
+    const left = Math.min(
+      Math.max(minLeft, rect.right - width),
+      Math.max(minLeft, box.right - width - MENU_MARGIN),
+    );
+    const top = down
+      ? rect.bottom + MENU_GAP
+      : Math.max(box.top + MENU_MARGIN, rect.top - MENU_GAP - height);
+    return { left: left - box.left, top: top - box.top, width, down };
+  }
+
+  function selectControl(row) {
+    const wrap = el('span', 'sel');
+    const choices = row.choices;
+    const selectedIndex = Math.max(0, choices.findIndex(([value]) => value === S[row.key]));
+    const chosen = choices[selectedIndex];
+
+    const trigger = el('button', 'sel-trigger');
+    trigger.type = 'button';
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.setAttribute('aria-label', row.title);
+    trigger.append(
+      el('span', '', chosen[2] && chosen[2] !== chosen[1] ? chosen[1] + ' \u00b7 ' + chosen[2] : chosen[1]),
+      glyph('i-chevron'),
+    );
+    wrap.append(trigger);
+
+    /** Which option the keyboard is ON, which is not which option is CHOSEN. Arrowing
+        must not commit: on this row that would retranslate the whole panel five times
+        on the way down to Deutsch. */
+    let active = selectedIndex;
+    const options = [];
+    const typed = { buffer: '', at: 0 };
+
+    const shade = el('div', 'sel-shade');
+    shade.setAttribute('role', 'presentation');
+    shade.addEventListener('mousedown', () => closeSelect(false));
+
+    const list = el('div', 'sel-list');
+    list.id = row.key + '-listbox';
+    list.setAttribute('role', 'listbox');
+    list.tabIndex = -1;
+    list.setAttribute('aria-label', row.title);
+
+    const paint = () => {
+      options.forEach((node, i) => {
+        node.classList.toggle('is-active', i === active);
+        if (i === active) node.scrollIntoView({ block: 'nearest' });
+      });
+      list.setAttribute('aria-activedescendant', options[active] ? options[active].id : '');
+    };
+
+    const commit = (index) => {
+      closeSelect(false);
+      set(row.key, choices[index][0]);
+    };
+
+    choices.forEach(([value, label, hint], i) => {
+      const option = el('div', 'sel-option');
+      option.id = row.key + '-option-' + i;
+      option.setAttribute('role', 'option');
+      option.setAttribute('aria-selected', String(i === selectedIndex));
+      option.append(el('b', '', label));
+      if (hint && hint !== label) option.append(el('small', '', hint));
+      if (i === selectedIndex) option.append(glyph('i-check'));
+      /** Pointer moves the highlight; it does not move focus off the listbox. */
+      option.addEventListener('mousemove', () => { active = i; paint(); });
+      option.addEventListener('click', () => commit(i));
+      options.push(option);
+      list.append(option);
+    });
+
+    /* Type-ahead: the affordance people use without knowing they use it. `d` jumps to
+       Deutsch. A single character CYCLES, so the scan starts one past the current row;
+       a longer buffer REFINES, so it includes it - `d`,`e` is still aiming at the
+       Deutsch that `d` found. The buffer only accumulates while typing stays brisk.
+       Endonym or English name alike: someone hunting for German may type either. */
+    const jump = (key) => {
+      const now = Date.now();
+      typed.buffer = now - typed.at > 900 ? key : typed.buffer + key;
+      typed.at = now;
+      const query = typed.buffer.toLowerCase();
+      const from = query.length === 1 ? active + 1 : active;
+      for (let step = 0; step < choices.length; step += 1) {
+        const i = (from + step) % choices.length;
+        const [, label, hint] = choices[i];
+        if (label.toLowerCase().startsWith(query) || (hint || '').toLowerCase().startsWith(query)) {
+          active = i;
+          paint();
+          return;
+        }
+      }
+    };
+
+    list.addEventListener('keydown', (event) => {
+      const step = (delta) => {
+        event.preventDefault();
+        active = clamp(active + delta, 0, choices.length - 1);
+        paint();
+      };
+      switch (event.key) {
+        case 'ArrowDown': return step(1);
+        case 'ArrowUp': return step(-1);
+        case 'PageDown': return step(5);
+        case 'PageUp': return step(-5);
+        case 'Home': event.preventDefault(); active = 0; return paint();
+        case 'End': event.preventDefault(); active = choices.length - 1; return paint();
+        case 'Enter':
+        case ' ':
+          event.preventDefault();
+          return commit(active);
+        /** Stopped, or the page's own key handling hears an Escape meant for the list. */
+        case 'Escape':
+          event.preventDefault();
+          event.stopPropagation();
+          return closeSelect(true);
+        /** Tab commits everywhere else in this panel; leaving it a cancel here would surprise. */
+        case 'Tab':
+          return commit(active);
+        default:
+          if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
+            event.preventDefault();
+            jump(event.key);
+          }
+      }
+    });
+
+    const open = () => {
+      const at = place(trigger, choices.length);
+      list.classList.toggle('is-up', !at.down);
+      list.style.left = at.left + 'px';
+      list.style.top = at.top + 'px';
+      list.style.width = at.width + 'px';
+      win.append(shade, list);
+      trigger.classList.add('is-open');
+      trigger.setAttribute('aria-expanded', 'true');
+      openSelect = { list, shade, trigger, count: choices.length };
+      /** Every opening starts from what is selected, not from wherever the last visit
+          was left. */
+      active = selectedIndex;
+      paint();
+      list.focus({ preventScroll: true });
+    };
+
+    /* `mousedown`, not `click`, and the shade depends on it: on `click`, pressing the
+       trigger to dismiss would close via the shade, unmount it, and let the release
+       land on the now-uncovered trigger and reopen the list. */
+    trigger.addEventListener('mousedown', () => (openSelect ? closeSelect(false) : open()));
+    trigger.addEventListener('keydown', (event) => {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        open();
+      }
+    });
+
+    return wrap;
   }
 
   let flashTimer = 0;
@@ -284,6 +550,36 @@
     flashTimer = window.setTimeout(() => button.classList.remove('is-flash'), 420);
   }
 
+  /** Which action row is mid-confirm, so a re-render can put it back the way it was. */
+  let confirming = null;
+  function askAgain(row) {
+    confirming = row.key;
+    render();
+  }
+
+  /* The revert column comes before the control and ALWAYS exists, even empty: it is
+     what keeps the switch in the same place before and after the first click. The
+     button inside it appears only once the row has moved off its default - one rule
+     for every row, derived here rather than declared per row, so a row that stops
+     matching cannot go on claiming it is at its default. */
+  function revertSlot(row) {
+    const slot = el('span', 'win-revert-slot');
+    const key = row.key;
+    if (!key || !(key in DEFAULTS) || S[key] === DEFAULTS[key]) return slot;
+
+    const button = el('button', 'win-revert');
+    button.type = 'button';
+    button.setAttribute('aria-label', `Reset ${row.title} to default`);
+    button.title = 'Reset to default';
+    button.append(glyph('i-revert'));
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      set(key, DEFAULTS[key]);
+    });
+    slot.append(button);
+    return slot;
+  }
+
   function rangeRow(row) {
     const line = el('div', 'win-row is-slider');
     const copy = el('span', 'win-copy');
@@ -291,6 +587,9 @@
     if (row.desc) copy.append(el('small', '', row.desc));
 
     const readout = el('span', 'readout', row.format(S[row.key]));
+    const control = el('span', 'win-control');
+    control.append(revertSlot(row), readout);
+
     const slider = el('span', 'slider');
     const input = el('input');
     input.type = 'range';
@@ -307,9 +606,15 @@
       paintPreview();
     });
     input.addEventListener('change', render);
-    slider.append(input);
+    /* The ends of the scale, flanking the track: a bare track says how far the thumb
+       has come but not what it is a fraction of. */
+    slider.append(
+      el('span', 'slider-bounds', row.format(row.min)),
+      input,
+      el('span', 'slider-bounds', row.format(row.max)),
+    );
 
-    line.append(copy, readout, slider);
+    line.append(copy, control, slider);
     return line;
   }
 
@@ -494,6 +799,9 @@
   /* ── Render ─────────────────────────────────────────────────────────────── */
 
   function render() {
+    /* The listbox is painted on `.win`, not inside the row, so a re-render would
+       otherwise leave it floating over a trigger that no longer exists. */
+    closeSelect(false);
     win.dataset.znTheme = S.appearanceTheme;
 
     nav.replaceChildren();
@@ -504,6 +812,7 @@
       button.prepend(glyph(section.icon));
       button.addEventListener('click', () => {
         S.section = section.id;
+        confirming = null;
         render();
         main.scrollTop = 0;
       });
@@ -544,18 +853,64 @@
         rows.append(rangeRow(row));
         continue;
       }
-      const line = el('div', 'win-row');
+      const line = el('div', `win-row${row.kind === 'open' ? ' is-openable' : ''}`);
       const copy = el('span', 'win-copy');
       copy.append(el('b', '', row.title));
       if (row.desc) copy.append(el('small', '', row.desc));
       line.append(copy);
-      const node = control(row);
-      if (node) line.append(node);
+
+      const control_ = el('span', 'win-control');
+      control_.addEventListener('click', (event) => event.stopPropagation());
+      control_.append(revertSlot(row));
+      /* Mid-confirm the row swaps its one button for the pair, so the press that
+         cannot be undone is never the press already under the pointer. */
+      if (row.confirm && confirming === row.key) {
+        const actions = el('span', 'confirm-actions');
+        const cancel = el('button', 'btn', 'Cancel');
+        cancel.type = 'button';
+        cancel.addEventListener('click', () => { confirming = null; render(); });
+        const go = el('button', 'btn is-danger', row.confirm.cta);
+        go.type = 'button';
+        go.addEventListener('click', () => { confirming = null; render(); });
+        actions.append(cancel, go);
+        control_.append(actions);
+      } else {
+        const node = control(row);
+        if (node) control_.append(node);
+      }
+      line.append(control_);
+
+      /* Under the row, not over it: what it says is the reason the second press
+         exists. Red only on the button that does it - a red row would read as an
+         error, and nothing has gone wrong yet. */
+      if (row.confirm && confirming === row.key) {
+        const note = el('p', 'confirm-body');
+        note.setAttribute('role', 'alert');
+        note.append(glyph('i-alert'), el('span', '', row.confirm.body));
+        line.append(note);
+        /* Restore defaults is the last row of the section, so the reason for the
+           second press opens below the fold unless the pane goes to meet it. */
+        requestAnimationFrame(() => note.scrollIntoView({ block: 'nearest' }));
+      }
+
+      if (row.kind === 'open') {
+        line.addEventListener('click', () => flash(line.querySelector('.btn')));
+      }
       rows.append(line);
     }
 
     if (previewLayer) paintPreview();
   }
+
+  /* The list is placed against `.win` while the trigger lives in `.win-main`, so a
+     scroll moves one and not the other. Re-measured rather than remembered. */
+  main.addEventListener('scroll', () => {
+    if (!openSelect) return;
+    const at = place(openSelect.trigger, openSelect.count);
+    openSelect.list.classList.toggle('is-up', !at.down);
+    openSelect.list.style.left = at.left + 'px';
+    openSelect.list.style.top = at.top + 'px';
+  });
 
   const version = document.getElementById('setVersion');
   if (version && LOOK.version) version.textContent = LOOK.version;

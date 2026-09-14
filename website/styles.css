@@ -765,7 +765,7 @@ a { color: inherit; text-decoration: none; }
 }
 
 .win {
-  overflow: hidden;
+  position: relative; overflow: hidden;
   color: var(--zn-text);
   transition: background .2s var(--zn-ease);
   border-radius: var(--zn-r-window);
@@ -848,7 +848,14 @@ a { color: inherit; text-decoration: none; }
 .win-head { margin-bottom: var(--zn-6); }
 .win-head h3 { font: 600 19px/1.15 var(--font-display); letter-spacing: -.022em; }
 .win-head p { margin-top: var(--zn-1); color: var(--zn-text-2); font-size: 12.5px; }
-.win-group { margin-bottom: var(--zn-2); color: var(--zn-text-2); font-size: 12px; font-weight: 600; }
+/* Group label: set apart from the description (11.5px/450) by weight, not by caps
+   or tracking - `.zs-group-title`. */
+.win-group { margin-bottom: var(--zn-2); color: var(--zn-text-2); font-size: 12px; font-weight: 600; letter-spacing: -.005em; }
+/* The panel wraps each group in a `.zs-group` and spaces the boxes apart. Here the
+   page is flat - label, rows, label - so the gap is asked of the label that follows
+   a block of rows. Without it every heading but the first sits on the divider above
+   it and the section reads as one undivided list. */
+.win-rows + .win-group { margin-top: var(--zn-6); }
 
 /* Continuous composition: dividers separate, not boxes. */
 .win-rows { border-top: 1px solid var(--zn-line); }
@@ -858,17 +865,27 @@ a { color: inherit; text-decoration: none; }
   padding-block: var(--zn-3);
   border-bottom: 1px solid var(--zn-line);
 }
-.win-copy b { display: block; font-size: 13px; font-weight: 500; letter-spacing: -.008em; }
+.win-row.is-openable { cursor: pointer; }
+.win-copy { min-width: 0; }
+.win-copy b { display: block; font-size: 13px; font-weight: 500; line-height: 1.35; letter-spacing: -.008em; }
 .win-copy small { display: block; margin-top: 3px; color: var(--zn-text-2); font-size: 11.5px; line-height: 1.45; }
 
-.kbd-set { display: flex; gap: 5px; }
-.kbd-set kbd {
-  min-width: 30px; padding: 6px 8px;
-  color: var(--zn-text);
-  border: 1px solid var(--zn-line-strong); border-radius: var(--zn-r-chip);
-  background: var(--zn-raised);
-  font: 500 11px/1 var(--font-display); text-align: center;
+.win-control { display: flex; align-items: center; justify-content: flex-end; gap: var(--zn-2); }
+/* The revert column comes before the control and ALWAYS exists, even empty: it is
+   what keeps the switch in the same place before and after the first click. A row
+   that only reserved it once changed would push its own control sideways. */
+.win-revert-slot { flex: none; display: grid; place-items: center; width: var(--zn-ctl-sm); height: var(--zn-ctl-sm); }
+/* Dim until the row is hovered: it marks a row that has been changed, and a bright
+   icon beside every changed setting reads as a warning about the change. */
+.win-revert {
+  width: var(--zn-ctl-sm); height: var(--zn-ctl-sm); display: grid; place-items: center; padding: 0;
+  color: var(--zn-text-3); border: 0; border-radius: var(--zn-r-chip); background: transparent;
+  cursor: pointer; opacity: .45;
+  transition: opacity .15s var(--zn-ease), color .15s var(--zn-ease), background .15s var(--zn-ease);
 }
+.win-revert .ico { width: 13px; height: 13px; }
+.win-row:hover .win-revert, .win-revert:focus-visible { opacity: 1; }
+.win-revert:hover { color: var(--zn-text); background: var(--zn-raised); }
 
 .toggle {
   position: relative; flex: none; width: 34px; height: 19px; padding: 0;
@@ -903,7 +920,10 @@ a { color: inherit; text-decoration: none; }
 
 .win-row.is-slider { row-gap: var(--zn-3); }
 .readout { color: var(--zn-text); font: 500 12.5px/1 var(--font-display); font-variant-numeric: tabular-nums; }
-.slider { grid-column: 1 / -1; display: flex; align-items: center; }
+/* The ends of the scale, stated. A bare track says how far the thumb has come
+   but not what it is a fraction of. */
+.slider-bounds { flex: none; color: var(--zn-text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.slider { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--zn-3); }
 /* The field's vertical slack is larger than the track's: it is the thumb that
    overhangs the line, and without that space it drops off the middle of it. */
 .slider input[type="range"] {
@@ -925,23 +945,71 @@ a { color: inherit; text-decoration: none; }
 .slider input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.12); }
 .slider input[type="range"]:active::-webkit-slider-thumb { transform: scale(.94); }
 
-/* Native select: the platform gives type-ahead, arrow keys and screen-reader
-   semantics for free, and the closed state is all CSS can reach anyway. */
-.select { position: relative; display: inline-flex; align-items: center; }
-.select select {
-  height: 30px; max-width: 100%;
-  padding-block: 0; padding-inline: var(--zn-3) calc(var(--zn-3) + 16px);
-  appearance: none; -webkit-appearance: none;
+/* ── Select (trigger in the row, listbox beneath it) ──────────────────────
+   Not a native `<select>`. Chromium draws that popup from the OS theme, so it lands
+   as a grey Windows listbox in the middle of a panel that controls every other
+   pixel of itself - which is exactly why the app stopped using one. Same reasoning
+   here, same markup: a trigger that reads as `.btn.is-value`, and a list that is
+   the panel's own surface. See `SelectSettingControl`. */
+.sel { position: relative; display: inline-flex; align-items: center; min-width: 0; }
+.sel-trigger {
+  max-width: 100%; height: var(--zn-ctl);
+  display: inline-flex; align-items: center; gap: var(--zn-2);
+  padding-inline: var(--zn-3);
   color: var(--zn-text); border: 1px solid var(--zn-line); border-radius: var(--zn-r-control);
   background: var(--zn-sunken); cursor: pointer;
-  font: 450 12px/1 var(--font-ui); text-overflow: ellipsis;
+  font: 450 11.5px/1.2 var(--font-ui); white-space: nowrap;
+  transition: color .15s var(--zn-ease), background .15s var(--zn-ease), box-shadow .15s var(--zn-ease);
 }
-.select select:hover { box-shadow: inset 0 0 0 1px var(--zn-line-strong); }
-.select > svg {
-  position: absolute; inset-inline-end: var(--zn-2);
-  width: 13px; height: 13px; color: var(--zn-text-3);
-  pointer-events: none; transform: rotate(90deg);
+/* The chosen language carries the emphasis, the way `.btn.is-value b` does. */
+.sel-trigger > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--zn-text); font-weight: 500; }
+.sel-trigger > .ico { flex: none; width: 13px; height: 13px; color: var(--zn-text-3); transform: rotate(90deg); transition: rotate .18s var(--zn-ease), color .15s var(--zn-ease); }
+.sel-trigger:hover { background: var(--zn-hover); box-shadow: inset 0 0 0 1px var(--zn-line-strong); }
+.sel-trigger:hover > .ico { color: var(--zn-text-2); }
+.sel-trigger:active { background: var(--zn-pressed); }
+/* Open is a state worth showing on the trigger too: the chevron turns to point at
+   its own list. */
+.sel-trigger.is-open { background: var(--zn-raised); box-shadow: inset 0 0 0 1px var(--zn-line-strong); }
+.sel-trigger.is-open > .ico { rotate: 180deg; color: var(--zn-text-2); }
+
+/* Transparent, covering the window, and only there to catch the click that
+   dismisses - closing the popup should never double as clicking the switch that
+   happened to sit underneath it. */
+.sel-shade { position: absolute; inset: 0; z-index: 60; }
+/* Painted on `.win` rather than in the row, because the row lives inside a scroller
+   that would clip the list the moment it was taller than the space beneath it. The
+   coordinates are measured against `.win` for the same reason. */
+.sel-list {
+  position: absolute; z-index: 61;
+  max-height: 244px; overflow-y: auto; overscroll-behavior: contain;
+  padding: var(--zn-1);
+  border-radius: var(--zn-r-panel); background: var(--zn-surface);
+  box-shadow: inset 0 0 0 1px var(--zn-line-strong), var(--zn-elev);
+  scrollbar-width: thin; scrollbar-color: var(--zn-line-strong) transparent;
+  animation: sel-in .14s var(--zn-ease);
 }
+.sel-list::-webkit-scrollbar { width: 6px; }
+.sel-list::-webkit-scrollbar-thumb { background: var(--zn-line-strong); border-radius: 999px; }
+@keyframes sel-in { from { opacity: 0; transform: translateY(-4px); } }
+.sel-list.is-up { animation-name: sel-in-up; }
+@keyframes sel-in-up { from { opacity: 0; transform: translateY(4px); } }
+.sel-list:focus, .sel-list:focus-visible { outline: none; }
+.sel-option {
+  display: flex; align-items: center; gap: var(--zn-2);
+  min-height: var(--zn-ctl); padding: var(--zn-2) var(--zn-3);
+  border-radius: var(--zn-r-chip); cursor: pointer; color: var(--zn-text-2);
+}
+.sel-option > b { flex: none; color: var(--zn-text); font: 500 11.5px/1.2 var(--font-ui); }
+/* The English name is support, not a second label: it recedes, and it is the part
+   that gives way when the row runs out of width. */
+.sel-option > small {
+  min-width: 0; flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--zn-text-3); font: 450 11px/1.2 var(--font-ui);
+}
+.sel-option > .ico { flex: none; width: 13px; height: 13px; margin-inline-start: auto; color: var(--zn-text); }
+.sel-option.is-active { background: var(--zn-raised); }
+@media (prefers-reduced-motion: reduce) { .sel-list { animation: none; } }
 
 .color-control {
   height: var(--zn-ctl); display: inline-flex; align-items: center; gap: 6px;
@@ -965,6 +1033,23 @@ a { color: inherit; text-decoration: none; }
    nothing has gone wrong yet. */
 .btn.is-danger { color: #ef7c7c; border-color: rgba(239, 124, 124, .45); background: rgba(239, 124, 124, .09); }
 .btn.is-danger:hover { color: #ff9090; border-color: rgba(239, 124, 124, .7); background: rgba(239, 124, 124, .16); }
+[data-zn-theme="white"] .btn.is-danger { color: #a52020; border-color: rgba(165, 32, 32, .4); background: rgba(165, 32, 32, .07); }
+[data-zn-theme="white"] .btn.is-danger:hover { color: #8c1a1a; border-color: rgba(165, 32, 32, .6); background: rgba(165, 32, 32, .13); }
+.confirm-actions { display: flex; align-items: center; gap: var(--zn-2); }
+/* Under the row, not over it: what it says is the reason the second press exists. */
+.confirm-body {
+  grid-column: 1 / -1;
+  display: grid; grid-template-columns: 13px minmax(0, 1fr); align-items: start; gap: var(--zn-2);
+  margin: var(--zn-3) 0 0; padding: var(--zn-2) var(--zn-3);
+  border: 1px solid rgba(239, 124, 124, .28); border-radius: var(--zn-r-chip);
+  background: rgba(239, 124, 124, .07); color: rgba(244, 168, 168, .95);
+  font-size: 10.5px; line-height: 1.5;
+}
+.confirm-body .ico { width: 13px; height: 13px; margin-top: 1px; color: rgba(244, 168, 168, .9); }
+[data-zn-theme="white"] .confirm-body {
+  border-color: rgba(165, 32, 32, .3); background: rgba(165, 32, 32, .07); color: rgba(124, 24, 24, .95);
+}
+[data-zn-theme="white"] .confirm-body .ico { color: rgba(165, 32, 32, .9); }
 /* Nothing in this panel writes anything, so a press answers and stops there. */
 .btn.is-flash { color: var(--zn-on-solid); border-color: var(--zn-solid); background: var(--zn-solid); }
 .btn.is-flash svg { color: currentColor; }
@@ -1044,9 +1129,19 @@ a { color: inherit; text-decoration: none; }
    the fold: dimming is the last row of the section, and a preview that has
    scrolled away by then is a preview for the first two settings only. */
 .wheel-preview {
-  position: sticky; top: 0; z-index: 5;
+  position: sticky; z-index: 5;
   margin-bottom: var(--zn-5); padding-bottom: var(--zn-2);
   background: var(--zn-bg);
+  /* Pinned over the pane's top padding, not under it. Sticky measures `top`
+     from the scroller's CONTENT box, so a plain `top: 0` parks the preview
+     24px down and leaves a strip above it for the rows to scroll through -
+     which showed as a group heading floating over the preview and the row
+     below it sliced through the middle of its own title. The negative offset
+     reaches up over that padding and the matching one on the margin keeps the
+     unpinned position exactly where it was. */
+  top: calc(var(--zn-6) * -1);
+  margin-top: calc(var(--zn-6) * -1);
+  padding-top: var(--zn-6);
 }
 .wheel-stage {
   position: relative; overflow: hidden;
@@ -1178,7 +1273,13 @@ a { color: inherit; text-decoration: none; }
   .win-nav li { white-space: nowrap; }
   .win-main { padding: var(--zn-6) var(--zn-5); }
   .win-row { grid-template-columns: minmax(0, 1fr); gap: var(--zn-3); }
-  .win-row > :not(.win-copy) { justify-self: start; }
+  /* Stacked: the control drops under the copy and starts at the left edge with
+     it. The slider and the confirm note are full-width blocks and stay so. */
+  .win-row > :not(.win-copy, .slider, .confirm-body) { justify-self: start; }
+  /* Stacked, the control leads and the revert slot follows it: reserved ahead of
+     a left-aligned control, the empty slot would read as an indent. */
+  .win-control { justify-content: flex-start; }
+  .win-revert-slot { order: 1; }
   .stage { aspect-ratio: 4 / 3; max-height: none; }
 }
 
