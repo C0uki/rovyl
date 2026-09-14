@@ -3188,6 +3188,19 @@ function WorkspaceManager({
                   onSelect={(iconName) => updateWorkspace(workspaceIndex, { pickerIconName: iconName })}
                 />
               </div>
+              {/**
+                * Picking writes straight through, so once a glyph was clicked the modal had
+                * nothing left to do — and no way out but the X in its corner, which reads as
+                * discarding rather than confirming. The footer names what is set and ends the
+                * choice on a button, the way every other editor here does.
+                */}
+              <footer>
+                <span className="zs-icon-modal-pick">
+                  <WorkspaceIcon size={16} strokeWidth={1.7} />
+                  <b>{workspace.pickerIconName?.trim() || 'Layers'}</b>
+                </span>
+                <button type="button" className="zs-btn is-primary" onClick={() => setIsIconPickerOpen(false)}>Done</button>
+              </footer>
             </motion.div>
           </motion.div>
         )}
