@@ -1212,6 +1212,54 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
     if (element.scrollTop !== scrollTopRef.current) element.scrollTop = scrollTopRef.current;
   });
 
+  /**
+   * The other half: the window growing under the panel, with React none the wiser.
+   *
+   * Rewriting after every commit only works while React is the one who notices, and the wheel is
+   * not. Opening it over Settings takes the HWND from the panel's 880x600 to the whole monitor —
+   * `[RadialOpen] ... hiding before resize (mode=windowed, panel=true)`, bounds 1920x1080, in the
+   * diagnostic log — and that happens in the main process, frames before `open-menu` reaches the
+   * renderer. For those frames the panel is still `inset-0` of a window that is now the screen:
+   * this list is handed ~1040px of height instead of ~560, the section stops needing to scroll at
+   * all, and Chromium clamps `scrollTop` to zero. No commit ran, so nothing put it back — and the
+   * clamp arrives as an ordinary scroll event, so the zero was saved over the position it had just
+   * destroyed. Appearance came back from the wheel at the top, every time.
+   *
+   * A `ResizeObserver` watches what actually changed: this box's own height. It is delivered after
+   * layout and before paint, so the rewrite is never seen, and it does not care which route resized
+   * the window — a box back at a height that can hold the offset gets the offset back.
+   */
+  const ignoreScrollRef = useRef(false);
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      /** No box yet: nothing to put back, and `scrollTop` would be dropped on the floor anyway. */
+      if (element.clientHeight === 0) return;
+      /**
+       * Shut the gate for a frame.
+       *
+       * A clamp is not reported in the frame it happens: the event is queued during that layout and
+       * fires in the NEXT frame's scroll steps — which run before anything of ours does, so by the
+       * time the handler could tell it apart it has already saved the zero. A flag cleared from a
+       * `requestAnimationFrame` lifts exactly one frame later, after those scroll steps, which is
+       * the one window in which no scroll report can be trusted.
+       */
+      ignoreScrollRef.current = true;
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        ignoreScrollRef.current = false;
+      });
+      if (element.scrollTop !== scrollTopRef.current) element.scrollTop = scrollTopRef.current;
+    });
+    observer.observe(element);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [isOpen]);
+
   /** Search walks every category — searching only the open one forced a guess about where a setting lives. */
   const results = useMemo(() => {
     const matches = (item: SettingItem) =>
@@ -1314,6 +1362,8 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
                * recording exactly what this pair of refs exists to undo.
                */
               if (event.currentTarget.clientHeight === 0) return;
+              /** A resize is still settling: see `ignoreScrollRef`. None of this is the user's doing. */
+              if (ignoreScrollRef.current) return;
               scrollTopRef.current = event.currentTarget.scrollTop;
             }}
           >
