@@ -225,6 +225,13 @@ export interface UIConfig {
    */
   radialInstantSensitivity?: 'low' | 'medium' | 'high';
   openAtLogin?: boolean; // New: Start app at login
+  /**
+   * Whether the global shortcut opens the wheel at all.
+   *
+   * Optional, and read as `!== false`: every config written before this key existed had a working
+   * keyboard trigger, and absence has to keep meaning that rather than silently taking it away.
+   */
+  enableKeyboardTrigger?: boolean;
   enableMouseTrigger: boolean;
   /** click: an MMB click opens and leaves the radial open; hold: holding opens, releasing runs the selection. */
   mouseTriggerMode?: 'click' | 'hold';

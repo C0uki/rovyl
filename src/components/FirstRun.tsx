@@ -31,6 +31,9 @@ export const FirstRun: React.FC<{
   const shortcut = (config.globalShortcut || 'Alt+Z').split('+').filter(Boolean);
   const mouseButton = MOUSE_BUTTON_NAMES[config.mouseTriggerButton ?? 'middle'] ?? 'the mouse wheel button';
   const byHold = config.mouseTriggerMode === 'hold';
+  /** Both triggers can be turned off independently now, so neither point is guaranteed a place. */
+  const byKeyboard = config.enableKeyboardTrigger !== false;
+  const byMouse = config.enableMouseTrigger !== false;
   const workspaces = config.workspaces?.length ?? 0;
   const handsFree = config.radialInstantActivate === 'dwell';
   const byDirection = handsFree || config.radialSelectionMode !== 'cursor';
@@ -45,28 +48,31 @@ export const FirstRun: React.FC<{
         </header>
 
         <ol className="zs-firstrun-points">
-          <li>
-            <span className="zs-firstrun-mark" aria-hidden><Keyboard size={15} strokeWidth={1.9} /></span>
-            <div>
-              <b>Open the wheel</b>
-              <p>
-                Press{' '}
-                {shortcut.map((key, index) => (
-                  <React.Fragment key={key}>
-                    {index > 0 && <span className="zs-firstrun-plus">+</span>}
-                    <kbd>{key}</kbd>
-                  </React.Fragment>
-                ))}{' '}
-                anywhere in Windows — over any application, without leaving it.
-              </p>
-            </div>
-          </li>
+          {byKeyboard && (
+            <li>
+              <span className="zs-firstrun-mark" aria-hidden><Keyboard size={15} strokeWidth={1.9} /></span>
+              <div>
+                <b>Open the wheel</b>
+                <p>
+                  Press{' '}
+                  {shortcut.map((key, index) => (
+                    <React.Fragment key={key}>
+                      {index > 0 && <span className="zs-firstrun-plus">+</span>}
+                      <kbd>{key}</kbd>
+                    </React.Fragment>
+                  ))}{' '}
+                  anywhere in Windows — over any application, without leaving it.
+                </p>
+              </div>
+            </li>
+          )}
 
-          {config.enableMouseTrigger !== false && (
+          {byMouse && (
             <li>
               <span className="zs-firstrun-mark" aria-hidden><Mouse size={15} strokeWidth={1.9} /></span>
               <div>
-                <b>Or use the mouse</b>
+                {/* "Or" only makes sense as the second way in. */}
+                <b>{byKeyboard ? 'Or use the mouse' : 'Open the wheel'}</b>
                 <p>
                   {byHold
                     ? `Hold ${mouseButton} to open the wheel, and let go on a target to run it.`

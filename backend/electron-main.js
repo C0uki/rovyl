@@ -3216,6 +3216,7 @@ app.whenReady().then(async () => {
   let currentSettings = {
     globalShortcut: "Alt+Z",
     shortcutTriggerMode: "toggle",
+    enableKeyboardTrigger: true,
     enableMouseTrigger: true,
     mouseTriggerMode: "click",
     mouseTriggerButton: "middle",
@@ -3262,6 +3263,9 @@ app.whenReady().then(async () => {
       currentSettings.shortcutTriggerMode = ui.shortcutTriggerMode;
       if (cachedRadialFlags) cachedRadialFlags.shortcutTriggerMode = ui.shortcutTriggerMode;
     }
+    if (typeof ui.enableKeyboardTrigger === "boolean") {
+      currentSettings.enableKeyboardTrigger = ui.enableKeyboardTrigger;
+    }
     if (typeof ui.enableMouseTrigger === "boolean") {
       currentSettings.enableMouseTrigger = ui.enableMouseTrigger;
     }
@@ -3293,6 +3297,7 @@ app.whenReady().then(async () => {
       currentSettings = { ...currentSettings, ...newSettings };
       const slim = {
         globalShortcut: currentSettings.globalShortcut || "Alt+Z",
+        enableKeyboardTrigger: currentSettings.enableKeyboardTrigger !== false,
         enableMouseTrigger: currentSettings.enableMouseTrigger !== false,
         mouseTriggerMode:
           currentSettings.mouseTriggerMode === "hold" ? "hold" : "click",
@@ -4702,7 +4707,10 @@ app.whenReady().then(async () => {
   }
 
   const shortcutRegistrationSignature = () => {
-    const entries = [String(currentSettings.globalShortcut || "Alt+Z")];
+    const entries = [
+      currentSettings.enableKeyboardTrigger === false ? "off" : "on",
+      String(currentSettings.globalShortcut || "Alt+Z"),
+    ];
     const visit = (apps) => {
       if (!Array.isArray(apps)) return;
       for (const item of apps) {
@@ -4764,52 +4772,65 @@ app.whenReady().then(async () => {
       }
     };
 
-    const mouseSpec = parseMouseShortcut(shortcut);
-    if (mouseSpec) {
-      ensureRadialMouseBlocker();
-      writeRadialMouseBlocker(`SHORTCUT_TRIGGER ${mouseSpec.vk} ${mouseSpec.modMask}`);
-      diagLog(
-        `[Shortcut] Registered mouse global shortcut '${shortcut}' (VK ${mouseSpec.vk}, ModMask ${mouseSpec.modMask})`,
-      );
-    } else {
+    /**
+     * With the keyboard trigger off, the wheel's own shortcut is not claimed at all — the point is
+     * to hand the combination back to whatever else wants it. App shortcuts below are a separate
+     * feature and keep working; this switch is about the wheel.
+     *
+     * `triggerRadialShortcut` is left assigned on purpose: the tray and IPC call it directly, and
+     * those are not the trigger being turned off.
+     */
+    if (currentSettings.enableKeyboardTrigger === false) {
       writeRadialMouseBlocker("SHORTCUT_TRIGGER OFF");
-
-      // MIGRATION / NORMALIZATION: 'Win' is recorded as 'Super' now, but old settings might have 'Win'
-      if (shortcut.includes("Win")) {
-        shortcut = shortcut.replace(/Win/g, "Super");
+      diagLog("[Shortcut] Keyboard trigger disabled; the wheel's shortcut is not registered.");
+    } else {
+      const mouseSpec = parseMouseShortcut(shortcut);
+      if (mouseSpec) {
+        ensureRadialMouseBlocker();
+        writeRadialMouseBlocker(`SHORTCUT_TRIGGER ${mouseSpec.vk} ${mouseSpec.modMask}`);
         diagLog(
-          `[Shortcut] Normalized 'Win' to 'Super' in shortcut: ${shortcut}`,
+          `[Shortcut] Registered mouse global shortcut '${shortcut}' (VK ${mouseSpec.vk}, ModMask ${mouseSpec.modMask})`,
         );
-      }
+      } else {
+        writeRadialMouseBlocker("SHORTCUT_TRIGGER OFF");
 
-      try {
-        const registered = globalShortcut.register(shortcut, () =>
-          openRadialFromShortcut(shortcut),
-        );
-
-        if (registered) {
-          diagLog(`Global shortcut '${shortcut}' registered successfully.`);
-        } else {
+        // MIGRATION / NORMALIZATION: 'Win' is recorded as 'Super' now, but old settings might have 'Win'
+        if (shortcut.includes("Win")) {
+          shortcut = shortcut.replace(/Win/g, "Super");
           diagLog(
-            `[Shortcut] Global shortcut '${shortcut}' not registered; it is likely already in use.${altZOverlayHint(shortcut)}`,
+            `[Shortcut] Normalized 'Win' to 'Super' in shortcut: ${shortcut}`,
           );
-          /** With no global mouse monitor, always guarantee a safe way to open the radial. */
-          const fallbackShortcut = "Alt+Shift+F9";
-          if (
-            shortcutCompactKey(shortcut) !== shortcutCompactKey(fallbackShortcut) &&
-            globalShortcut.register(fallbackShortcut, () =>
-              openRadialFromShortcut(fallbackShortcut),
-            )
-          ) {
-            diagLog(
-              `[Shortcut] Fallback '${fallbackShortcut}' registered because '${shortcut}' is taken.`,
-            );
-          }
         }
-      } catch (e) {
-        diagLog(
-          `[Shortcut] Global shortcut '${shortcut}' registration failed: ${e.message}${altZOverlayHint(shortcut)}`,
-        );
+
+        try {
+          const registered = globalShortcut.register(shortcut, () =>
+            openRadialFromShortcut(shortcut),
+          );
+
+          if (registered) {
+            diagLog(`Global shortcut '${shortcut}' registered successfully.`);
+          } else {
+            diagLog(
+              `[Shortcut] Global shortcut '${shortcut}' not registered; it is likely already in use.${altZOverlayHint(shortcut)}`,
+            );
+            /** With no global mouse monitor, always guarantee a safe way to open the radial. */
+            const fallbackShortcut = "Alt+Shift+F9";
+            if (
+              shortcutCompactKey(shortcut) !== shortcutCompactKey(fallbackShortcut) &&
+              globalShortcut.register(fallbackShortcut, () =>
+                openRadialFromShortcut(fallbackShortcut),
+              )
+            ) {
+              diagLog(
+                `[Shortcut] Fallback '${fallbackShortcut}' registered because '${shortcut}' is taken.`,
+              );
+            }
+          }
+        } catch (e) {
+          diagLog(
+            `[Shortcut] Global shortcut '${shortcut}' registration failed: ${e.message}${altZOverlayHint(shortcut)}`,
+          );
+        }
       }
     }
 
@@ -4915,6 +4936,7 @@ app.whenReady().then(async () => {
     if (!settings || typeof settings !== "object") return;
     const patch = {};
     if (typeof settings.globalShortcut === "string") patch.globalShortcut = settings.globalShortcut;
+    if (typeof settings.enableKeyboardTrigger === "boolean") patch.enableKeyboardTrigger = settings.enableKeyboardTrigger;
     if (typeof settings.enableMouseTrigger === "boolean") patch.enableMouseTrigger = settings.enableMouseTrigger;
     if (settings.mouseTriggerMode === "click" || settings.mouseTriggerMode === "hold") {
       patch.mouseTriggerMode = settings.mouseTriggerMode;
@@ -4946,7 +4968,7 @@ app.whenReady().then(async () => {
       syncMouseHookState();
     }
 
-    if (patch.globalShortcut) {
+    if (patch.globalShortcut || patch.enableKeyboardTrigger !== undefined) {
       registerGlobalShortcut();
     }
 

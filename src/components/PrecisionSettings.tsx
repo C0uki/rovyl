@@ -813,6 +813,35 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
       value: format(raw), configKey,
     });
 
+    const keyboardTriggerOn = config.enableKeyboardTrigger !== false;
+    const mouseTriggerOn = config.enableMouseTrigger !== false;
+
+    /**
+     * Turning off the last trigger would leave no way in, so the other one comes on in the same
+     * change — the pair behaves like a choice of route rather than two switches that can both be
+     * down.
+     *
+     * The press is never refused. Someone switching the last trigger off is not making a mistake,
+     * they are saying "not this one", and answering that with a toast leaves them to work out the
+     * other half themselves; doing it for them is the answer they meant. Both keys move in ONE
+     * `setConfig` so the two rows can never render a frame with nothing enabled.
+     */
+    const toggleTrigger = (key: 'enableKeyboardTrigger' | 'enableMouseTrigger') => {
+      const other = key === 'enableKeyboardTrigger' ? 'enableMouseTrigger' : 'enableKeyboardTrigger';
+      const turningOff = key === 'enableKeyboardTrigger' ? keyboardTriggerOn : mouseTriggerOn;
+      const otherOn = key === 'enableKeyboardTrigger' ? mouseTriggerOn : keyboardTriggerOn;
+      if (turningOff && !otherOn) {
+        setConfig((current) => ({ ...current, [key]: false, [other]: true }));
+        showToast(
+          key === 'enableKeyboardTrigger'
+            ? 'Switched to the mouse trigger'
+            : 'Switched to the keyboard trigger',
+        );
+        return;
+      }
+      update(key, !turningOff);
+    };
+
     return {
       general: [
         {
@@ -862,42 +891,71 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
         },
       ],
       trigger: [
+        /**
+         * Each way in is a switch that owns its own settings, and the settings only exist while
+         * the switch is on.
+         *
+         * What stood here was one switch, on the mouse group alone, described as "instead of the
+         * keyboard" — which was not true (both worked at once, and always had) and left the
+         * keyboard side looking like the thing you could not turn off. Two symmetrical switches
+         * say the real shape: two independent triggers, either of which can be off.
+         *
+         * The trigger's own rows are the ones that collapse. Position and Hands-free below are
+         * about the wheel once it is open, however it got there, so they stay put.
+         */
         {
-          key: 'shortcut', group: 'Keyboard', title: 'Global shortcut',
-          description: 'Open the wheel over any application.',
-          kind: 'open', value: config.globalShortcut, onOpen: () => setEditor({ kind: 'shortcut' }),
+          key: 'keyboard', configKey: 'enableKeyboardTrigger', group: 'Keyboard',
+          title: 'Enable keyboard trigger',
+          description: 'Open the wheel with a keyboard shortcut.',
+          kind: 'bool', enabled: keyboardTriggerOn,
+          onToggle: () => toggleTrigger('enableKeyboardTrigger'),
         },
+        ...(keyboardTriggerOn
+          ? ([
+              {
+                key: 'shortcut', group: 'Keyboard', title: 'Global shortcut',
+                description: 'Open the wheel over any application.',
+                kind: 'open', value: config.globalShortcut, onOpen: () => setEditor({ kind: 'shortcut' }),
+              },
+              {
+                key: 'shortcutMode', configKey: 'shortcutTriggerMode' as const, group: 'Keyboard',
+                title: t('shortcutBehavior'),
+                description: t('shortcutBehaviorDesc'),
+                kind: 'segmented', current: config.shortcutTriggerMode ?? 'toggle',
+                choices: [{ value: 'toggle', label: t('shortcutToggle') }, { value: 'hold', label: t('shortcutHold') }],
+                onChange: (value) => update('shortcutTriggerMode', value as UIConfig['shortcutTriggerMode']),
+              },
+            ] as SettingItem[])
+          : []),
         {
-          key: 'shortcutMode', configKey: 'shortcutTriggerMode', group: 'Keyboard', title: t('shortcutBehavior'),
-          description: t('shortcutBehaviorDesc'),
-          kind: 'segmented', current: config.shortcutTriggerMode ?? 'toggle',
-          choices: [{ value: 'toggle', label: t('shortcutToggle') }, { value: 'hold', label: t('shortcutHold') }],
-          onChange: (value) => update('shortcutTriggerMode', value as UIConfig['shortcutTriggerMode']),
+          key: 'mouse', configKey: 'enableMouseTrigger', group: 'Mouse',
+          title: 'Enable mouse trigger',
+          description: 'Open the wheel with a mouse button.',
+          kind: 'bool', enabled: mouseTriggerOn,
+          onToggle: () => toggleTrigger('enableMouseTrigger'),
         },
-        {
-          key: 'mouse', configKey: 'enableMouseTrigger', group: 'Mouse', title: 'Mouse trigger',
-          description: 'Open Rovyl with a mouse button instead of the keyboard.',
-          kind: 'bool', enabled: config.enableMouseTrigger,
-          onToggle: () => update('enableMouseTrigger', !config.enableMouseTrigger),
-        },
-        {
-          key: 'mouseButton', configKey: 'mouseTriggerButton', group: 'Mouse', title: 'Trigger button',
-          description: 'Side buttons are usually free; left and right stay with Windows.',
-          kind: 'segmented', current: config.mouseTriggerButton ?? 'middle',
-          choices: [
-            { value: 'middle', label: 'Wheel' },
-            { value: 'x1', label: 'Back' },
-            { value: 'x2', label: 'Forward' },
-          ],
-          onChange: (value) => update('mouseTriggerButton', value as UIConfig['mouseTriggerButton']),
-        },
-        {
-          key: 'mouseMode', configKey: 'mouseTriggerMode', group: 'Mouse', title: 'Gesture behavior',
-          description: 'Click keeps the wheel open; hold runs the selection on release.',
-          kind: 'segmented', current: config.mouseTriggerMode ?? 'click',
-          choices: [{ value: 'click', label: 'Click' }, { value: 'hold', label: 'Hold' }],
-          onChange: (value) => update('mouseTriggerMode', value as UIConfig['mouseTriggerMode']),
-        },
+        ...(mouseTriggerOn
+          ? ([
+              {
+                key: 'mouseButton', configKey: 'mouseTriggerButton' as const, group: 'Mouse', title: 'Trigger button',
+                description: 'Side buttons are usually free; left and right stay with Windows.',
+                kind: 'segmented', current: config.mouseTriggerButton ?? 'middle',
+                choices: [
+                  { value: 'middle', label: 'Wheel' },
+                  { value: 'x1', label: 'Back' },
+                  { value: 'x2', label: 'Forward' },
+                ],
+                onChange: (value) => update('mouseTriggerButton', value as UIConfig['mouseTriggerButton']),
+              },
+              {
+                key: 'mouseMode', configKey: 'mouseTriggerMode' as const, group: 'Mouse', title: 'Gesture behavior',
+                description: 'Click keeps the wheel open; hold runs the selection on release.',
+                kind: 'segmented', current: config.mouseTriggerMode ?? 'click',
+                choices: [{ value: 'click', label: 'Click' }, { value: 'hold', label: 'Hold' }],
+                onChange: (value) => update('mouseTriggerMode', value as UIConfig['mouseTriggerMode']),
+              },
+            ] as SettingItem[])
+          : []),
         {
           key: 'radialMonitor', configKey: 'radialMonitor', group: 'Position', title: 'Monitor',
           /**
@@ -1188,7 +1246,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
         },
       ],
     };
-  }, [config, gameMode, taskbar, taskbarElementsReachable, theme, apps, update, updateRow, canUpdate, onReset, deleteWorkspace, reorderWorkspaces]);
+  }, [config, gameMode, taskbar, taskbarElementsReachable, theme, apps, update, setConfig, updateRow, canUpdate, onReset, deleteWorkspace, reorderWorkspaces]);
 
   const trimmedQuery = query.trim().toLowerCase();
   const activeMeta = sectionsList.find((section) => section.id === sectionId) || SECTIONS[0];
