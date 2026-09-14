@@ -1016,17 +1016,30 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
            * changes nothing is worse than a disabled one.
            */
           description:
-            config.radialInstantActivate === 'dwell'
-              ? 'Launch without clicking is on, so the wheel always aims by direction — each item owns an equal slice of the screen.'
-              : config.radialSelectionMode === 'cursor'
-                ? 'Only the icon under the pointer highlights. Release away from every icon to cancel.'
-                : 'Aim by direction: the slice you point toward highlights from anywhere on screen.',
+            config.radialSelectionMode === 'area'
+              ? 'The wheel is cut into equal wedges — one per shortcut — and the one you point at fills up. Click anywhere inside it.'
+              : config.radialInstantActivate === 'dwell'
+                ? 'Launch without clicking is on, so the wheel always aims by direction — each item owns an equal slice of the screen.'
+                : config.radialSelectionMode === 'cursor'
+                  ? 'Only the icon under the pointer highlights. Release away from every icon to cancel.'
+                  : 'Aim by direction: the slice you point toward highlights from anywhere on screen.',
           kind: 'segmented',
+          /**
+           * Area is Direction with the boundaries drawn — same maths, same muscle memory — so the
+           * two sit next to each other and Pointer, which is the one that actually targets
+           * something else, sits at the end.
+           */
           choices: [
             { value: 'angle', label: 'Direction' },
+            { value: 'area', label: 'Area' },
             { value: 'cursor', label: 'Pointer' },
           ],
-          current: config.radialSelectionMode === 'cursor' ? 'cursor' : 'angle',
+          current:
+            config.radialSelectionMode === 'cursor'
+              ? 'cursor'
+              : config.radialSelectionMode === 'area'
+                ? 'area'
+                : 'angle',
           onChange: (value) => update('radialSelectionMode', value as UIConfig['radialSelectionMode']),
         },
         {

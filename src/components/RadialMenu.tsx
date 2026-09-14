@@ -14,6 +14,18 @@ import {
 } from '../utils/workspaceRadial';
 import { clampDwellMs, directionCommitPx } from '../constants/radialDwell';
 import { radialScrimGradient } from '../utils/radialScrim';
+import {
+  annularSectorPath,
+  polarPoint,
+  sectorBoundsDeg,
+  sectorGradientStops,
+  sectorIndexForDelta,
+  SECTOR_EDGE_ALPHA,
+  SECTOR_FILL_ALPHA,
+  SECTOR_SEAM_ALPHA,
+  SECTOR_SEAM_FALLOFF_SCALE,
+  SECTOR_SEAM_REACH,
+} from '../utils/radialSectors';
 
 // PERF FIX #3: Module-level weather cache — persists across menu open/close cycles
 // Prevents a new HTTP fetch on every menu open; refreshes only after 10 minutes or location change
@@ -458,6 +470,192 @@ function getReadableForeground(background: string): '#000000' | '#FFFFFF' {
 function normalizeHoverColor(value?: string): string {
   return /^#[0-9a-f]{6}$/i.test(value ?? '') ? value!.toUpperCase() : '#FFFFFF';
 }
+
+/**
+ * Area targeting, drawn.
+ *
+ * By direction the wheel has always given each item an equal share of the screen — the maths in
+ * `resolveAimAtPoint` say so — but nothing on screen did. The user was told "point at it" and left
+ * to infer where one target stopped owning the pointer and the next began, which is the kind of
+ * boundary a hand only learns by being wrong about it. This paints that division: the seams are
+ * there from the moment the wheel opens, and the wedge being aimed at lights up evenly from the
+ * hub out past its icon, then fades before the rim — so it reads as a SECTION that carries on off
+ * the edge of the drawing, which is the truth, rather than as a shape whose outer arc is a limit.
+ *
+ * It draws nothing that takes clicks: the confirmation is the window's `mouseup`, which resolves
+ * the aim from the point itself. A wedge that swallowed the event would be a second opinion about
+ * where the target is, and the wheel is only ever allowed one.
+ */
+const RadialSectors = React.memo(({
+  count,
+  activeIndex,
+  radiusInner,
+  radiusOuter,
+  hoverColor,
+  falloffRadius,
+  visible,
+  dimmed,
+}: {
+  count: number;
+  /** `null` while the aim is in the dead zone — every wedge goes back to being a boundary only. */
+  activeIndex: number | null;
+  radiusInner: number;
+  radiusOuter: number;
+  hoverColor: string;
+  /**
+   * Where the hold ends and the dissolve begins — the scrim pool's edge, comfortably past the icon
+   * ring. Everything inside it is the lit section; everything outside is the wedge saying goodbye.
+   */
+  falloffRadius: number;
+  visible: boolean;
+  /** During the launch echo the wheel's furniture gets out of the way of what was confirmed. */
+  dimmed: boolean;
+}) => {
+  const gradientId = React.useId().replace(/:/g, '');
+  /**
+   * The ring has to have a ring's shape. A large activation zone on a small wheel can push the dead
+   * zone past where the wedges are allowed to end, and an annulus with its radii the wrong way
+   * round does not draw a smaller ring — it draws an inside-out path. There is no area to show in
+   * that configuration, so nothing is shown.
+   */
+  const drawable = radiusOuter > radiusInner + 8;
+  const size = Math.max(radiusOuter * 2, 2);
+
+  /**
+   * Paths are rebuilt only when the geometry changes, never on a hover: the highlight is an
+   * `opacity` swap on wedges that are already in the tree, which the compositor animates without
+   * touching the main thread. Rebuilding the `d` strings on every slice crossed was the one way to
+   * make a full-screen SVG cost something.
+   */
+  const wedges = React.useMemo(() => {
+    return Array.from({ length: count }, (_, index) => {
+      const { startDeg, endDeg } = sectorBoundsDeg(index, count);
+      return annularSectorPath(radiusInner, radiusOuter, startDeg, endDeg);
+    });
+  }, [count, radiusInner, radiusOuter]);
+
+  /** The boundaries themselves: one line per seam, drawn once and never touched again. */
+  const dividers = React.useMemo(() => {
+    if (count < 2) return [] as { x1: number; y1: number; x2: number; y2: number }[];
+    const seamEnd = radiusOuter * SECTOR_SEAM_REACH;
+    return Array.from({ length: count }, (_, index) => {
+      /** One seam per wedge — each item's opening edge; the closing one is its neighbour's. */
+      const { startDeg } = sectorBoundsDeg(index, count);
+      const near = polarPoint(radiusOuter, radiusInner, startDeg);
+      const far = polarPoint(radiusOuter, seamEnd, startDeg);
+      return { x1: near.x, y1: near.y, x2: far.x, y2: far.y };
+    });
+  }, [count, radiusInner, radiusOuter]);
+
+  /**
+   * Fractions of the gradient's radius — every radius here is in pixels, and the gradient wants
+   * them normalised against its own.
+   */
+  const innerStop = radiusInner / radiusOuter;
+  const falloffStop = Math.min(0.9, Math.max(innerStop + 0.02, falloffRadius / radiusOuter));
+  /** The seams fade sooner than the wedges, and over their own shorter run. */
+  const seamFalloffStop = Math.min(
+    0.9,
+    Math.max(innerStop + 0.02, (falloffRadius * SECTOR_SEAM_FALLOFF_SCALE) / (radiusOuter * SECTOR_SEAM_REACH)),
+  );
+  const seamInnerStop = innerStop / SECTOR_SEAM_REACH;
+
+  if (!drawable) return null;
+
+  const gradient = (id: string, color: string, stops: { offset: number; opacity: number }[]) => (
+    <radialGradient id={id} cx="50%" cy="50%" r="50%">
+      {stops.map((stop, index) => (
+        <stop
+          key={index}
+          offset={stop.offset.toFixed(4)}
+          stopColor={color}
+          stopOpacity={stop.opacity.toFixed(4)}
+        />
+      ))}
+    </radialGradient>
+  );
+
+  return (
+    <svg
+      className="zn-radial-sectors absolute top-0 left-0 pointer-events-none"
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      shapeRendering="geometricPrecision"
+      style={{
+        transform: 'translate(-50%, -50%)',
+        ['--zn-op' as string]: visible ? (dimmed ? 0 : 1) : 0,
+      }}
+      aria-hidden
+    >
+      <defs>
+        {/*
+          Three gradients, one shape: hold through the section, then dissolve to nothing at the rim.
+          `sectorGradientStops` owns the curve and the sampling; the pairs below are only how bright
+          each of the three starts out. See `src/utils/radialSectors.ts`.
+        */}
+        {gradient(
+          `${gradientId}-beam`,
+          hoverColor,
+          sectorGradientStops(innerStop, falloffStop, SECTOR_FILL_ALPHA[0], SECTOR_FILL_ALPHA[1]),
+        )}
+        {/*
+          The wedge's two sides, lit. The fill alone made a soft blob — a lit AREA needs the angle
+          it occupies to be visible, and that angle is carried entirely by its edges.
+        */}
+        {gradient(
+          `${gradientId}-edge`,
+          hoverColor,
+          sectorGradientStops(innerStop, falloffStop, SECTOR_EDGE_ALPHA[0], SECTOR_EDGE_ALPHA[1]),
+        )}
+        {/*
+          The seams, white rather than the hover colour: they belong to the wheel and not to the
+          selection, and they are on before anything is aimed at. Their gradient is normalised
+          against their own shorter reach, so it still lands on zero exactly at their ends.
+        */}
+        {gradient(
+          `${gradientId}-seam`,
+          '#FFFFFF',
+          sectorGradientStops(seamInnerStop, seamFalloffStop, SECTOR_SEAM_ALPHA[0], SECTOR_SEAM_ALPHA[1]),
+        )}
+      </defs>
+
+      {wedges.map((path, index) => (
+        <path
+          key={index}
+          className="zn-radial-sector"
+          d={path}
+          fill={`url(#${gradientId}-beam)`}
+          stroke={`url(#${gradientId}-edge)`}
+          strokeWidth={1.25}
+          vectorEffect="non-scaling-stroke"
+          style={{ opacity: index === activeIndex ? 1 : 0 }}
+        />
+      ))}
+
+      {/*
+        The seams, and they are on from the moment the wheel opens — that is the whole point of the
+        mode. Faint, though: they answer "where does this one end", which is a question the user
+        asks once and never again, and furniture that had to shout would be worse than none.
+
+        Drawn AFTER the wedges so the lit one does not paint over its own boundaries.
+      */}
+      {dividers.map((line, index) => (
+        <line
+          key={index}
+          x1={line.x1}
+          y1={line.y1}
+          x2={line.x2}
+          y2={line.y2}
+          stroke={`url(#${gradientId}-seam)`}
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+        />
+      ))}
+    </svg>
+  );
+});
+RadialSectors.displayName = 'RadialSectors';
 
 const RadialMenuItem = React.memo(({
   app,
@@ -1395,8 +1593,20 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
    * a pointer to hit it with. Keeping it here made high sensitivity indistinguishable from medium,
    * because nothing would light before the hub's ~60px.
    */
-  const aimGateRef = useRef(deadZoneRadius);
-  aimGateRef.current = directionMode ? directionCommitRef.current : deadZoneRadius;
+  const aimGate = directionMode ? directionCommitRef.current : deadZoneRadius;
+  const aimGateRef = useRef(aimGate);
+  aimGateRef.current = aimGate;
+
+  /**
+   * Area targeting: the same aim as by direction, with the division painted (see `RadialSectors`).
+   *
+   * It survives `radialInstantActivate: 'dwell'` rather than being replaced by it. That mode
+   * already aims by direction, so the wedges describe it exactly — and with the pointer hidden
+   * there is even less on screen saying where one target's share of the plane ends, which is the
+   * whole thing this draws. Pointer targeting is the one mode it cannot mean: there the target is
+   * the icon and not the sector, so a wedge would promise an area that does not launch anything.
+   */
+  const areaMode = config.radialSelectionMode === 'area';
 
   /**
    * Confirmation diagnostics. It lands in the persistence log (`rovyl-persistence.log`) and says,
@@ -1642,12 +1852,13 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
       }
       if (currentLevelApps.length === 0) return { isCenter: false, index: null };
 
+      /**
+       * The same function the wedges are drawn from (`src/utils/radialSectors.ts`). It used to be
+       * this arithmetic written out here, and the drawing would have been a second copy of it —
+       * which is the one bug a launcher cannot afford: lighting one target and opening another.
+       */
       const sliceAngle = 360 / currentLevelApps.length;
-
-      let angle = Math.atan2(deltaY, deltaX) * (180 / Math.PI) + 90;
-      if (angle < 0) angle += 360;
-      const index = Math.floor(((angle + sliceAngle / 2) % 360) / sliceAngle);
-      const candidateIndex = index >= 0 && index < currentLevelApps.length ? index : null;
+      const candidateIndex = sectorIndexForDelta(deltaX, deltaY, currentLevelApps.length);
 
       /**
        * Cursor mode: the target is the icon UNDER the pointer, not the direction it lies in.
@@ -2847,6 +3058,36 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
   );
 
   /**
+   * Where the area wedges stop: as far as they can go, which is the nearest edge of the window.
+   *
+   * The nearest, not the farthest corner, and that is the whole constraint. The wedge's gradient
+   * is built to reach exactly zero at this radius; anything drawn past the window is cut, and a cut
+   * through alpha that is not yet zero is a straight line across the desktop — the one thing the
+   * scrim itself is carefully built never to produce. An inscribed circle is the largest shape
+   * whose own fade is guaranteed to finish inside the frame.
+   *
+   * They used to stop at `backdropRadius`, where the scrim's pool starts fading. That kept the
+   * highlight tidy but short: it hugged the wheel, and the fade had to happen in the last thirty
+   * pixels, which is a visible edge no matter how it is shaped. Reaching the frame gives the fade
+   * hundreds of pixels to disappear in — and it is also the honest picture, because the pointer
+   * really can be anywhere on that side of the screen and still launch the item.
+   *
+   * The floor covers the pathological case — a wheel clamped hard against a corner. There the
+   * tiles are already at the edge and the wedges are not what is wrong.
+   */
+  const sectorOuterRadius = Math.max(
+    Math.round(actualMenuRadius + actualIconSize * 0.6),
+    Math.floor(
+      Math.min(
+        position.x,
+        position.y,
+        viewportSize.width - position.x,
+        viewportSize.height - position.y,
+      ),
+    ),
+  );
+
+  /**
    * The window is `transparent: true` over the desktop, so `backdrop-filter` has nothing to sample
    * on Windows — we only composite alpha. Two design consequences:
    *
@@ -2960,6 +3201,34 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
             className="fixed z-[10] pointer-events-none"
             tabIndex={-1}
           >
+
+            {/*
+              Area targeting: the wheel's plane, cut into equal shares and drawn.
+
+              First child of the container so it paints UNDER the hub (z-20) and the tiles: it is
+              the ground the wheel stands on, not a layer over it. It reaches the nearest edge of
+              the window and holds full strength only as far as `backdropRadius` — the scrim pool's
+              own edge — so the lit section sits around the wheel and the rest of the wedge is the
+              long dissolve out to the frame.
+            */}
+            {areaMode && currentLevelApps.length > 0 && (
+              <RadialSectors
+                count={currentLevelApps.length}
+                /** During the echo the confirmed target holds the highlight, exactly as the tiles do. */
+                activeIndex={launchEcho ? launchEcho.index : activeIndex}
+                /**
+                 * Where the wedge starts owning the pointer is `aimGate` — inside it, the aim is the
+                 * hub. Floored at the hub's own radius so a high sensitivity (which pulls the gate in
+                 * to ~18px) does not draw the seams across the middle button.
+                 */
+                radiusInner={Math.max(aimGate, hubDiameter / 2 + 8)}
+                radiusOuter={sectorOuterRadius}
+                falloffRadius={backdropRadius}
+                hoverColor={radialHoverColor}
+                visible={isOpen && !isExiting && bloom}
+                dimmed={centerFired}
+              />
+            )}
 
             {/*
               Centre target: a transparent SQUARE over the hub, slightly larger than it.

@@ -193,8 +193,12 @@ export interface UIConfig {
    * How the wheel decides the target.
    * 'angle'  — direction from the center; the slice lights up even with the cursor far away (default).
    * 'cursor' — only lights up when the pointer is right over the icon.
+   * 'area'   — the same maths as 'angle', with the division DRAWN: the wheel is cut into as many
+   *            equal wedges as there are items and the one being pointed at fills with a gradient.
+   *            Same targeting, so a config can move between the two without relearning the aim —
+   *            what changes is that the boundaries stop being something to infer.
    */
-  radialSelectionMode?: 'angle' | 'cursor';
+  radialSelectionMode?: 'angle' | 'cursor' | 'area';
   /**
    * Launch without a click: holding the aim on a target for `radialInstantDwellMs` launches it.
    *

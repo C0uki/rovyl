@@ -346,6 +346,9 @@
   border: 2px solid rgba(255,255,255,.32);
 }
 .zs-wheel-slot { position: absolute; left: 0; top: 0; }
+/* Area targeting's wedges, centred on the layer's origin like every other piece of the preview.
+   It sits at the bottom of the stack: the wedges are the ground the wheel stands on. */
+.zs-wheel-sectors { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); }
 .zs-wheel-tile {
   display: grid; place-items: center; border-radius: 18px; border: 1px solid;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.08), 0 0 0 1px rgba(0,0,0,.5), 0 8px 22px rgba(0,0,0,.42);
@@ -1579,6 +1582,34 @@
   .zn-radial-label,
   .zn-radial-pill,
   .zn-radial-scrim { transition-duration: .01ms !important; }
+}
+
+/* ── Area targeting: the wheel's plane, cut into equal shares ───────────────
+   The layer fades with the wheel (`--zn-op`, like every other piece of radial
+   furniture); the wedge under the aim is a plain `opacity` swap on a path that
+   is already in the tree. Both are compositor-only, which is what lets a
+   full-screen SVG sit under a wheel that has to answer the mouse every frame.
+
+   The crossfade is deliberately slower than the tile's highlight: the wedge is
+   a large, soft area and a fast swap on that much surface reads as a flicker,
+   where the same duration on a 60px tile reads as crisp. */
+.zn-radial-sectors {
+  opacity: var(--zn-op, 1);
+  transition: opacity var(--zn-dur-op, 175ms) ease-out;
+  will-change: opacity;
+}
+
+.zn-radial-sector {
+  transition: opacity 130ms ease-out;
+}
+
+.zn-radial--fast .zn-radial-sectors { --zn-dur-op: 90ms; }
+.zn-radial--fast .zn-radial-sector { transition-duration: 70ms; }
+.zn-radial--closing .zn-radial-sectors { --zn-dur-op: 100ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .zn-radial-sectors,
+  .zn-radial-sector { transition-duration: .01ms !important; }
 }
 
 /* ══ Launch echo ════════════════════════════════════════════════════════════

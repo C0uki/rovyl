@@ -1,5 +1,16 @@
 import React, { useMemo } from 'react';
 import { computeRadialLayout, getLabelPlacement } from './RadialMenu';
+import {
+  annularSectorPath,
+  polarPoint,
+  sectorBoundsDeg,
+  sectorGradientStops,
+  SECTOR_EDGE_ALPHA,
+  SECTOR_FILL_ALPHA,
+  SECTOR_SEAM_ALPHA,
+  SECTOR_SEAM_FALLOFF_SCALE,
+  SECTOR_SEAM_REACH,
+} from '../utils/radialSectors';
 import { radialScrimGradient } from '../utils/radialScrim';
 import { getIcon } from '../iconMap';
 import { SmartIcon } from './SmartIcon';
@@ -88,6 +99,17 @@ export const WheelPreview: React.FC<{ config: UIConfig; apps: AppItem[] }> = ({ 
     ) & ~1;
 
   /**
+   * The area wedges' radii — `RadialMenu`'s, not new ones. Inner is the dead zone, floored at the
+   * hub so the seams never cross the middle button; outer is `backdropRadius`, where the scrim's
+   * pool starts fading.
+   */
+  const sectorInnerRadius = Math.max(
+    Math.max(config.activationThreshold ?? 60, Math.ceil((hubDiameter / 2) * 1.06 * Math.SQRT2) + 4),
+    hubDiameter / 2 + 8,
+  );
+  const sectorOuterRadiusFull = Math.ceil(actualMenuRadius + actualIconSize * 0.75 + Math.max(18, minGap));
+
+  /**
    * Half the box the wheel needs at full size — ring, plus the tile that straddles it, plus the
    * labels when they are on.
    *
@@ -129,6 +151,49 @@ export const WheelPreview: React.FC<{ config: UIConfig; apps: AppItem[] }> = ({ 
   );
 
   /**
+   * The wedges, capped to the stage.
+   *
+   * The real wheel caps them at its window's edge for one reason — the gradient has to reach zero
+   * before anything cuts it, or the wedge ends in a straight line. Here the thing that cuts is the
+   * stage's own frame, and its short side is the height, so that is what the radius is measured
+   * against. The stops below are then placed as fractions of whichever radius won.
+   */
+  const sectorOuterRadius = Math.max(
+    Math.round(actualMenuRadius + actualIconSize * 0.6),
+    Math.floor(STAGE_HEIGHT / 2 / Math.max(scale, 0.01)),
+  );
+  const sectorInnerStop = sectorInnerRadius / sectorOuterRadius;
+  /**
+   * Where the hold ends — the pool's edge, as on the wheel, but never past 55% of the stage.
+   *
+   * On the wheel the dissolve gets hundreds of pixels, because the wedge runs to the edge of the
+   * radial's window. The stage is 188px tall and crops rather than rescales, so that much room does
+   * not exist here at any setting. Given the choice between a preview that is proportionally exact
+   * and one that SHOWS what the mode does, this takes the second: the ceiling buys back enough of
+   * the stage for the fade to read as a fade. A preview whose wedge ended in a hard ring would be
+   * advertising the defect this mode was tuned to avoid.
+   */
+  const sectorFalloffStop = Math.min(
+    0.55,
+    Math.max(sectorInnerStop + 0.02, sectorOuterRadiusFull / sectorOuterRadius),
+  );
+  const sectorSeamInnerStop = sectorInnerStop / SECTOR_SEAM_REACH;
+  const sectorSeamFalloffStop = Math.min(
+    0.9,
+    Math.max(
+      sectorSeamInnerStop + 0.02,
+      (sectorOuterRadiusFull * SECTOR_SEAM_FALLOFF_SCALE) / (sectorOuterRadius * SECTOR_SEAM_REACH),
+    ),
+  );
+  const sectorGradient = (id: string, color: string, stops: { offset: number; opacity: number }[]) => (
+    <radialGradient id={id} cx="50%" cy="50%" r="50%">
+      {stops.map((stop, index) => (
+        <stop key={index} offset={stop.offset.toFixed(4)} stopColor={color} stopOpacity={stop.opacity.toFixed(4)} />
+      ))}
+    </radialGradient>
+  );
+
+  /**
    * The dimming is drawn on the stage rather than inside the scaled layer, with the radius scaled
    * to match: a gradient inside a `scale()` would shrink its own falloff and report the setting as
    * gentler than it is.
@@ -161,6 +226,60 @@ export const WheelPreview: React.FC<{ config: UIConfig; apps: AppItem[] }> = ({ 
         />
 
         <div className="zs-wheel-layer" style={{ transform: `translate(-50%, -50%) scale(${scale})` }}>
+          {/*
+            Area targeting, in the preview for the same reason the hover colour is: it is a setting
+            on this page, and a segmented control that changes nothing visible is indistinguishable
+            from one that is broken. The geometry is the wheel's own — `annularSectorPath`, the same
+            radii — so what is shown here is the division that will actually be drawn.
+          */}
+          {config.radialSelectionMode === 'area' && sectorOuterRadius > sectorInnerRadius + 8 && (
+            <svg
+              className="zs-wheel-sectors"
+              width={sectorOuterRadius * 2}
+              height={sectorOuterRadius * 2}
+              viewBox={`0 0 ${sectorOuterRadius * 2} ${sectorOuterRadius * 2}`}
+              shapeRendering="geometricPrecision"
+            >
+              {/* The wheel's own three gradients — fill, lit edges, seams. See `RadialSectors`. */}
+              <defs>
+                {sectorGradient('zs-wheel-beam', hoverColor,
+                  sectorGradientStops(sectorInnerStop, sectorFalloffStop, SECTOR_FILL_ALPHA[0], SECTOR_FILL_ALPHA[1]))}
+                {sectorGradient('zs-wheel-beam-edge', hoverColor,
+                  sectorGradientStops(sectorInnerStop, sectorFalloffStop, SECTOR_EDGE_ALPHA[0], SECTOR_EDGE_ALPHA[1]))}
+                {sectorGradient('zs-wheel-beam-seam', '#FFFFFF',
+                  sectorGradientStops(sectorSeamInnerStop, sectorSeamFalloffStop, SECTOR_SEAM_ALPHA[0], SECTOR_SEAM_ALPHA[1]))}
+              </defs>
+              {items.map((item, index) => {
+                const { startDeg, endDeg } = sectorBoundsDeg(index, items.length);
+                const near = polarPoint(sectorOuterRadius, sectorInnerRadius, startDeg);
+                /** Seams stop short of the wedges — see `SECTOR_SEAM_REACH`. */
+                const far = polarPoint(sectorOuterRadius, sectorOuterRadius * SECTOR_SEAM_REACH, startDeg);
+                return (
+                  <React.Fragment key={item.id}>
+                    <path
+                      d={annularSectorPath(sectorInnerRadius, sectorOuterRadius, startDeg, endDeg)}
+                      fill="url(#zs-wheel-beam)"
+                      stroke="url(#zs-wheel-beam-edge)"
+                      strokeWidth={1.25}
+                      vectorEffect="non-scaling-stroke"
+                      /** The same lit slice as the tiles': the preview shows one aim, not a live one. */
+                      opacity={index === 0 ? 1 : 0}
+                    />
+                    <line
+                      x1={near.x}
+                      y1={near.y}
+                      x2={far.x}
+                      y2={far.y}
+                      stroke="url(#zs-wheel-beam-seam)"
+                      strokeWidth={1}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  </React.Fragment>
+                );
+              })}
+            </svg>
+          )}
+
           <div
             className="zs-wheel-hub"
             style={{ width: hubDiameter, height: hubDiameter, borderColor: `${hoverColor}55` }}
