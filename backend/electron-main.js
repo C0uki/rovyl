@@ -4922,7 +4922,11 @@ app.whenReady().then(async () => {
   };
 
   let workspaceShortcutsMenuOpen = false;
-  /** When false (picker mode), 1–9 are not registered while the radial is open. */
+  /**
+   * When false, 1–9 are not registered while the radial is open — either because the workspace
+   * switcher is the picker wheel, or because the wheel has claimed the digits for launching by
+   * number. See the `set-workspace-shortcuts` handler.
+   */
   let workspaceShortcutsUseNumeric = true;
 
   // Register initial shortcut
@@ -5687,8 +5691,14 @@ app.whenReady().then(async () => {
     }, 5 * 60 * 1000);
   });
 
-  ipcMain.on("set-workspace-shortcuts", (event, isOpen, mode) => {
-    const useNumeric = mode !== "picker";
+  ipcMain.on("set-workspace-shortcuts", (event, isOpen, mode, numberKeysClaimed) => {
+    /**
+     * Two features cannot own one key. A registered global shortcut is consumed by main and never
+     * reaches the renderer, so while the wheel is launching by number (`radialNumberLaunch`) the
+     * digits have to stay UNregistered — otherwise pressing 2 switches workspace and the wheel
+     * never hears the keystroke it was told to act on.
+     */
+    const useNumeric = mode !== "picker" && numberKeysClaimed !== true;
     if (
       workspaceShortcutsMenuOpen === isOpen &&
       workspaceShortcutsUseNumeric === useNumeric

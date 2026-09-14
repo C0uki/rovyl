@@ -815,6 +815,9 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
 
     const keyboardTriggerOn = config.enableKeyboardTrigger !== false;
     const mouseTriggerOn = config.enableMouseTrigger !== false;
+    const numberLaunchOn = config.radialNumberLaunch === true;
+    /** The other claimant on 1–9 — see the description of the quick-launch row. */
+    const workspaceHotkeysOn = (config.workspaceSwitchMode ?? 'picker') !== 'picker';
 
     /**
      * Turning off the last trigger would leave no way in, so the other one comes on in the same
@@ -1040,6 +1043,39 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
                 (value) => (Math.round(value) === 0 ? 'Instant' : `${Math.round(value)} ms`),
                 DWELL_MS_STEP, 'radialInstantDwellMs'),
             ]
+          : []),
+        {
+          key: 'numberLaunch', configKey: 'radialNumberLaunch', group: 'Number keys',
+          title: 'Quick launch with number keys',
+          /**
+           * Three things have to be here and nowhere else: that there is no Enter (it is the whole
+           * point, and every other keyboard path on the wheel needs one), that the count follows
+           * the wheel rather than any list in this panel, and — when it applies — what it takes
+           * away. `workspaceSwitchMode: 'hotkeys'` also owns 1–9, and a feature that quietly
+           * disables another one is a bug report waiting to be filed.
+           */
+          description:
+            numberLaunchOn && workspaceHotkeysOn
+              ? 'Press 1–9 to run the shortcut in that position — no Enter. The digits are the wheel’s now, so switching workspace by number is off; use the wheel or the scroll wheel instead.'
+              : workspaceHotkeysOn
+                ? 'Press 1–9 to run the shortcut in that position, counting clockwise from the top — no Enter. It takes the number keys away from workspace switching.'
+                : 'Press 1–9 to run the shortcut in that position, counting clockwise from the top — no Enter, no aiming.',
+          kind: 'bool', enabled: numberLaunchOn,
+          onToggle: () => update('radialNumberLaunch', !numberLaunchOn),
+        },
+        /** Only while there are numbers to show — same rule as the hands-free tunings above. */
+        ...(numberLaunchOn
+          ? ([
+              {
+                key: 'numberLabels', configKey: 'radialNumberLabels' as const, group: 'Number keys',
+                title: 'Show numbers on the wheel',
+                description:
+                  'Draws each position’s digit on its icon. Turn it off once the wheel is in your hands — the keys go on working.',
+                kind: 'bool', enabled: config.radialNumberLabels !== false,
+                onToggle: () =>
+                  update('radialNumberLabels', config.radialNumberLabels === false),
+              },
+            ] as SettingItem[])
           : []),
       ],
       appearance: [

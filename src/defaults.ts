@@ -362,6 +362,14 @@ export const DEFAULT_UI_CONFIG: UIConfig = {
   radialInstantActivate: 'off',
   radialInstantDwellMs: 400,
   radialInstantSensitivity: 'medium',
+  /**
+   * Off, like every other setting here that changes what an existing gesture DOES. Typing on an
+   * open wheel filters it; turning this on makes nine of those keys launch instead, and nobody
+   * should meet that by updating.
+   */
+  radialNumberLaunch: false,
+  /** On, so that turning the feature on is enough to see where the numbers are. */
+  radialNumberLabels: true,
   enableKeyboardTrigger: true,
   enableMouseTrigger: true,
   mouseTriggerMode: 'click',

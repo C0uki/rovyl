@@ -224,6 +224,29 @@ export interface UIConfig {
    * meant something before the hand moved.
    */
   radialInstantSensitivity?: 'low' | 'medium' | 'high';
+  /**
+   * Number keys pick AND run: while the wheel is up, 1-9 launch the shortcut sitting in that
+   * position, with no Enter and no aiming. The digits count from the top and go clockwise, the
+   * same order the wheel is laid out in, and they address the level on screen — inside a folder
+   * they are that folder's items, on the workspace picker they are the workspaces.
+   *
+   * It CLAIMS the digits. `workspaceSwitchMode: 'hotkeys'` registers 1-9 as global shortcuts while
+   * the wheel is open, and two features cannot own one key: with this on, the wheel asks main not
+   * to register them and switching by number goes back to the picker wheel. That is said out loud
+   * in the settings row rather than discovered by pressing 2 and watching an app open.
+   *
+   * Off by default: it turns a keystroke that filtered ("Photoshop 2024") into one that launches.
+   */
+  radialNumberLaunch?: boolean;
+  /**
+   * Whether each tile carries its digit while `radialNumberLaunch` is on. Read as `!== false`:
+   * a number you cannot see is a number you have to count to, so the badges are what the feature
+   * ships with and hiding them is the deliberate step — for someone who has learned the wheel and
+   * wants the icons back unmarked.
+   *
+   * Means nothing on its own: with number launching off, no tile is numbered whatever this says.
+   */
+  radialNumberLabels?: boolean;
   openAtLogin?: boolean; // New: Start app at login
   /**
    * Whether the global shortcut opens the wheel at all.
@@ -502,6 +525,11 @@ export interface ElectronAPI {
   setWorkspaceShortcutsState: (
     isOpen: boolean,
     workspaceSwitchMode?: 'hotkeys' | 'picker',
+    /**
+     * The wheel is handling 1-9 itself (`radialNumberLaunch`), so main must NOT register them as
+     * global shortcuts — registered, they never reach the renderer at all.
+     */
+    numberKeysClaimed?: boolean,
   ) => void;
   exportConfig: () => Promise<{ success: boolean; error?: string }>;
   importConfig: () => Promise<{ success: boolean; error?: string }>;

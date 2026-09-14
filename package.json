@@ -39,6 +39,7 @@
     "test:fullscreen-bounds": "node scripts/fullscreen-bounds-smoke.mjs",
     "test:page-title": "node scripts/page-title-smoke.mjs",
     "test:keyboard-nav": "node scripts/keyboard-nav-smoke.mjs",
+    "test:number-launch": "node scripts/number-launch-smoke.mjs",
     "test:i18n": "node scripts/i18n-smoke.mjs",
     "test:select-menu": "node scripts/select-menu-smoke.mjs",
     "test:window-split": "node scripts/window-split-smoke.mjs",

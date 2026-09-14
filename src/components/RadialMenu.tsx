@@ -359,6 +359,15 @@ interface RadialMenuItemProps {
   /** Small chip inside the label pill (workspace number, "recents"…). Omitted when the slice has no hint. */
   shortcutHint?: string;
   /**
+   * The digit that launches this slice, drawn ON THE TILE. Undefined when numbers are off.
+   *
+   * Not the same channel as `shortcutHint`, which lives in the label pill: that pill is hidden
+   * entirely unless labels are on, and hidden on every unaimed slice unless they are persistent.
+   * A number you can only see once you are already pointing at the thing has nothing left to tell
+   * you — so this one rides the tile, where it is visible for every slice at once.
+   */
+  numberHint?: string;
+  /**
    * Duration of the dwell aim arc. Set ONLY on the tile whose timer is running — `undefined` on
    * every other one, so their `React.memo` is not invalidated on each dwell.
    */
@@ -672,6 +681,7 @@ const RadialMenuItem = React.memo(({
   folderStackLength,
   bloom,
   shortcutHint,
+  numberHint,
   dwellMs,
   dwellKey,
   echo,
@@ -999,6 +1009,38 @@ const RadialMenuItem = React.memo(({
               )}
             </div>
           </div>
+
+          {/*
+            NUMBER BADGE — the key that launches this slice.
+
+            Top-left, because bottom-right is the folder badge's and the two would sit on top of
+            each other on any folder in the first nine positions. Outside the mask, like that one:
+            the mask exists to clip raster icons and would cut the badge in half.
+
+            It carries the tile's own plate and border rather than floating glyph-on-wallpaper —
+            the wheel opens over a desktop nobody controls, and a bare digit disappears on a light
+            one. During the launch echo it fades with the rest of the slice, which it gets for free
+            by sitting inside the wrapper.
+          */}
+          {numberHint && (
+            <div
+              className="absolute -top-1 -left-1 min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center z-30"
+              style={{
+                background: isActive ? hoverColor : 'rgba(6,7,9,0.95)',
+                border: `1px solid ${isActive ? hoverColor : 'rgba(255,255,255,0.26)'}`,
+                color: isActive ? activeForeground : 'rgba(255,255,255,0.78)',
+                boxShadow: '0 0 0 1px rgba(0,0,0,0.5)',
+                fontFamily: 'var(--font-radial)',
+                fontSize: '11px',
+                fontWeight: 600,
+                lineHeight: 1,
+                letterSpacing: '-0.01em',
+              }}
+              aria-hidden
+            >
+              {numberHint}
+            </div>
+          )}
 
           {/* FOLDER BADGE (Outside Mask, Inside Wrapper) */}
           {app.type === 'folder' && (
@@ -1445,6 +1487,14 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
   viewportSizeRef.current = viewportSize;
   const radialHoverColor = normalizeHoverColor(config.radialHoverColor);
   const radialHoverForeground = getReadableForeground(radialHoverColor);
+  /**
+   * The digits are drawn only when they DO something. `radialNumberLabels` is the choice of whether
+   * to keep seeing them once the positions are learned, and it is read as `!== false` — but it
+   * cannot turn numbers on by itself: an unmarked wheel is the wheel, marking it is what the
+   * launch feature costs, and a badge over a key that launches nothing is furniture.
+   */
+  const numberBadgesOn =
+    config.radialNumberLaunch === true && config.radialNumberLabels !== false;
   const iconSizePx = config.iconSize || 64;
   const minGap = config.appSpacing || 0;
   const numberOfApps = currentLevelApps.length;
@@ -2277,9 +2327,15 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
       window.electron.setWorkspaceShortcutsState(
         isOpen,
         config.workspaceSwitchMode === 'picker' ? 'picker' : 'hotkeys',
+        /**
+         * Quick launch owns 1–9 while it is on. Main registers them as GLOBAL shortcuts in
+         * hotkeys mode — and a registered global shortcut is consumed there, so the keydown
+         * handler in this file would never see the digit it was told to launch on.
+         */
+        config.radialNumberLaunch === true,
       );
     }
-  }, [isOpen, config.workspaceSwitchMode]);
+  }, [isOpen, config.workspaceSwitchMode, config.radialNumberLaunch]);
 
   // STABLE KEYBOARD LISTENER (Decoupled from interaction states to avoid missing events)
   // NOTE: Workspace switching (1-9) is handled exclusively by global shortcuts registered in
@@ -2382,9 +2438,50 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
       const isTypedCharacter =
         e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey && e.key !== ' ';
 
-      // Workspace Switching (1-9) — disabled in picker mode (user chooses workspace on the radial)
+      /**
+       * QUICK LAUNCH — 1–9 run the item in that position, no Enter.
+       *
+       * First, ahead of both the workspace digits and the filter, because with the setting on the
+       * digits are its: main has been told not to register 1–9 globally (see the
+       * `setWorkspaceShortcutsState` effect) precisely so they arrive here.
+       *
+       * `!typeAheadRef.current` for the same reason the workspace digits have it — once a filter is
+       * running, the 2 in "Photoshop 2024" is a character. And a digit past the last slice falls
+       * THROUGH to the type-ahead below rather than being swallowed: on a wheel of four items, 7
+       * has no target, and eating it would make the wheel feel broken instead of just unfiltered.
+       */
+      if (
+        configRef.current.radialNumberLaunch === true &&
+        !typeAheadRef.current &&
+        e.key >= '1' &&
+        e.key <= '9'
+      ) {
+        const currentItems = stateRef.current.currentLevelApps;
+        const targetIdx = parseInt(e.key, 10) - 1;
+        const target = currentItems[targetIdx];
+        if (target) {
+          e.preventDefault();
+          /**
+           * Set the aim before firing. The echo highlights the confirmed index on its own, but
+           * `handleAppClick` on a folder or a recents fetch does NOT launch — it descends — and
+           * without this the new level would arrive with nothing selected and no sign that the
+           * keystroke landed.
+           */
+          setActiveIndex(targetIdx);
+          handleAppClickRef.current(target);
+          return;
+        }
+      }
+
+      /*
+       * Workspace Switching (1-9) — disabled in picker mode (user chooses workspace on the radial),
+       * and disabled outright while quick launch owns the digits. The block above only CONSUMES the
+       * ones with a slice under them; without this, 7 on a wheel of four fell through to here and
+       * switched workspace, which is exactly what the setting says it no longer does.
+       */
       if (
         onWorkspaceSwitch &&
+        configRef.current.radialNumberLaunch !== true &&
         configRef.current.workspaceSwitchMode !== 'picker'
       ) {
         const num = parseInt(e.key);
@@ -3487,9 +3584,24 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                   angularDistance = Math.min(raw, currentLevelApps.length - raw);
                 }
                 /* Workspace slices carry the 1–9 global shortcut, which was previously invisible. */
-                const shortcutHint = isWorkspacePickItem(app)
+                const workspaceHint = isWorkspacePickItem(app)
                   ? String(parseWorkspacePickIndex(app.id) + 1)
                   : undefined;
+                /**
+                 * Only the first nine get a digit — there is no tenth key, and a tile numbered
+                 * `10` would promise a keystroke that does not exist.
+                 */
+                const numberHint =
+                  numberBadgesOn && index < 9 ? String(index + 1) : undefined;
+                /**
+                 * One number per slice, and it is the one that does something.
+                 *
+                 * The pill's hint is the workspace's own hotkey; the badge is the slice's POSITION.
+                 * They are not the same count — a disabled workspace is skipped by the picker but
+                 * keeps its hotkey — so on a wheel where the two disagree, showing both puts two
+                 * different digits on one tile and only the badge's is the key being pressed.
+                 */
+                const shortcutHint = numberHint ? undefined : workspaceHint;
                 return (
                   <RadialMenuItem
                     key={`${app.id}-${folderStack.length}-${index}`}
@@ -3507,6 +3619,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                     folderStackLength={folderStack.length}
                     bloom={isOpen && !isExiting && bloom}
                     shortcutHint={shortcutHint}
+                    numberHint={numberHint}
                     /** `undefined` on every other tile — their `React.memo` is not invalidated. */
                     dwellMs={dwellTick && dwellTick.index === index ? dwellRunMsRef.current : undefined}
                     dwellKey={dwellTick && dwellTick.index === index ? dwellTick.key : undefined}
