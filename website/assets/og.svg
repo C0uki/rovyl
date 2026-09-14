@@ -1,0 +1,42 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" fill="#151515"/>
+  <rect x="0.5" y="0.5" width="1199" height="629" fill="none" stroke="#ffffff" stroke-opacity="0.07"/>
+
+  <!-- The wheel, schematic: hub, six tiles, one aimed. -->
+  <g transform="translate(908 315)">
+    <circle r="150" fill="none" stroke="#ffffff" stroke-opacity="0.06" stroke-dasharray="4 8"/>
+    <circle r="30" fill="#0a0b0e" stroke="#ffffff" stroke-opacity="0.28" stroke-width="2"/>
+    <circle r="10" fill="none" stroke="#ffffff" stroke-opacity="0.32" stroke-width="2"/>
+    <g fill="#121212" stroke="#ffffff" stroke-opacity="0.34">
+      <rect x="-33" y="-183" width="66" height="66" rx="18"/>
+      <rect x="97"  y="-108" width="66" height="66" rx="18"/>
+      <rect x="97"  y="42"   width="66" height="66" rx="18"/>
+      <rect x="-33" y="117"  width="66" height="66" rx="18"/>
+      <rect x="-163" y="42"  width="66" height="66" rx="18"/>
+    </g>
+    <!-- Aimed: white plate, the radial's active pair. -->
+    <rect x="-166" y="-111" width="72" height="72" rx="20" fill="#ffffff"/>
+  </g>
+
+  <!-- Mark -->
+  <g transform="translate(96 132) scale(0.164)">
+    <mask id="m" maskUnits="userSpaceOnUse" x="48" y="48" width="416" height="416">
+      <rect x="48" y="48" width="416" height="416" fill="black"/>
+      <rect x="112" y="104" width="320" height="112" rx="50" transform="rotate(30 272 160)" fill="white"/>
+      <rect x="70" y="286" width="202" height="112" rx="48" transform="rotate(-30 171 342)" fill="white"/>
+      <rect x="267" y="286" width="202" height="112" rx="48" transform="rotate(58 368 342)" fill="white"/>
+      <circle cx="256" cy="256" r="54" fill="black"/>
+    </mask>
+    <rect x="48" y="48" width="416" height="416" fill="#F4F2ED" mask="url(#m)"/>
+  </g>
+
+  <text x="168" y="163" fill="#ffffff" fill-opacity="0.93" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="34" font-weight="600" letter-spacing="-0.5">Rovyl</text>
+
+  <text x="96" y="316" fill="#ffffff" fill-opacity="0.95" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="68" font-weight="700" letter-spacing="-2.6">One gesture.</text>
+  <text x="96" y="392" fill="#ffffff" fill-opacity="0.95" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="68" font-weight="700" letter-spacing="-2.6">Any destination.</text>
+
+  <text x="96" y="452" fill="#ffffff" fill-opacity="0.55" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="26" letter-spacing="-0.4">Hold. Aim. Release.</text>
+
+  <rect x="96" y="500" width="296" height="1" fill="#ffffff" fill-opacity="0.09"/>
+  <text x="96" y="540" fill="#ffffff" fill-opacity="0.48" font-family="Segoe UI, Inter, Helvetica, Arial, sans-serif" font-size="20" letter-spacing="0.4">A radial launcher for Windows</text>
+</svg>

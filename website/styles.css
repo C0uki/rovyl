@@ -1,0 +1,989 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   Rovyl — website
+
+   One rule governs this file: nothing is invented here. The tokens, the radii,
+   the control heights, the eases and the tile recipe are lifted from the app's
+   own `src/index.css` and `src/components/RadialMenu.tsx`, so the page and the
+   product read as one object. Zenith's accent is the absence of colour — solid
+   white on near-black — and the only hue on the page belongs to the simulated
+   desktop the wheel is drawn over, exactly as in the product screenshots.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Surfaces (src/index.css, `:root`) ─────────────────────────────────── */
+  --zn-bg: #151515;
+  --zn-sunken: #111111;
+  --zn-surface: #151515;
+  --zn-raised: rgba(255, 255, 255, .055);
+  --zn-hover: rgba(255, 255, 255, .032);
+  --zn-pressed: rgba(255, 255, 255, .085);
+
+  --zn-line: rgba(255, 255, 255, .07);
+  --zn-line-strong: rgba(255, 255, 255, .13);
+
+  --zn-text: rgba(255, 255, 255, .93);
+  --zn-text-2: rgba(255, 255, 255, .55);
+  --zn-text-3: rgba(255, 255, 255, .48);
+
+  --zn-solid: #ffffff;
+  --zn-on-solid: #0a0a0b;
+
+  --zn-focus: rgba(255, 255, 255, .55);
+  --zn-elev: 0 20px 50px rgba(0, 0, 0, .55);
+
+  /* ── Space: 4px base, no value outside it ─────────────────────────────── */
+  --zn-1: 4px;  --zn-2: 8px;  --zn-3: 12px; --zn-4: 16px;
+  --zn-5: 20px; --zn-6: 24px; --zn-8: 32px; --zn-10: 40px;
+
+  /* ── Radius carries hierarchy: window > panel > control > chip ────────── */
+  --zn-r-window: 12px;
+  --zn-r-panel: 10px;
+  --zn-r-control: 8px;
+  --zn-r-chip: 6px;
+  /* The wheel's own tile radius, from `RadialMenu` — 18px, not on the scale
+     above, because a tile is not a control. */
+  --zn-r-tile: 18px;
+
+  --zn-ctl: 32px;
+  --zn-ctl-sm: 26px;
+
+  --zn-ease: cubic-bezier(.22, 1, .36, 1);
+  /* The radial's own opening ease and duration. */
+  --zn-ease-bloom: cubic-bezier(.16, .86, .24, 1);
+  --zn-dur-bloom: 220ms;
+
+  --font-display: "Space Grotesk", sans-serif;
+  --font-ui: "Inter", system-ui, sans-serif;
+  --font-radial: "Instrument Sans", "Inter", sans-serif;
+
+  --page: 1080px;
+}
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--zn-bg);
+  color: var(--zn-text);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  color-scheme: dark;
+  overflow-x: hidden;
+}
+
+/* Same reasoning as the app: a wheel operated by pointing and releasing must
+   never hand the browser a drag ghost or a blue selection. */
+img, svg { -webkit-user-drag: none; user-select: none; }
+
+h1, h2, h3, h4, p, ul, ol, figure { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+
+a { color: inherit; text-decoration: none; }
+
+:where(a, button):focus-visible {
+  outline: 2px solid var(--zn-focus);
+  outline-offset: 3px;
+  border-radius: var(--zn-r-chip);
+}
+
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+
+/* Layout `display` values outrank the UA rule for `[hidden]`, so a row the
+   settings mock hides (a tuning whose feature is off) stayed on screen. */
+[hidden] { display: none !important; }
+
+/* Every glyph on the page is drawn the way the app draws a shortcut with no
+   native icon: stroked, 1.75, round joins. */
+.ico {
+  width: 16px; height: 16px; flex: none;
+  fill: none; stroke: currentColor; stroke-width: 1.75;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* The mark itself, as a mask so it inherits `color` like any other glyph. */
+.brand-mark {
+  display: block; width: 18px; height: 18px; flex: none;
+  background: currentColor;
+  -webkit-mask: url(assets/logo.svg) center / contain no-repeat;
+  mask: url(assets/logo.svg) center / contain no-repeat;
+}
+.brand-mark.is-sm { width: 13px; height: 13px; }
+.brand-mark.is-xl { width: 56px; height: 56px; }
+
+/* ── Buttons (`.zs-btn`) ──────────────────────────────────────────────────── */
+
+.btn {
+  height: var(--zn-ctl);
+  display: inline-flex; align-items: center; gap: var(--zn-2);
+  padding-inline: var(--zn-3);
+  color: var(--zn-text);
+  border: 1px solid var(--zn-line);
+  border-radius: var(--zn-r-control);
+  background: transparent;
+  font: 450 12px/1.2 var(--font-ui);
+  white-space: nowrap; cursor: pointer;
+  transition: color .15s var(--zn-ease), border-color .15s var(--zn-ease),
+              background .15s var(--zn-ease), transform .15s var(--zn-ease);
+}
+.btn:hover { border-color: var(--zn-line-strong); background: var(--zn-hover); }
+.btn:active { background: var(--zn-pressed); transform: translateY(1px); }
+.btn .ico { color: var(--zn-text-3); transition: color .15s var(--zn-ease); }
+.btn:hover .ico { color: var(--zn-text-2); }
+
+.btn.is-primary {
+  color: var(--zn-on-solid);
+  border-color: var(--zn-solid);
+  background: var(--zn-solid);
+  font-weight: 550;
+}
+.btn.is-primary .ico, .btn.is-primary:hover .ico { color: currentColor; }
+.btn.is-primary:hover { background: var(--zn-solid); opacity: .9; }
+
+.btn.is-quiet { border-color: transparent; color: var(--zn-text-2); }
+.btn.is-quiet:hover { color: var(--zn-text); border-color: var(--zn-line); }
+
+.btn.is-icon { width: var(--zn-ctl); padding-inline: 0; justify-content: center; }
+.btn.is-icon .ico { width: 17px; height: 17px; color: var(--zn-text-2); }
+.btn.is-icon:hover .ico { color: var(--zn-text); }
+
+.btn.is-lg {
+  height: 42px; padding-inline: var(--zn-5);
+  border-radius: var(--zn-r-panel); font-size: 13.5px;
+}
+.btn.is-lg .ico { width: 17px; height: 17px; }
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
+
+.nav {
+  position: sticky; top: 0; z-index: 50;
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  gap: var(--zn-6);
+  height: 58px;
+  padding-inline: clamp(var(--zn-4), 4vw, var(--zn-8));
+  border-bottom: 1px solid transparent;
+  background: color-mix(in srgb, var(--zn-bg) 82%, transparent);
+  backdrop-filter: blur(14px);
+  transition: border-color .2s var(--zn-ease), background .2s var(--zn-ease);
+}
+.nav.is-stuck { border-bottom-color: var(--zn-line); }
+
+.nav-brand { justify-self: start; display: inline-flex; align-items: center; gap: var(--zn-2); color: var(--zn-text); }
+/* The product's own icon, not the bare mark: this is the thing you install.
+   The icon's own plate is near-black, so a hairline is what makes it read as a
+   tile on a near-black page instead of as a floating glyph. */
+.brand-icon {
+  width: 22px; height: 22px; flex: none;
+  border-radius: 5px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .09);
+}
+.brand-word { font: 600 14.5px/1 var(--font-display); letter-spacing: -.015em; }
+
+.nav-links { justify-self: center; display: flex; gap: var(--zn-5); }
+.nav-links a {
+  color: var(--zn-text-2); font-size: 12.5px;
+  transition: color .15s var(--zn-ease);
+}
+.nav-links a:hover { color: var(--zn-text); }
+
+.nav-actions { grid-column: -2; justify-self: end; display: flex; align-items: center; gap: var(--zn-2); }
+
+/* ── Hero ─────────────────────────────────────────────────────────────────── */
+
+.hero {
+  max-width: var(--page);
+  margin-inline: auto;
+  padding: clamp(var(--zn-6), 4vh, 44px) clamp(var(--zn-4), 4vw, var(--zn-8)) clamp(var(--zn-8), 6vh, 56px);
+  text-align: center;
+}
+
+.hero h1 {
+  margin: 0;
+  font: 600 clamp(34px, 6.2vw, 58px)/1.05 var(--font-display);
+  letter-spacing: -.035em;
+}
+
+.lede {
+  margin: var(--zn-4) 0 0;
+  color: var(--zn-text-2);
+  font: 400 clamp(15px, 2vw, 18px)/1.5 var(--font-ui);
+  letter-spacing: -.01em;
+}
+
+.hero-cta {
+  display: flex; flex-wrap: wrap; gap: var(--zn-3);
+  justify-content: center;
+  margin-top: var(--zn-8);
+}
+
+/* ── The stage: a desktop, dimmed, with the wheel on it ───────────────────── */
+
+.stage {
+  position: relative;
+  margin-top: clamp(var(--zn-6), 3.5vh, 40px);
+  /* `width: 100%` is load-bearing: with an auto width, a `max-height` that bites
+     makes Chromium solve the width from the ratio too, and the stage shrinks
+     into a letterbox narrower than the column it sits in. Pinning the width
+     leaves only the height derived, and the cap just makes the box wider. */
+  width: 100%;
+  aspect-ratio: 2 / 1;
+  max-height: min(52vh, 470px);
+  overflow: hidden;
+  border: 1px solid var(--zn-line-strong);
+  border-radius: var(--zn-r-window);
+  box-shadow: var(--zn-elev);
+}
+
+/* The wallpaper from the product screenshots. Deliberately bright and warm:
+   the scrim below it is the app's own background dimming, and dimming can only
+   be judged against something with enough light to lose. */
+.desk {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(130% 130% at 4% 96%,
+      #d7912b 0%, #c1620c 13%, #9c3a08 27%, #6b1a05 42%,
+      #3a0c03 58%, #180402 72%, #0a0303 84%, #070707 100%);
+}
+
+/* The app's `backdropOpacity` default, 0.6, as a flat black wash. */
+.scrim {
+  position: absolute; inset: 0;
+  background: rgb(0 0 0 / var(--scrim-o, .6));
+  opacity: 0;
+  transition: opacity 200ms cubic-bezier(.16, 1, .3, 1);
+}
+.scrim.is-on { opacity: 1; }
+
+/* `--origin-y` lifts the hub off the stage's centre so that the wheel PLUS what
+   hangs under it — the aimed slice's label, then the workspace pill — is what
+   ends up centred. See `measure()` in site.js. */
+.wheel {
+  position: absolute; left: 50%; top: 50%; width: 0; height: 0;
+  transform: translateY(var(--origin-y, 0px));
+}
+
+/* The hub. Square div, `border-radius: 50%` — in the app the radius clips the
+   hit test too, which is why it is a circle and not a ring drawn on top. */
+.hub {
+  position: absolute; left: 0; top: 0;
+  display: grid; place-items: center;
+  width: var(--hub); height: var(--hub);
+  transform: translate(-50%, -50%) scale(var(--hub-s, .2));
+  opacity: var(--hub-o, 0);
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, .28);
+  background: rgba(10, 11, 14, .92);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), 0 8px 22px rgba(0, 0, 0, .42);
+  transition: transform var(--zn-dur-bloom) var(--zn-ease-bloom),
+              opacity 165ms ease-out, border-color 170ms ease-out;
+}
+/* At the root the hub carries the mark, at 0.64 of a tile and the app's own
+   `#F4F2ED`; inside a level it becomes the explicit Back control. */
+.hub-mark {
+  width: calc(var(--hub) * .9); height: calc(var(--hub) * .9);
+  background: #F4F2ED; opacity: .78;
+  -webkit-mask: url(assets/logo.svg) center / contain no-repeat;
+  mask: url(assets/logo.svg) center / contain no-repeat;
+}
+.hub-back {
+  width: calc(var(--hub) * .54); height: calc(var(--hub) * .54);
+  color: rgba(255, 255, 255, .82); stroke-width: 1.5;
+}
+.stage[data-level="0"] .hub-back,
+.stage:not([data-level="0"]) .hub-mark { display: none; }
+/* Only inside a level is the centre a control, so only there does it say so. */
+.stage:not([data-level="0"]) .hub { cursor: pointer; }
+.stage:not([data-level="0"]) .hub:hover { border-color: rgba(255, 255, 255, .5); }
+
+/* One slice. Position and presence are a single transform, as in the app —
+   hovering only swaps the value, never touches layout. */
+.slice {
+  position: absolute; left: 0; top: 0;
+  z-index: 1;
+  transform: translate3d(var(--tx, 0px), var(--ty, 0px), 0) scale(var(--ts, .2));
+  opacity: var(--to, 0);
+  transition: transform var(--zn-dur-bloom) var(--zn-ease-bloom),
+              opacity 165ms ease-out;
+  will-change: transform, opacity;
+}
+.slice-inner {
+  position: relative;
+  display: grid; place-items: center;
+  transform: translate(-50%, -50%);
+}
+
+/* The tile. Opaque plate, light inner border, dark outer ring: it has to cut
+   itself out of a desktop nobody controls, without leaning on the scrim. */
+.tile {
+  position: relative; z-index: 2;
+  display: grid; place-items: center;
+  width: var(--tile); height: var(--tile);
+  border-radius: var(--zn-r-tile);
+  border: 1px solid rgba(255, 255, 255, .34);
+  background: rgb(18, 18, 18);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .08),
+    0 0 0 1px rgba(0, 0, 0, .5),
+    0 8px 22px rgba(0, 0, 0, .42);
+  cursor: pointer;
+  transition: background-color 150ms ease-out, border-color 150ms ease-out,
+              color 150ms ease-out, box-shadow 170ms ease-out;
+}
+.tile .ico {
+  width: calc(var(--tile) * .5); height: calc(var(--tile) * .5);
+  stroke-width: 1.75;
+}
+.tile.has-icon { overflow: hidden; }
+.tile img {
+  width: 100%; height: 100%;
+  object-fit: contain;
+  /* `referenceScale` in the app's `SmartIcon`: an icon sits just inside its
+     plate rather than bleeding to the corners. */
+  padding: 6%;
+}
+
+/* Aimed. White plate, black glyph — the radial's active pair, no new hue. */
+.slice.is-active .tile {
+  border-color: var(--hover, #fff);
+  background: var(--hover, #fff);
+  color: #0a0a0b;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, .45),
+    0 0 0 4px rgba(255, 255, 255, .18),
+    0 0 22px rgba(255, 255, 255, .22),
+    0 12px 28px rgba(0, 0, 0, .5);
+}
+
+/* The name of what is aimed at. A pill, in the radial's own face. */
+.slice-label {
+  position: absolute; top: calc(50% + var(--tile) / 2 + 12px); left: 50%;
+  display: inline-flex; align-items: center; gap: 6px;
+  transform: translate(-50%, 4px);
+  padding: 5px 8px 5px 12px;
+  color: rgba(255, 255, 255, .95);
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 999px;
+  background: rgba(10, 11, 14, .88);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .45), 0 6px 18px rgba(0, 0, 0, .45);
+  font: 500 12px/1 var(--font-radial);
+  white-space: nowrap;
+  opacity: 0; pointer-events: none;
+  transition: opacity 140ms ease-out, transform 180ms var(--zn-ease);
+}
+/* The chip beside the name: the workspace slices are what it exists for, and it
+   carries the number key that would otherwise be invisible. */
+.slice-label i {
+  padding: 3px 5px;
+  color: rgba(255, 255, 255, .5);
+  border-radius: 5px; background: rgba(255, 255, 255, .1);
+  font: 500 10px/1 var(--font-radial); font-style: normal;
+}
+/* The label has its own plate, and the plate takes the hover colour too —
+   dimming only the text faded the name, not the highlight. */
+.slice.is-active .slice-label {
+  opacity: 1; transform: translate(-50%, 0);
+  color: #0a0a0b;
+  border-color: var(--hover, #fff);
+  background: var(--hover, #fff);
+}
+.slice.is-active .slice-label i { color: inherit; background: rgba(0, 0, 0, .09); }
+
+/* The sustained-aim arc: the only sign a timer is running, so it is CSS and
+   never a per-frame commit. `pathLength: 1` normalises the perimeter. */
+.dwell {
+  position: absolute; left: 50%; top: 50%; z-index: 1;
+  transform: translate(-50%, -50%);
+  fill: none; stroke: rgba(255, 255, 255, .9); stroke-width: 2.5;
+  stroke-linecap: round;
+  opacity: 0;
+}
+.slice.is-dwelling .dwell { opacity: 1; }
+.slice.is-dwelling .dwell path {
+  stroke-dasharray: 1; stroke-dashoffset: 1;
+  animation: dwell-arc var(--dwell, 620ms) linear forwards;
+}
+@keyframes dwell-arc { to { stroke-dashoffset: 0; } }
+
+/* ── Launch echo (the app's `zn-launch-*`) ────────────────────────────────── */
+
+/* The unchosen ones leave before the waves start, so the confirmed tile is the
+   only thing left on screen — which is all the echo has to say. */
+.slice.is-faded { --to: 0 !important; transition-duration: 180ms, 120ms; transition-timing-function: ease-in; }
+
+.slice.is-active { z-index: 2; }
+.slice.is-fired { z-index: 3; }
+.slice.is-fired .tile { animation: launch-pop var(--echo, 520ms) cubic-bezier(.2, .7, .3, 1) forwards; }
+/* Legible for the length of the kick and only then out, so the name is still
+   read instead of flashing. */
+.slice.is-fired .slice-label { animation: launch-fade var(--echo, 520ms) ease-out forwards; }
+@keyframes launch-fade { 0%, 55% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes launch-pop {
+  0%   { transform: scale(1);    opacity: 1; }
+  18%  { transform: scale(1.18); opacity: 1; }
+  42%  { transform: scale(1.02); opacity: 1; }
+  62%  { transform: scale(1.04); opacity: .96; }
+  100% { transform: scale(.82);  opacity: 0; }
+}
+
+/* The wave is born with the TILE's silhouette, not as a circle: the continuity
+   is what makes it read as "this came from here". */
+.wave {
+  position: absolute; left: 50%; top: 50%;
+  width: calc(var(--tile) + 6px); height: calc(var(--tile) + 6px);
+  border: 2px solid rgba(255, 255, 255, .6);
+  border-radius: 21px;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(.92);
+  pointer-events: none;
+}
+.slice.is-fired .wave {
+  animation: launch-wave calc(var(--echo, 520ms) * .82) cubic-bezier(.12, .74, .3, 1) forwards;
+}
+.slice.is-fired .wave.is-late {
+  animation-delay: calc(var(--echo, 520ms) * .16);
+  animation-duration: calc(var(--echo, 520ms) * .66);
+}
+@keyframes launch-wave {
+  0%   { transform: translate(-50%, -50%) scale(.92); opacity: 0; }
+  8%   { opacity: .58; }
+  100% { transform: translate(-50%, -50%) scale(2.7); opacity: 0; }
+}
+
+.stage.is-handsfree,
+.stage.is-handsfree * { cursor: none !important; }
+.stage.is-handsfree .hf,
+.stage.is-handsfree .hf * { cursor: pointer !important; }
+
+.hf {
+  position: absolute; top: var(--zn-4); inset-inline-end: var(--zn-4); z-index: 6;
+  display: inline-flex; align-items: center; gap: var(--zn-2);
+  height: 30px; padding: 0 12px 0 8px;
+  color: rgba(255, 255, 255, .62);
+  border: 1px solid rgba(255, 255, 255, .1); border-radius: 999px;
+  background: rgba(10, 11, 14, .74);
+  backdrop-filter: blur(6px);
+  font: 450 11.5px/1 var(--font-ui); white-space: nowrap; cursor: pointer;
+  transition: color .15s var(--zn-ease), border-color .15s var(--zn-ease);
+}
+.hf:hover { color: rgba(255, 255, 255, .9); border-color: rgba(255, 255, 255, .18); }
+.hf[aria-checked="true"] { color: rgba(255, 255, 255, .95); }
+.hf .toggle { width: 30px; height: 17px; }
+.hf .toggle::after { width: 11px; height: 11px; }
+.hf .toggle.is-on::after { transform: translateX(13px); }
+
+/* The workspace pill the wheel carries under the hub. */
+.pill {
+  position: absolute; left: 50%; top: 50%; z-index: 4;
+  display: inline-flex; align-items: center; gap: var(--zn-2);
+  padding: 5px 6px 5px 12px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 999px;
+  background: rgba(10, 11, 14, .88);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .45), 0 6px 18px rgba(0, 0, 0, .45);
+  font: 500 11.5px/1 var(--font-radial);
+  opacity: 0;
+  transform: translate(-50%, calc(var(--pill-y, 190px)));
+  transition: opacity 165ms ease-out, transform var(--zn-dur-bloom) var(--zn-ease-bloom);
+  pointer-events: none;
+}
+.pill.is-on { opacity: 1; }
+.pill b { color: rgba(255, 255, 255, .95); font-weight: 500; }
+.pill span {
+  padding: 3px 7px;
+  color: rgba(255, 255, 255, .6);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .07);
+  font-size: 10.5px;
+}
+
+/* Top corner, not under the wheel: the workspace pill lives below the hub and
+   the two collided as soon as the stage got short. */
+.stage-hint {
+  position: absolute; top: var(--zn-4); inset-inline-start: var(--zn-4);
+  padding: 5px 11px;
+  color: rgba(255, 255, 255, .6);
+  border: 1px solid rgba(255, 255, 255, .09);
+  border-radius: 999px;
+  background: rgba(10, 11, 14, .7);
+  backdrop-filter: blur(6px);
+  font-size: 11px; white-space: nowrap;
+  transition: opacity .25s var(--zn-ease);
+}
+.stage.is-manual .stage-hint { opacity: 0; }
+@media (hover: none), (pointer: coarse) { .stage-hint, .hf { display: none; } }
+
+/* ── Sections ─────────────────────────────────────────────────────────────── */
+
+.section {
+  max-width: var(--page);
+  margin-inline: auto;
+  padding: clamp(48px, 7.5vh, 84px) clamp(var(--zn-4), 4vw, var(--zn-8));
+}
+
+.section-title {
+  margin-bottom: var(--zn-8);
+  font: 600 clamp(22px, 3.2vw, 30px)/1.15 var(--font-display);
+  letter-spacing: -.028em;
+  text-align: center;
+}
+
+.tag {
+  display: inline-block;
+  margin-bottom: var(--zn-3);
+  color: var(--zn-text-3);
+  font-size: 11.5px; font-weight: 500;
+  letter-spacing: .04em; text-transform: uppercase;
+}
+
+/* ── Hold / Aim / Release ─────────────────────────────────────────────────── */
+
+.beats {
+  max-width: var(--page);
+  margin-inline: auto;
+  padding: 0 clamp(var(--zn-4), 4vw, var(--zn-8)) clamp(40px, 6vh, 64px);
+}
+.beat-grid {
+  display: grid; gap: var(--zn-3);
+  grid-template-columns: repeat(3, 1fr);
+}
+.beat {
+  display: grid; justify-items: center;
+  padding: var(--zn-8) var(--zn-5) var(--zn-6);
+  border: 1px solid var(--zn-line);
+  border-radius: var(--zn-r-panel);
+  background: var(--zn-sunken);
+  text-align: center;
+  transition: border-color .18s var(--zn-ease), background .18s var(--zn-ease);
+}
+.beat:hover { border-color: var(--zn-line-strong); background: var(--zn-raised); }
+.beat h3 {
+  margin-top: var(--zn-5);
+  font: 600 17px/1.2 var(--font-display);
+  letter-spacing: -.02em;
+}
+.beat p { margin-top: 5px; color: var(--zn-text-2); font-size: 12.5px; }
+.beat-art { width: 120px; height: 120px; }
+
+.art { width: 100%; height: 100%; overflow: visible; }
+.art :where([class^="a-"], [class^="m-"]) {
+  fill: none; stroke: rgba(255, 255, 255, .34);
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+
+/* Hold — the wheel button pulses, two rings leave it. */
+.a-mouse { stroke: rgba(255, 255, 255, .42); }
+.a-btn { fill: rgba(255, 255, 255, .9); stroke: none; animation: hold-press 2.6s var(--zn-ease) infinite; transform-origin: 60px 39px; }
+.a-ping { stroke: rgba(255, 255, 255, .5); opacity: 0; transform-origin: 60px 40px; animation: hold-ping 2.6s cubic-bezier(.12, .74, .3, 1) infinite; }
+.a-ping2 { animation-delay: .3s; }
+@keyframes hold-press {
+  0%, 22% { transform: scaleY(1); opacity: .9; }
+  30%, 62% { transform: scaleY(.82); opacity: 1; }
+  74%, 100% { transform: scaleY(1); opacity: .9; }
+}
+@keyframes hold-ping {
+  0%, 24% { transform: scale(.5); opacity: 0; }
+  32% { opacity: .55; }
+  70%, 100% { transform: scale(1.9); opacity: 0; }
+}
+
+/* Aim — the vector sweeps, each tile lights as it passes. */
+.a-ring { stroke: rgba(255, 255, 255, .1); stroke-dasharray: 3 6; }
+.a-core { fill: rgba(255, 255, 255, .9); stroke: none; }
+.a-vec { stroke: rgba(255, 255, 255, .75); }
+.a-sweep { transform-origin: 60px 60px; animation: aim-sweep 5.6s cubic-bezier(.6, 0, .4, 1) infinite; }
+@keyframes aim-sweep {
+  0%, 8%    { transform: rotate(0deg); }
+  20%, 28%  { transform: rotate(90deg); }
+  40%, 48%  { transform: rotate(180deg); }
+  60%, 68%  { transform: rotate(270deg); }
+  80%, 100% { transform: rotate(360deg); }
+}
+.a-tile { fill: rgba(255, 255, 255, .05); stroke: rgba(255, 255, 255, .22); animation: aim-lit 5.6s steps(1, end) infinite; }
+.a-t1 { animation-delay: -.45s; }
+.a-t2 { animation-delay: -1.57s; }
+.a-t3 { animation-delay: -2.69s; }
+.a-t4 { animation-delay: -3.81s; }
+@keyframes aim-lit {
+  0%, 14%  { fill: rgba(255, 255, 255, .92); stroke: #fff; }
+  15%, 100% { fill: rgba(255, 255, 255, .05); stroke: rgba(255, 255, 255, .22); }
+}
+
+/* Release — the confirmed tile kicks, two waves leave it. */
+.a-pop { fill: rgba(255, 255, 255, .92); stroke: #fff; transform-origin: 60px 60px; animation: rel-pop 2.8s cubic-bezier(.2, .7, .3, 1) infinite; }
+.a-wave { stroke: rgba(255, 255, 255, .55); opacity: 0; transform-origin: 60px 60px; animation: rel-wave 2.8s cubic-bezier(.12, .74, .3, 1) infinite; }
+.a-wave2 { animation-delay: .26s; }
+@keyframes rel-pop {
+  0%, 18% { transform: scale(1); opacity: 1; }
+  26% { transform: scale(1.18); }
+  38% { transform: scale(1.02); }
+  62% { transform: scale(1.04); opacity: .96; }
+  78%, 100% { transform: scale(1); opacity: 1; }
+}
+@keyframes rel-wave {
+  0%, 20% { transform: scale(.92); opacity: 0; }
+  26% { opacity: .6; }
+  70%, 100% { transform: scale(2.5); opacity: 0; }
+}
+
+/* ── Feature cards ────────────────────────────────────────────────────────── */
+
+.cards {
+  display: grid; gap: var(--zn-2);
+  grid-template-columns: repeat(auto-fill, minmax(206px, 1fr));
+}
+.card {
+  display: flex; align-items: center; gap: var(--zn-3);
+  min-height: 58px;
+  padding: var(--zn-3) var(--zn-4);
+  border: 1px solid var(--zn-line);
+  border-radius: var(--zn-r-control);
+  background: var(--zn-sunken);
+  transition: border-color .15s var(--zn-ease), background .15s var(--zn-ease),
+              transform .15s var(--zn-ease);
+}
+.card:hover { border-color: var(--zn-line-strong); background: var(--zn-raised); transform: translateY(-2px); }
+.card .ico { width: 17px; height: 17px; color: var(--zn-text-2); transition: color .15s var(--zn-ease); }
+.card:hover .ico { color: var(--zn-text); }
+.card b { font-size: 13px; font-weight: 500; letter-spacing: -.008em; }
+
+/* ── Split sections ───────────────────────────────────────────────────────── */
+
+.split {
+  display: grid; gap: clamp(var(--zn-8), 5vw, 64px);
+  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+  align-items: center;
+}
+.split.is-reverse { grid-template-columns: minmax(0, 1fr) minmax(0, 22rem); }
+.split.is-reverse .split-copy { order: 2; }
+
+.split-copy h2 {
+  font: 600 clamp(22px, 3vw, 30px)/1.15 var(--font-display);
+  letter-spacing: -.028em;
+}
+.split-copy p { margin-top: var(--zn-3); color: var(--zn-text-2); font-size: 13.5px; }
+
+/* Workspace cards, each previewing its own wheel — the app's own idiom. */
+.ws-strip {
+  display: grid; gap: var(--zn-2);
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+.ws {
+  display: grid; justify-items: center; gap: var(--zn-2);
+  padding: var(--zn-4) var(--zn-2) var(--zn-3);
+  border: 1px solid var(--zn-line);
+  border-radius: var(--zn-r-control);
+  background: var(--zn-sunken);
+  transition: border-color .15s var(--zn-ease), background .15s var(--zn-ease);
+}
+.ws:hover { border-color: var(--zn-line-strong); background: var(--zn-raised); }
+.ws.is-current { border-color: var(--zn-line-strong); background: var(--zn-raised); }
+.ws figcaption {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--zn-text-2); font-size: 11.5px;
+}
+.ws.is-current figcaption { color: var(--zn-text); }
+.ws kbd {
+  min-width: 17px; padding: 2px 4px;
+  color: var(--zn-text-2);
+  border: 1px solid var(--zn-line-strong); border-radius: var(--zn-r-chip);
+  background: var(--zn-raised);
+  font: 500 10px/1.2 var(--font-display);
+  text-align: center;
+}
+
+/* Each preview is a mini wheel, positioned by JS the way the real one is. */
+.ws-preview { position: relative; width: 108px; height: 108px; }
+.ws-dot {
+  position: absolute; left: 50%; top: 50%;
+  display: grid; place-items: center; overflow: hidden;
+  width: 21px; height: 21px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, .16);
+  background: rgba(255, 255, 255, .05);
+}
+.ws-dot img { width: 100%; height: 100%; object-fit: contain; padding: 2px; opacity: .85; }
+.ws:hover .ws-dot img, .ws.is-current .ws-dot img { opacity: 1; }
+.ws-preview .ws-hub {
+  position: absolute; left: 50%; top: 50%;
+  width: 19px; height: 19px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, .3);
+}
+.ws.is-current .ws-dot { border-color: rgba(255, 255, 255, .35); background: rgba(255, 255, 255, .14); }
+
+/* ── Aiming modes ─────────────────────────────────────────────────────────── */
+
+.aim-pair { display: grid; gap: var(--zn-3); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.aim-card {
+  padding: var(--zn-5) var(--zn-4) var(--zn-3);
+  border: 1px solid var(--zn-line);
+  border-radius: var(--zn-r-panel);
+  background: var(--zn-sunken);
+  text-align: center;
+}
+.aim-card .art { height: 128px; }
+.aim-card figcaption { margin-top: var(--zn-2); color: var(--zn-text-2); font-size: 12px; }
+.m-cone { fill: rgba(255, 255, 255, .07); stroke: none; }
+.m-ring { fill: rgba(255, 255, 255, .85); stroke: none; }
+.m-vec { stroke: rgba(255, 255, 255, .5); stroke-dasharray: 4 5; }
+.m-tile { fill: rgba(255, 255, 255, .05); stroke: rgba(255, 255, 255, .2); }
+.m-tile.is-on { fill: rgba(255, 255, 255, .92); stroke: #fff; }
+.m-cursor { fill: rgba(255, 255, 255, .9); stroke: none; animation: cursor-nudge 3.4s var(--zn-ease) infinite; }
+.m-cursor use { fill: rgba(255, 255, 255, .9); stroke: rgba(0, 0, 0, .5); stroke-width: 1.2; }
+@keyframes cursor-nudge {
+  0%, 100% { transform: translate(96px, 40px); }
+  45%, 70% { transform: translate(124px, 56px); }
+}
+
+/* ── Settings window ──────────────────────────────────────────────────────── */
+
+.win {
+  overflow: hidden;
+  border-radius: var(--zn-r-window);
+  background: var(--zn-bg);
+  box-shadow: inset 0 0 0 1px var(--zn-line), var(--zn-elev);
+  font-size: 12px;
+}
+.win-bar {
+  display: flex; align-items: center; gap: var(--zn-3);
+  height: 34px; padding-inline: var(--zn-3);
+  border-bottom: 1px solid var(--zn-line);
+  background: var(--zn-sunken);
+}
+.win-bar-lead .ico { width: 13px; height: 13px; color: var(--zn-text-3); }
+.win-bar-title { color: var(--zn-text-2); font: 500 11.5px/1 var(--font-ui); letter-spacing: -.01em; }
+.win-bar-ctl { display: flex; gap: var(--zn-4); margin-left: auto; }
+.win-bar-ctl i { width: 9px; height: 9px; border-top: 1px solid var(--zn-text-3); }
+.win-bar-ctl i:nth-child(2) { border: 1px solid var(--zn-text-3); border-radius: 1px; }
+.win-bar-ctl i.is-close {
+  border: 0;
+  background:
+    linear-gradient(to bottom right, transparent 45%, var(--zn-text-3) 45%, var(--zn-text-3) 55%, transparent 55%),
+    linear-gradient(to bottom left, transparent 45%, var(--zn-text-3) 45%, var(--zn-text-3) 55%, transparent 55%);
+}
+
+.win-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); }
+
+.win-side {
+  display: flex; flex-direction: column; gap: var(--zn-4);
+  padding: var(--zn-5) var(--zn-3) var(--zn-3);
+  border-right: 1px solid var(--zn-line);
+  background: var(--zn-sunken);
+}
+.win-side h4 { font: 600 14px/1 var(--font-display); letter-spacing: -.02em; }
+.win-search {
+  display: flex; align-items: center; gap: var(--zn-2);
+  height: 30px; padding-inline: var(--zn-3);
+  color: var(--zn-text-3);
+  border: 1px solid var(--zn-line); border-radius: var(--zn-r-control);
+  font-size: 11.5px;
+}
+.win-search .ico { width: 13px; height: 13px; }
+.win-nav { display: flex; flex-direction: column; gap: 2px; }
+.win-nav li {
+  display: flex; align-items: center; gap: var(--zn-2);
+  height: var(--zn-ctl); padding-inline: var(--zn-2);
+  color: var(--zn-text-2);
+  border-radius: var(--zn-r-control);
+  font-size: 12px;
+}
+.win-nav .ico { width: 14px; height: 14px; color: var(--zn-text-3); }
+/* Discreet active state: raised surface + hairline, never a high-contrast pill. */
+.win-nav li.is-active {
+  color: var(--zn-text); background: var(--zn-raised);
+  box-shadow: inset 0 0 0 1px var(--zn-line);
+}
+.win-nav li.is-active .ico { color: var(--zn-text); }
+.win-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: auto; padding: var(--zn-3) var(--zn-2) var(--zn-1);
+  border-top: 1px solid var(--zn-line);
+  color: var(--zn-text-2); font-size: 11px;
+}
+.win-foot-brand { display: inline-flex; align-items: center; gap: 6px; }
+.win-foot em { color: var(--zn-text-3); font-style: normal; font-variant-numeric: tabular-nums; }
+
+.win-main { padding: var(--zn-8) clamp(var(--zn-5), 3vw, var(--zn-10)); }
+.win-head { margin-bottom: var(--zn-6); }
+.win-head h3 { font: 600 19px/1.15 var(--font-display); letter-spacing: -.022em; }
+.win-head p { margin-top: var(--zn-1); color: var(--zn-text-2); font-size: 12.5px; }
+.win-group { margin-bottom: var(--zn-2); color: var(--zn-text-2); font-size: 12px; font-weight: 600; }
+
+/* Continuous composition: dividers separate, not boxes. */
+.win-rows { border-top: 1px solid var(--zn-line); }
+.win-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center; gap: var(--zn-6);
+  padding-block: var(--zn-3);
+  border-bottom: 1px solid var(--zn-line);
+}
+.win-copy b { display: block; font-size: 13px; font-weight: 500; letter-spacing: -.008em; }
+.win-copy small { display: block; margin-top: 3px; color: var(--zn-text-2); font-size: 11.5px; line-height: 1.45; }
+
+.kbd-set { display: flex; gap: 5px; }
+.kbd-set kbd {
+  min-width: 30px; padding: 6px 8px;
+  color: var(--zn-text);
+  border: 1px solid var(--zn-line-strong); border-radius: var(--zn-r-chip);
+  background: var(--zn-raised);
+  font: 500 11px/1 var(--font-display); text-align: center;
+}
+
+.toggle {
+  position: relative; width: 34px; height: 19px;
+  border-radius: 999px; background: var(--zn-raised);
+  box-shadow: inset 0 0 0 1px var(--zn-line);
+}
+.toggle::after {
+  content: ''; position: absolute; top: 3px; left: 3px;
+  width: 13px; height: 13px; border-radius: 50%;
+  background: var(--zn-text-3);
+  transition: transform .18s var(--zn-ease);
+}
+.toggle.is-on { background: var(--zn-solid); box-shadow: none; }
+.toggle.is-on::after { background: var(--zn-on-solid); transform: translateX(15px); }
+
+.seg {
+  display: inline-flex; gap: 2px; padding: 2px;
+  border: 1px solid var(--zn-line); border-radius: var(--zn-r-control);
+  background: var(--zn-sunken);
+}
+.seg i {
+  padding: 0 10px; height: 26px;
+  display: inline-flex; align-items: center;
+  color: var(--zn-text-2); border-radius: var(--zn-r-chip);
+  font: 450 11.5px/1 var(--font-ui); font-style: normal;
+}
+.seg i.is-on { color: var(--zn-text); background: var(--zn-raised); box-shadow: inset 0 0 0 1px var(--zn-line); }
+
+.win-row.is-slider { row-gap: var(--zn-3); }
+.readout { color: var(--zn-text); font: 500 12.5px/1 var(--font-display); font-variant-numeric: tabular-nums; }
+.slider { position: relative; grid-column: 1 / -1; display: flex; align-items: center; height: 14px; }
+.slider .track { flex: 1; height: 4px; border-radius: 999px; background: var(--zn-raised); }
+.slider .fill { display: block; width: 40%; height: 100%; border-radius: 999px; background: var(--zn-line-strong); }
+.slider .thumb {
+  position: absolute; left: 40%; top: 50%;
+  width: 13px; height: 13px; margin-left: -6.5px;
+  transform: translateY(-50%);
+  border-radius: 50%; background: var(--zn-solid);
+  box-shadow: 0 0 0 1px var(--zn-line-strong);
+}
+
+/* ── Privacy ──────────────────────────────────────────────────────────────── */
+
+.privacy { text-align: center; }
+.nots {
+  display: grid; gap: var(--zn-2);
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  max-width: 700px; margin-inline: auto;
+}
+.nots li {
+  display: grid; justify-items: center; gap: var(--zn-3);
+  padding: var(--zn-8) var(--zn-4);
+  border: 1px solid var(--zn-line);
+  border-radius: var(--zn-r-panel);
+  background: var(--zn-sunken);
+}
+.nots .ico { width: 24px; height: 24px; color: var(--zn-text-2); stroke-width: 1.5; }
+.nots b { font: 500 13.5px/1 var(--font-ui); letter-spacing: -.01em; }
+.privacy-note {
+  margin-top: var(--zn-6);
+  color: var(--zn-text-2);
+  font: 400 clamp(15px, 2.2vw, 19px)/1.4 var(--font-display);
+  letter-spacing: -.02em;
+}
+
+/* ── Download ─────────────────────────────────────────────────────────────── */
+
+.cta { padding-top: clamp(40px, 6vh, 64px); }
+.cta-inner {
+  display: grid; justify-items: center;
+  padding: clamp(48px, 8vh, 80px) var(--zn-6);
+  border: 1px solid var(--zn-line);
+  border-radius: var(--zn-r-window);
+  /* One soft highlight from the top-left, as on the app's licence card. */
+  background:
+    radial-gradient(120% 140% at 50% -20%, rgba(255, 255, 255, .07), transparent 60%),
+    var(--zn-sunken);
+  text-align: center;
+}
+.cta-inner .brand-mark { color: var(--zn-text); opacity: .9; }
+.cta-inner h2 {
+  margin: var(--zn-5) 0 var(--zn-6);
+  font: 600 clamp(26px, 4vw, 38px)/1.1 var(--font-display);
+  letter-spacing: -.032em;
+}
+.cta-meta { margin-top: var(--zn-4); color: var(--zn-text-3); font-size: 11.5px; }
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+
+.foot {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--zn-4);
+  max-width: var(--page);
+  margin-inline: auto;
+  padding: var(--zn-6) clamp(var(--zn-4), 4vw, var(--zn-8)) var(--zn-10);
+  border-top: 1px solid var(--zn-line);
+}
+.foot nav { display: flex; flex-wrap: wrap; gap: var(--zn-5); margin-left: auto; }
+.foot nav a { color: var(--zn-text-3); font-size: 12px; transition: color .15s var(--zn-ease); }
+.foot nav a:hover { color: var(--zn-text); }
+
+/* ── Scroll reveal ────────────────────────────────────────────────────────── */
+
+.reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity .5s var(--zn-ease), transform .5s var(--zn-ease);
+}
+.reveal.is-in { opacity: 1; transform: none; }
+
+/* ── Narrow ───────────────────────────────────────────────────────────────── */
+
+@media (max-width: 860px) {
+  .nav-links { display: none; }
+  .nav { grid-template-columns: 1fr auto; }
+  .split, .split.is-reverse { grid-template-columns: minmax(0, 1fr); text-align: center; }
+  .split.is-reverse .split-copy { order: 0; }
+  .beat-grid { grid-template-columns: minmax(0, 1fr); }
+  .beat { grid-template-columns: 96px minmax(0, 1fr); justify-items: start; text-align: left;
+          display: grid; align-items: center; column-gap: var(--zn-4); padding: var(--zn-5); }
+  .beat-art { width: 96px; height: 96px; grid-row: span 2; }
+  .beat h3 { margin-top: 0; align-self: end; }
+  .beat p { align-self: start; }
+  .win-body { grid-template-columns: minmax(0, 1fr); }
+  .win-side { flex-direction: row; align-items: center; gap: var(--zn-3); overflow-x: auto;
+              border-right: 0; border-bottom: 1px solid var(--zn-line); padding: var(--zn-3); }
+  .win-side h4, .win-search, .win-foot { display: none; }
+  .win-nav { flex-direction: row; }
+  .win-nav li { white-space: nowrap; }
+  .win-main { padding: var(--zn-6) var(--zn-5); }
+  .win-row { grid-template-columns: minmax(0, 1fr); gap: var(--zn-3); }
+  .win-row > :not(.win-copy) { justify-self: start; }
+  .stage { aspect-ratio: 4 / 3; max-height: none; }
+}
+
+@media (max-width: 520px) {
+  .hero-cta { flex-direction: column; align-items: stretch; }
+  .hero-cta .btn { justify-content: center; }
+  .aim-pair { grid-template-columns: minmax(0, 1fr); }
+  .stage { aspect-ratio: 1 / 1; max-height: none; }
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .reveal { opacity: 1; transform: none; transition: none; }
+  .slice, .hub, .pill, .scrim { transition-duration: .01ms !important; }
+  .art [class^="a-"], .art [class^="m-"],
+  .slice.is-fired .tile, .slice.is-fired .wave,
+  .slice.is-dwelling .dwell path { animation: none !important; }
+  .slice.is-fired .wave { display: none; }
+}
