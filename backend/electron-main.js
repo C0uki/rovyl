@@ -73,7 +73,25 @@ const http = require("http");
 const https = require("https");
 const url = require("url");
 
-const isDev = !app.isPackaged && process.env.NODE_ENV !== "production";
+/**
+ * Whether this is a real packaged build — the question `app.isPackaged` stopped answering.
+ *
+ * Electron derives `isPackaged` from the executable's file name: anything that is not
+ * `electron.exe` counts as packaged. `scripts/brand-dev-electron.cjs` renames the dev runtime to
+ * `Rovyl.exe` so Windows stops introducing the app as Electron — and from that rename on, every
+ * run from source claimed to be packaged. The updater configured itself and went looking for
+ * `node_modules/electron/dist/resources/app-update.yml`, the keyboard listener looked for its key
+ * server inside an `app.asar.unpacked` that only exists in an installed build, and `isDev` could
+ * never be true again.
+ *
+ * `process.defaultApp` does not depend on the name. Electron sets it when the runtime is handed an
+ * app path to run — `electron .`, which is how every launcher in `scripts/` starts it — and leaves
+ * it undefined in a packaged app. `app.isPackaged` is only ever wrong in the one direction, so the
+ * two together are the honest answer.
+ */
+const isPackagedBuild = app.isPackaged && !process.defaultApp;
+
+const isDev = !isPackagedBuild && process.env.NODE_ENV !== "production";
 
 /**
  * Distribution channel. The Microsoft Store forbids self-updating mechanisms — the store is what
@@ -3020,7 +3038,7 @@ function notifyRendererUpdateState(state, version, extra = {}) {
 const UPDATE_RECHECK_INTERVAL_MS = 6 * 60 * 60_000;
 
 function configureAutoUpdates() {
-  if (!app.isPackaged || process.platform !== "win32") return;
+  if (!isPackagedBuild || process.platform !== "win32") return;
 
   /**
    * Store build: we do not even register the listeners. Not calling `checkForUpdates` is not
@@ -4548,7 +4566,7 @@ app.whenReady().then(async () => {
   function ensureKeyboardListener() {
     if (keyboardListener) return keyboardListener;
     try {
-      const keyServerPath = app.isPackaged
+      const keyServerPath = isPackagedBuild
         ? path.join(
             process.resourcesPath,
             "app.asar.unpacked",
@@ -7588,7 +7606,7 @@ ipcMain.handle("get-app-version", () => app.getVersion());
  */
 const buildChannel = () => {
   if (isStoreBuild()) return "store";
-  if (!app.isPackaged || process.platform !== "win32") return "unsupported";
+  if (!isPackagedBuild || process.platform !== "win32") return "unsupported";
   return "direct";
 };
 
