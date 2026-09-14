@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="docs/media/banner.png" alt="" width="720">
-
 # Rovyl
 
 **One gesture. Any destination.**
@@ -13,6 +11,8 @@ A radial launcher for Windows. Hold the middle mouse button anywhere, aim, relea
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4?style=flat-square)
 ![Electron](https://img.shields.io/badge/Electron-28-47848f?style=flat-square&logo=electron&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-149eca?style=flat-square&logo=react&logoColor=white)
+
+<img src="docs/media/banner.png" alt="" width="720">
 
 </div>
 
