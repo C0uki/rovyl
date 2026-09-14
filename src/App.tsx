@@ -255,7 +255,7 @@ export default function App() {
    * gets painted.
    */
   const [settingsNav, setSettingsNav] = useState<SettingsNav>({
-    sectionId: 'general',
+    sectionId: 'spaces',
     isSidebarCollapsed: false,
   });
   const isDashboardOpenRef = useRef(false);
@@ -1483,7 +1483,7 @@ export default function App() {
                       setIsAppReady(false);
                       setIsLoaded(false);
                       /** Resetting everything and reopening on Advanced, where the button was pressed, would be odd. */
-                      setSettingsNav({ sectionId: 'general', isSidebarCollapsed: false, focusShortcut: null });
+                      setSettingsNav({ sectionId: 'spaces', isSidebarCollapsed: false, focusShortcut: null });
                     } catch(e) {}
                     setApps(MINIMAL_MAIN_WORKSPACE_APPS); 
                     setConfig(DEFAULT_UI_CONFIG); 

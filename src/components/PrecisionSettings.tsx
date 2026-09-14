@@ -195,11 +195,11 @@ interface SettingItem {
  * Monochrome — color stays reserved for action or state, never for navigation.
  */
 const SECTIONS: Array<{ id: SectionId; label: string; caption: string; icon: LucideIcon }> = [
-  { id: 'general', label: 'General', caption: 'Core Rovyl behavior.', icon: Settings },
-  { id: 'trigger', label: 'Activation', caption: 'How and where the wheel appears.', icon: Mouse },
-  { id: 'appearance', label: 'Appearance', caption: 'Shape, presence, and theme.', icon: Palette },
   { id: 'spaces', label: 'Workspaces', caption: 'Contexts and their shortcuts.', icon: SquareStack },
+  { id: 'trigger', label: 'Activation', caption: 'How and where the wheel appears.', icon: Mouse },
   { id: 'advanced', label: 'Advanced', caption: 'Performance, protection, and data.', icon: Shield },
+  { id: 'appearance', label: 'Appearance', caption: 'Shape, presence, and theme.', icon: Palette },
+  { id: 'general', label: 'General', caption: 'Core Rovyl behavior.', icon: Settings },
 ];
 
 export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
@@ -216,11 +216,11 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
   const { t, dir } = useTranslation(config.language);
 
   const sectionsList = useMemo(() => [
-    { id: 'general' as const, label: t('general'), caption: t('generalDesc'), icon: Settings },
-    { id: 'trigger' as const, label: t('trigger'), caption: t('triggerDesc'), icon: Mouse },
-    { id: 'appearance' as const, label: t('appearance'), caption: t('appearanceDesc'), icon: Palette },
     { id: 'spaces' as const, label: t('workspaces'), caption: t('workspacesDesc'), icon: SquareStack },
+    { id: 'trigger' as const, label: t('trigger'), caption: t('triggerDesc'), icon: Mouse },
     { id: 'advanced' as const, label: t('advanced'), caption: t('advancedDesc'), icon: Shield },
+    { id: 'appearance' as const, label: t('appearance'), caption: t('appearanceDesc'), icon: Palette },
+    { id: 'general' as const, label: t('general'), caption: t('generalDesc'), icon: Settings },
   ], [t]);
 
   /**
