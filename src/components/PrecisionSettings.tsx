@@ -41,7 +41,8 @@ import {
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { AppItem, UIConfig, UpdateChannel, UpdateState, Workspace } from '../types';
+import { SETTINGS_CORNERS } from '../types';
+import type { AppItem, SettingsCorner, UIConfig, UpdateChannel, UpdateState, Workspace } from '../types';
 import { DEFAULT_UI_CONFIG } from '../defaults';
 import { normalizeTaskbarOverlay } from '../utils/taskbarOverlay';
 import { getIcon } from '../iconMap';
@@ -1285,6 +1286,43 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
             onOpen: () => setEditor({ kind: 'blocked' as const }),
           },
         ] : []),
+        {
+          key: 'settingsCorner', configKey: 'showSettingsCorner', group: 'Settings shortcut',
+          title: 'Settings button on the wheel',
+          /**
+           * Said with its cost, because it has one that shows: the overlay normally opens as a box
+           * around the wheel, and a corner only means the screen's corner if the window is the
+           * screen. And said with its one exclusion — aiming by direction hides the pointer, so
+           * there is no hand to bring to a corner and the gear is not drawn in that mode.
+           */
+          description:
+            config.radialInstantActivate === 'dwell'
+              ? 'A gear in the corner of the open wheel, one click from these settings. Launch without clicking aims by direction and hides the pointer, so the gear stays off while that is on.'
+              : 'A gear in the corner of the open wheel, one click from these settings. The wheel then opens over the whole screen instead of a box around itself, so the corner is a real one.',
+          kind: 'bool', enabled: config.showSettingsCorner === true,
+          keywords: 'gear cog icon corner open settings preferences shortcut button',
+          onToggle: () => update('showSettingsCorner', !config.showSettingsCorner),
+        },
+        ...(config.showSettingsCorner === true ? [{
+          key: 'settingsCornerPosition', configKey: 'settingsCorner' as const, group: 'Settings shortcut',
+          title: 'Which corner',
+          description: 'Where the gear sits. It steps inboard if the battery or weather pill is already there.',
+          /**
+           * A select: four corner names are ~380px of segmented control, wider than the column,
+           * and the same reason the Language row stopped being one.
+           */
+          kind: 'select' as const,
+          current: SETTINGS_CORNERS.includes(config.settingsCorner as SettingsCorner)
+            ? (config.settingsCorner as SettingsCorner)
+            : 'top-right',
+          choices: [
+            { value: 'top-right', label: 'Top right' },
+            { value: 'top-left', label: 'Top left' },
+            { value: 'bottom-right', label: 'Bottom right' },
+            { value: 'bottom-left', label: 'Bottom left' },
+          ],
+          onChange: (value: number | string) => update('settingsCorner', value as SettingsCorner),
+        }] : []),
         {
           key: 'export', group: 'Data', title: 'Export settings',
           description: 'Save a portable copy of your configuration.',

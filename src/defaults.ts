@@ -346,6 +346,12 @@ export const DEFAULT_UI_CONFIG: UIConfig = {
   showBattery: false,
   showWeather: false,
   clockPosition: "top-center",
+  /**
+   * Off: it paints something over the desktop that was never there, and it costs the overlay its
+   * cheap box (see `showSettingsCorner`). Whoever wants a visible way into Settings turns it on.
+   */
+  showSettingsCorner: false,
+  settingsCorner: "top-right",
   gameMode: {
     enabled: false,
     mode: "list",

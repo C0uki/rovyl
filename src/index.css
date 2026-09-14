@@ -1555,6 +1555,36 @@
   --zn-dur-op: 165ms;
 }
 
+/* The corner gear: the HUD pill's plate, sized for a single glyph. It carries
+   `zn-radial-pill` too, so it enters and leaves with the rest of the wheel. */
+.zn-radial-gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(8, 8, 10, 0.72);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  /* The whole shorthand, like `.zn-radial-hub`: this rule comes after the shared one, so a
+     partial declaration here would drop the enter/exit transform and opacity. */
+  transition:
+    transform var(--zn-dur, 220ms) var(--zn-ease, cubic-bezier(.2, .82, .28, 1)),
+    opacity var(--zn-dur-op, 175ms) ease-out,
+    background-color 140ms ease-out,
+    border-color 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.zn-radial-gear:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(20, 20, 24, 0.88);
+  color: rgba(255, 255, 255, 0.92);
+}
+
 /* `performanceMode`: same drawing, no overshoot and shorter. */
 .zn-radial--fast .zn-radial-slice,
 .zn-radial--fast .zn-radial-hub,

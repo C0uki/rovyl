@@ -178,7 +178,15 @@ export default function RadialApp() {
        * Past a certain dimming the scrim no longer fades out inside that box, and a box that shows
        * its own edge has to stop being a box: main opens the overlay over the whole monitor instead.
        */
-      fullBleed: radialScrimNeedsFullBleed(config.backdropOpacity),
+      fullBleed:
+        radialScrimNeedsFullBleed(config.backdropOpacity) ||
+        /**
+         * The corner gear asks for the same thing, for the same reason: the box has no corners
+         * worth the name. Placed in it, the gear floats a couple of hundred pixels off the wheel
+         * on a diagonal — not in the corner of anything the user can see. Over the monitor, the
+         * corner is the screen's.
+         */
+        config.showSettingsCorner === true,
       /** Which monitor the wheel is born on — main needs it BEFORE an open. */
       monitor: config.radialMonitor === 'cursor' ? 'cursor' : 'primary',
       /** And where on it. Same reason: the box is placed before this renderer hears about the open. */
@@ -195,6 +203,7 @@ export default function RadialApp() {
     config.menuRadius,
     config.iconSize,
     config.backdropOpacity,
+    config.showSettingsCorner,
     config.radialMonitor,
     config.radialPlacement,
   ]);
@@ -523,6 +532,19 @@ export default function RadialApp() {
 
   handleMenuCloseRef.current = handleMenuClose;
 
+  /**
+   * The corner gear.
+   *
+   * The wheel comes down through its own close path first — that is what tells main the overlay is
+   * idle again and puts the taskbar back — and only then is Settings asked for. `toggle-settings`
+   * would take the wheel down by itself (`forceCloseRadial`), but from behind this renderer's
+   * back, leaving it to hear about its own close over IPC.
+   */
+  const handleOpenSettings = useCallback(() => {
+    handleMenuCloseRef.current?.(null);
+    window.electron?.toggleSettings?.();
+  }, []);
+
   /* ------------------------------------------------------------------ */
 
   const radialApps = useMemo(() => {
@@ -557,6 +579,7 @@ export default function RadialApp() {
         discoveryPhase={discoveryPhase}
         onWorkspaceSwitch={handleWorkspaceSwitch}
         onDirectionHintSeen={handleDirectionHintSeen}
+        onOpenSettings={handleOpenSettings}
         currentWorkspace={radialCurrentWorkspace}
         animationReady={
           radialPendingPaintToken === null ||

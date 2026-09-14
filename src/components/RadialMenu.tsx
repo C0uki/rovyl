@@ -5,7 +5,7 @@ import { CornerUpLeft } from 'lucide-react';
 import { SmartIcon } from './SmartIcon';
 import { RovylLogo } from './RovylLogo';
 import { uiString } from '../strings';
-import { RadialHud } from './RadialHud';
+import { RadialHud, RadialSettingsCorner, hudOccupiedRegion, resolveSettingsCorner } from './RadialHud';
 import {
   filterRadialApps,
   getRootRadialApps,
@@ -218,6 +218,11 @@ interface RadialMenuProps {
    * hint off screen mid-sentence, punishing the one person it was written for.
    */
   onDirectionHintSeen?: () => void;
+  /**
+   * The corner gear was pressed: take the wheel down and put Settings up. Absent — the wheel used
+   * anywhere that has no Settings window to open — withdraws the gear entirely.
+   */
+  onOpenSettings?: () => void;
 }
 
 /**
@@ -1131,6 +1136,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
   windowOrigin = null,
   onWorkspaceSwitch,
   onDirectionHintSeen,
+  onOpenSettings,
   currentWorkspace,
   animationReady = true,
   updateReady = false,
@@ -3201,6 +3207,10 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
     [bo, backdropRadius, position.x, position.y],
   );
 
+  const settingsCorner = resolveSettingsCorner(config.settingsCorner);
+  const showSettingsGear =
+    config.showSettingsCorner === true && !!onOpenSettings && !directionMode;
+
   return (
     <div
       data-zenith-radial-modal="true"
@@ -3231,6 +3241,23 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
             batteryLevel={batteryLevel}
             weather={weather}
           />
+
+          {/*
+            The way into Settings that does not have to be known about — off unless asked for.
+
+            Not in direction mode: there the pointer is hidden and parked at the centre, so no hand
+            can reach a corner, and the click that tried would launch the slice it was aiming
+            across. A gear that cannot be pressed is worse than no gear, so it is withdrawn rather
+            than disabled — the same rule the taskbar rows follow in Settings.
+          */}
+          {showSettingsGear && (
+            <RadialSettingsCorner
+              isOpen={isOpen && !isExiting && bloom && !echoActive}
+              corner={settingsCorner}
+              dodgeStatus={hudOccupiedRegion(config, batteryLevel, weather) === settingsCorner}
+              onOpen={onOpenSettings!}
+            />
+          )}
 
           {/*
             What has been typed, and what it left. Fixed to the viewport rather than hung off the

@@ -105,6 +105,21 @@ export const CLOCK_HUD_POSITIONS = [
 
 export type ClockHudPosition = (typeof CLOCK_HUD_POSITIONS)[number];
 
+/**
+ * Where the settings gear may sit while the wheel is open.
+ *
+ * Corners only, unlike the HUD's regions: the middle of an edge is the one place a small target
+ * must not be, because that is where a wedge aimed at the top or the bottom of the wheel ends up.
+ */
+export const SETTINGS_CORNERS = [
+  'top-left',
+  'top-right',
+  'bottom-left',
+  'bottom-right',
+] as const;
+
+export type SettingsCorner = (typeof SETTINGS_CORNERS)[number];
+
 export interface UIConfig {
   accentColor: string;
   /** Color applied to the item pointed at in the radial menu. Optional for compatibility with old configs. */
@@ -262,6 +277,25 @@ export interface UIConfig {
    * Means nothing on its own: with number launching off, no tile is numbered whatever this says.
    */
   radialNumberLabels?: boolean;
+  /**
+   * A gear in a corner of the open wheel, which opens Settings.
+   *
+   * Rovyl's other doors to Settings are all gestures you have to know about — the tray icon, a
+   * double middle-click — and none of them is visible from the wheel itself. This one is, at the
+   * cost of one more thing painted over the desktop, so it is opt-in.
+   *
+   * Turning it on makes the overlay cover the whole monitor (`radialScrimNeedsFullBleed` asks for
+   * the same thing at high dimming): the window is normally only a box around the wheel, and a
+   * "corner" of that box is not a corner of the screen — it is a gear floating beside the wheel.
+   *
+   * It is NOT offered while click-free launching aims by direction: that mode hides the pointer
+   * and parks it at the centre, so there is no way to reach a corner, and a click anywhere
+   * launches whatever the gesture is pointing at. The gear hides itself there rather than sit on
+   * screen unclickable.
+   */
+  showSettingsCorner?: boolean;
+  /** Which corner it sits in. Absent means `top-right`. */
+  settingsCorner?: SettingsCorner;
   openAtLogin?: boolean; // New: Start app at login
   /**
    * Whether the global shortcut opens the wheel at all.

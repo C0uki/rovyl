@@ -1,6 +1,6 @@
 import React from 'react';
-import { Cloud } from 'lucide-react';
-import { CLOCK_HUD_POSITIONS, ClockHudPosition, UIConfig } from '../types';
+import { Cloud, Settings } from 'lucide-react';
+import { CLOCK_HUD_POSITIONS, ClockHudPosition, SETTINGS_CORNERS, SettingsCorner, UIConfig } from '../types';
 
 export type ClockHudRegion = ClockHudPosition;
 
@@ -150,6 +150,35 @@ export interface RadialHudProps {
   weather: { temp: number; condition: string } | null;
 }
 
+/**
+ * Whether the strip has anything to paint at all.
+ *
+ * Exported because the settings gear has to know: the two are placed independently and can be
+ * asked for the same corner, and only something that already answers this question can tell an
+ * occupied corner from an empty one.
+ */
+export function hudStatusVisible(
+  config: UIConfig,
+  batteryLevel: number | null,
+  weather: { temp: number; condition: string } | null,
+): boolean {
+  return (
+    (config.showBattery && batteryLevel !== null) ||
+    (config.showWeather && !config.performanceMode && !!weather)
+  );
+}
+
+/** The corner the strip occupies, or `null` when it is not on screen — see `hudStatusVisible`. */
+export function hudOccupiedRegion(
+  config: UIConfig,
+  batteryLevel: number | null,
+  weather: { temp: number; condition: string } | null,
+): ClockHudRegion | null {
+  return hudStatusVisible(config, batteryLevel, weather)
+    ? resolveHudRegion(config.clockPosition)
+    : null;
+}
+
 export const RadialHud: React.FC<RadialHudProps> = ({
   isOpen,
   config,
@@ -159,10 +188,7 @@ export const RadialHud: React.FC<RadialHudProps> = ({
   const region = resolveHudRegion(config.clockPosition);
   const { isBottom, align, shellClass, innerClass } = getHudLayout(region);
 
-  const showStatus =
-    (config.showBattery && batteryLevel !== null) ||
-    (config.showWeather && !config.performanceMode && !!weather);
-  if (!showStatus) return null;
+  if (!hudStatusVisible(config, batteryLevel, weather)) return null;
 
   const enterY = isBottom ? 10 : -10;
 
@@ -186,6 +212,81 @@ export const RadialHud: React.FC<RadialHudProps> = ({
           weather={weather}
         />
       </div>
+    </div>
+  );
+};
+
+
+/** Absent or unknown → top-right, which is what `DEFAULT_UI_CONFIG` says and where a gear is looked for. */
+export function resolveSettingsCorner(corner: UIConfig['settingsCorner']): SettingsCorner {
+  return corner && SETTINGS_CORNERS.includes(corner) ? corner : 'top-right';
+}
+
+export interface RadialSettingsCornerProps {
+  isOpen: boolean;
+  corner: SettingsCorner;
+  /**
+   * The battery/weather strip is in this same corner. The gear steps inboard by one pill's height
+   * rather than sharing the spot: both are placed from the same edge, so left alone they stack on
+   * top of each other.
+   */
+  dodgeStatus?: boolean;
+  onOpen: () => void;
+}
+
+/**
+ * The gear, in a corner of the open wheel.
+ *
+ * Every mouse event it takes is stopped dead. The wheel confirms its aim from a `mouseup` on the
+ * WINDOW — anywhere on the window, because by direction the target is a vector and not whatever
+ * the pointer is over — so a click that reached it would open Settings AND launch whichever slice
+ * the corner happens to point at. React 17+ propagates the stop to the native event (the same
+ * mechanism `.zn-radial--nocursor` relies on, in reverse), which is what keeps that listener out.
+ */
+export const RadialSettingsCorner: React.FC<RadialSettingsCornerProps> = ({
+  isOpen,
+  corner,
+  dodgeStatus,
+  onOpen,
+}) => {
+  const isBottom = corner.startsWith('bottom');
+  const isRight = corner.endsWith('right');
+  const shellClass = [
+    'fixed z-[12] p-5 sm:p-6 md:p-7',
+    isBottom ? 'bottom-0' : 'top-0',
+    isRight ? 'right-0' : 'left-0',
+  ].join(' ');
+
+  const swallow = (event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  return (
+    <div className={shellClass} style={{ [isBottom ? 'marginBottom' : 'marginTop']: dodgeStatus ? 46 : 0 }}>
+      <button
+        type="button"
+        className={`zn-radial-pill zn-radial-gear ${isOpen ? '' : 'pointer-events-none'}`}
+        style={{
+          ['--zn-tf' as string]: `translate3d(0, ${isOpen ? 0 : (isBottom ? 10 : -10)}px, 0)`,
+          ['--zn-op' as string]: isOpen ? 1 : 0,
+          ['--zn-dur' as string]: isOpen ? '260ms' : '140ms',
+          ['--zn-dur-op' as string]: isOpen ? '200ms' : '120ms',
+        }}
+        aria-label="Open Rovyl settings"
+        title="Rovyl settings"
+        tabIndex={-1}
+        onMouseDown={swallow}
+        onMouseUp={swallow}
+        onAuxClick={swallow}
+        onContextMenu={swallow}
+        onClick={(event) => {
+          swallow(event);
+          onOpen();
+        }}
+      >
+        <Settings size={16} strokeWidth={1.9} aria-hidden />
+      </button>
     </div>
   );
 };
