@@ -1,6 +1,7 @@
 const path = require('node:path');
 const { execFileSync, spawn, spawnSync } = require('node:child_process');
 const { waitForPort, isPortOpen } = require('./wait-for-port.cjs');
+const { brandDevElectron } = require('./brand-dev-electron.cjs');
 
 /**
  * Runs the dev pair — Vite, then Electron once Vite is actually listening.
@@ -125,6 +126,9 @@ function track(child, label) {
    */
   const env = { ...process.env, NODE_ENV: 'development' };
   delete env.ELECTRON_RUN_AS_NODE;
+
+  /** Windows reads the app's name and icon off the exe, not off `app.setName`. See the script. */
+  await brandDevElectron({ quiet: true });
 
   const electronExe = require(path.join(root, 'node_modules', 'electron'));
   track(

@@ -1,6 +1,7 @@
 const path = require("path");
 const { spawn } = require("child_process");
 const { waitForPort } = require("./wait-for-port.cjs");
+const { brandDevElectron } = require("./brand-dev-electron.cjs");
 
 /**
  * Standalone Electron launcher, for running Electron against a Vite you started yourself.
@@ -27,6 +28,9 @@ const projectRoot = path.join(__dirname, "..");
     console.log("Sanitizing environment: Removing ELECTRON_RUN_AS_NODE");
     delete env.ELECTRON_RUN_AS_NODE;
   }
+
+  /** Windows reads the app's name and icon off the exe, not off `app.setName`. See the script. */
+  await brandDevElectron({ quiet: true });
 
   const electron = require("electron");
   const child = spawn(electron, ["."], {
