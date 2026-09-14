@@ -46,8 +46,16 @@ export interface MenuPlacement {
   drop: 'down' | 'up';
 }
 
-/** Matches the CSS: `--zn-1` of padding either side of 38px rows, capped by `max-height`. */
-export const MENU_ROW_HEIGHT = 38;
+/**
+ * Mirrors the CSS, and has to be kept in step with it by hand.
+ *
+ * An option is `min-height: var(--zn-ctl)` (32px) and the list adds `var(--zn-1)` (4px) of padding
+ * top and bottom. These numbers only decide whether the popup FLIPS, so drift shows up as a list
+ * that opens downward into a space it does not quite fit, never as a broken layout — which is
+ * exactly why it would go unnoticed.
+ */
+export const MENU_ROW_HEIGHT = 32;
+export const MENU_LIST_PADDING = 8;
 export const MENU_MAX_HEIGHT = 320;
 export const MENU_MIN_WIDTH = 208;
 /** Breathing room from the trigger, and the smallest gap tolerated at a window edge. */
@@ -55,7 +63,7 @@ export const MENU_GAP = 6;
 export const MENU_MARGIN = 8;
 
 export function menuHeight(count: number): number {
-  return Math.min(count * MENU_ROW_HEIGHT + 10, MENU_MAX_HEIGHT);
+  return Math.min(count * MENU_ROW_HEIGHT + MENU_LIST_PADDING, MENU_MAX_HEIGHT);
 }
 
 /**

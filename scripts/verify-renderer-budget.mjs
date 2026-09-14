@@ -255,6 +255,33 @@ if (missingFaces.length) {
   );
 }
 
+/**
+ * Controls that state their own typography have to outrank the shell's own reset.
+ *
+ * `.zs-shell button, input, textarea, select { font: inherit }` is a class-plus-type selector, so a
+ * bare `.zs-select-trigger { font-size: 12px }` loses to it — and loses silently, because the
+ * declaration is right there in the stylesheet looking correct while the button renders at the
+ * inherited 16px. That shipped once, on the language picker. Every control below states its own
+ * font and renders as one of those reset elements, so each must stay `.zs-shell`-scoped; the fix
+ * is to write `.zs-shell .zs-thing`, never to delete the name from this list.
+ */
+const SHELL_SCOPED_CONTROLS = [".zs-btn", ".zs-select-trigger"];
+
+for (const styleSheet of assetNames.filter((name) => name.endsWith(".css"))) {
+  const css = readFileSync(join(distDir, "assets", styleSheet), "utf8");
+  for (const control of SHELL_SCOPED_CONTROLS) {
+    const name = control.replace(/\./g, "\\.");
+    /** The rule carrying the typography is the one declaring the `font` shorthand. */
+    const scoped = new RegExp(`\\.zs-shell\\s+${name}\\{[^}]*font:`);
+    const unscoped = new RegExp(`(^|[,}])${name}\\{[^}]*font:`);
+    if (!scoped.test(css) && unscoped.test(css)) {
+      problems.push(
+        `${control} sets its own font with no .zs-shell scope in ${styleSheet} — the shell's "font: inherit" reset outranks a bare class, so it renders at the inherited base size`,
+      );
+    }
+  }
+}
+
 /** The same failure seen from the other side: an unresolved specifier left verbatim in the output. */
 for (const styleSheet of assetNames.filter((name) => name.endsWith(".css"))) {
   const css = readFileSync(join(distDir, "assets", styleSheet), "utf8");
