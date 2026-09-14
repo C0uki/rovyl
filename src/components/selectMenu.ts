@@ -21,7 +21,20 @@ export interface MenuRect {
   width: number;
 }
 
-export interface MenuViewport {
+/**
+ * The box the popup must stay inside, in viewport coordinates — the settings shell, not the window.
+ *
+ * It is also the element the popup is positioned against, and that is not a free choice. The panel
+ * is wrapped in a `motion.div` carrying `filter: blur()` and an `x` transform (`PanelTransition`),
+ * and a filter creates a containing block for `position: fixed` — so "fixed" inside the panel is
+ * not viewport-relative at all, it is relative to a box that starts below the title bar. The first
+ * version of this menu used fixed and viewport coordinates and opened one title-bar's-height too
+ * low, every time. Absolute coordinates against a measured container cannot drift that way,
+ * whatever a future ancestor does with transforms.
+ */
+export interface MenuBounds {
+  top: number;
+  left: number;
   width: number;
   height: number;
 }
@@ -46,36 +59,41 @@ export function menuHeight(count: number): number {
 }
 
 /**
- * Where the popup sits, in viewport coordinates.
+ * Where the popup sits, as offsets INSIDE `bounds` — both inputs are viewport coordinates, the
+ * result is relative, because that is what an absolutely positioned child of `bounds` needs.
  *
- * Down unless down does not fit and up fits better — "better", not "at all", because a window
- * short enough to squeeze both should still pick the roomier side rather than flipping to a list
- * that is merely less clipped. The left edge is clamped twice over: once to keep the popup's right
- * edge aligned to the trigger's, and once so a popup wider than its trigger cannot leave the
- * window on either side, which is the case that a single `Math.max` silently gets wrong in RTL.
+ * Down unless down does not fit and up fits better — "better", not "at all", because a panel short
+ * enough to squeeze both should still take the roomier side rather than flipping to a list that is
+ * merely less clipped. The left edge is clamped twice over: once to hold the popup's right edge to
+ * the trigger's, and once so a popup wider than its trigger cannot leave the panel on either side,
+ * which is the case a single `Math.max` silently gets wrong in RTL.
  */
 export function selectMenuPlacement(
   rect: MenuRect,
-  viewport: MenuViewport,
+  bounds: MenuBounds,
   count: number,
 ): MenuPlacement {
   const height = menuHeight(count);
   const width = Math.max(rect.width, MENU_MIN_WIDTH);
-  const roomBelow = viewport.height - rect.bottom - (MENU_GAP + MENU_MARGIN);
-  const roomAbove = rect.top - (MENU_GAP + MENU_MARGIN);
+  const floor = bounds.top + bounds.height;
+  const roomBelow = floor - rect.bottom - (MENU_GAP + MENU_MARGIN);
+  const roomAbove = rect.top - bounds.top - (MENU_GAP + MENU_MARGIN);
   const drop: 'down' | 'up' = roomBelow >= height || roomBelow >= roomAbove ? 'down' : 'up';
+  const minLeft = bounds.left + MENU_MARGIN;
   const left = Math.min(
-    Math.max(MENU_MARGIN, rect.right - width),
-    Math.max(MENU_MARGIN, viewport.width - width - MENU_MARGIN),
+    Math.max(minLeft, rect.right - width),
+    Math.max(minLeft, bounds.left + bounds.width - width - MENU_MARGIN),
   );
+  const top =
+    drop === 'down'
+      ? rect.bottom + MENU_GAP
+      : Math.max(bounds.top + MENU_MARGIN, rect.top - MENU_GAP - height);
   return {
-    left,
     width,
     drop,
-    top:
-      drop === 'down'
-        ? rect.bottom + MENU_GAP
-        : Math.max(MENU_MARGIN, rect.top - MENU_GAP - height),
+    /** Back into the container's own coordinate space, which is where it will be painted. */
+    left: left - bounds.left,
+    top: top - bounds.top,
   };
 }
 

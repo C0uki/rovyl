@@ -639,10 +639,10 @@
 .zs-select-trigger.is-open > svg { rotate: 180deg; color: var(--zn-text-2); }
 
 /* Transparent, full-bleed, and only there to catch the click that dismisses. */
-.zs-select-shade { position: fixed; inset: 0; z-index: 60; }
+.zs-select-shade { position: absolute; inset: 0; z-index: 60; }
 
 .zs-select-list {
-  position: fixed; z-index: 61;
+  position: absolute; z-index: 61;
   max-height: 320px; overflow-y: auto; overscroll-behavior: contain;
   padding: var(--zn-1); margin: 0;
   border-radius: var(--zn-r-panel); background: var(--zn-surface);

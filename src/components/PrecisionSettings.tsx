@@ -1732,6 +1732,16 @@ function normalizeHexInput(value: string): string | null {
  * committing, focus returning to the trigger on close, and the active option kept in view. Those
  * are not embellishments on a dropdown — for anyone not using a mouse, they ARE the dropdown.
  */
+/**
+ * The shell, which is both where the popup is painted and what it is measured against.
+ *
+ * It has to be the same element for both or the arithmetic is against one box and the rendering
+ * against another. `document.body` is not an option: the theme tokens and `dir` cascade from the
+ * shell, so a popup parented to the body would come out unthemed and, in Arabic, the wrong way
+ * round.
+ */
+const portalTarget = () => document.getElementById('settings-container');
+
 function SelectSettingControl({ item, describedBy }: { item: SettingItem; describedBy?: string }) {
   const reduceMotion = useReducedMotion();
   const choices = item.choices ?? [];
@@ -1752,20 +1762,29 @@ function SelectSettingControl({ item, describedBy }: { item: SettingItem; descri
   const listId = `${item.key}-listbox`;
 
   /**
-   * Anchored to the trigger in viewport coordinates, and re-measured rather than remembered.
+   * Anchored to the trigger, measured against the shell, re-measured rather than remembered.
    *
-   * The row lives inside `.zs-scroll`, so an absolutely positioned popup would be clipped by that
-   * scroller as soon as it was taller than the space left below the row. Fixed escapes the clip —
-   * the shell sets no transform while it is open, so nothing re-parents the containing block — but
-   * fixed also means the popup does not travel with the row, hence the listeners below.
+   * Two constraints meet here. The row lives inside `.zs-scroll`, so a popup positioned within the
+   * row would be clipped by that scroller the moment it was taller than the space beneath — hence
+   * the portal out to the shell. But the shell sits inside `PanelTransition`'s `motion.div`, which
+   * carries `filter: blur()`, and a filter makes its element the containing block for any
+   * `position: fixed` descendant. So "fixed" here is not viewport-relative; it is relative to a box
+   * starting below the title bar, and the first version of this menu duly opened a title-bar's
+   * height too low. Absolute coordinates measured against the shell are immune to that, and to
+   * whatever a future ancestor does with transforms.
+   *
+   * Re-measured on scroll and resize because an absolute popup does not travel with a row that
+   * scrolls underneath it.
    */
   const measure = useCallback(() => {
     const trigger = triggerRef.current;
-    if (!trigger) return;
+    const container = portalTarget();
+    if (!trigger || !container) return;
+    const bounds = container.getBoundingClientRect();
     setPlacement(
       selectMenuPlacement(
         trigger.getBoundingClientRect(),
-        { width: window.innerWidth, height: window.innerHeight },
+        { top: bounds.top, left: bounds.left, width: bounds.width, height: bounds.height },
         choices.length,
       ),
     );
@@ -1947,7 +1966,7 @@ function SelectSettingControl({ item, describedBy }: { item: SettingItem; descri
             ))}
           </motion.div>
         </>,
-        document.getElementById('settings-container') ?? document.body,
+        portalTarget() ?? document.body,
       )}
     </div>
   );

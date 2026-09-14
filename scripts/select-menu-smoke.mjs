@@ -3,9 +3,9 @@
  *
  * A custom dropdown is a promise to reimplement what `<select>` was doing for nothing, and the two
  * halves that are not markup are here: where the popup lands, and where a keystroke goes. Both
- * fail quietly. A placement bug shows up only in a short window or near a screen edge — the popup
- * is simply half off-screen, and only for the people it happens to. A type-ahead bug shows up only
- * when a letter is pressed twice, and reads as the list being stuck rather than as a bug.
+ * fail quietly. A placement bug shows up only in a short panel or near an edge — the popup is
+ * simply in the wrong place, and often only for the people it happens to. A type-ahead bug shows
+ * up only when a letter is pressed twice, and reads as the list being stuck rather than as a bug.
  */
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -39,6 +39,7 @@ try {
     menuHeight,
     MENU_MIN_WIDTH,
     MENU_MARGIN,
+    MENU_GAP,
     TYPE_AHEAD_RESET_MS,
   } = await import(pathToFileURL(join(outDir, "entry.mjs")).href);
 
@@ -59,78 +60,131 @@ try {
 
   /* ── placement ─────────────────────────────────────────────────────────── */
 
-  const VIEW = { width: 1280, height: 800 };
+  /**
+   * The real geometry, and the reason every assertion below reads in container coordinates.
+   *
+   * The settings shell does NOT start at the top of the window — it begins under the app's custom
+   * title bar, which is what `top: 36` stands for here. Placements come back relative to that box,
+   * so a correct downward placement is a small number like 6, never 6 + 36.
+   */
+  const SHELL = { top: 36, left: 0, width: 1280, height: 764 };
   /** A row control near the top of the settings panel: plenty of room underneath. */
   const roomy = { top: 200, bottom: 230, right: 900, width: 150 };
+  /** Viewport y to the container-relative y the popup will actually be painted at. */
+  const inShell = (viewportY) => viewportY - SHELL.top;
 
   check(() => {
-    const place = selectMenuPlacement(roomy, VIEW, LANGS.length);
+    const place = selectMenuPlacement(roomy, SHELL, LANGS.length);
     assert.equal(place.drop, "down", "with room below, the list drops down");
-    assert.ok(place.top > roomy.bottom, "a downward list starts below the trigger");
+    assert.ok(place.top > inShell(roomy.bottom), "a downward list starts below the trigger");
   });
 
   check(() => {
-    const place = selectMenuPlacement(roomy, VIEW, LANGS.length);
+    /**
+     * The regression this file was rewritten for.
+     *
+     * The popup used `position: fixed` with viewport coordinates. But `PanelTransition` wraps the
+     * panel in a `motion.div` carrying `filter: blur()`, and a filter makes that element the
+     * containing block for any fixed descendant — so the popup was PAINTED against a box starting
+     * below the title bar while being MEASURED against the window, and opened exactly one title
+     * bar too low. Pinning the gap to the constant makes that impossible to reintroduce quietly.
+     */
+    const place = selectMenuPlacement(roomy, SHELL, LANGS.length);
+    const gap = place.top - inShell(roomy.bottom);
+    assert.equal(gap, MENU_GAP, `the gap under the trigger must be exactly MENU_GAP, got ${gap}`);
+  });
+
+  check(() => {
+    /** The same trigger with the shell further down the window: the offset must not leak in. */
+    const deeper = selectMenuPlacement(roomy, { ...SHELL, top: 120, height: 680 }, LANGS.length);
+    assert.equal(
+      deeper.top,
+      roomy.bottom + MENU_GAP - 120,
+      "placement tracks the container, not the window",
+    );
+  });
+
+  check(() => {
+    const place = selectMenuPlacement(roomy, SHELL, LANGS.length);
     assert.equal(place.width, MENU_MIN_WIDTH, "a narrow trigger still gets a readable list");
     assert.equal(
       place.left + place.width,
-      roomy.right,
+      roomy.right - SHELL.left,
       "the list aligns to the trigger's right edge, which is where the control sits in the row",
     );
   });
 
   check(() => {
     const wide = { ...roomy, width: 320, right: 900 };
-    assert.equal(selectMenuPlacement(wide, VIEW, LANGS.length).width, 320, "a wide trigger keeps its width");
+    assert.equal(selectMenuPlacement(wide, SHELL, LANGS.length).width, 320, "a wide trigger keeps its width");
   });
 
   check(() => {
-    /** Bottom of a tall window: not enough underneath, so it flips above the trigger. */
+    /** Bottom of the panel: not enough underneath, so it flips above the trigger. */
     const low = { top: 720, bottom: 750, right: 900, width: 150 };
-    const place = selectMenuPlacement(low, VIEW, LANGS.length);
+    const place = selectMenuPlacement(low, SHELL, LANGS.length);
     assert.equal(place.drop, "up", "with no room below, the list flips up");
-    assert.ok(place.top + menuHeight(LANGS.length) <= low.top, "an upward list ends above the trigger");
-    assert.ok(place.top >= MENU_MARGIN, "and never starts off the top of the window");
+    assert.ok(
+      place.top + menuHeight(LANGS.length) <= inShell(low.top),
+      "an upward list ends above the trigger",
+    );
+    assert.ok(place.top >= MENU_MARGIN, "and never starts off the top of the container");
   });
 
   check(() => {
     /**
-     * Squeezed both ways — a 360px-tall window. Neither side fits, so it takes the roomier one
-     * rather than flipping to whichever merely overflows less by accident.
+     * Squeezed both ways. Neither side fits, so it takes the roomier one rather than flipping to
+     * whichever merely overflows less by accident.
      */
     const squeezed = { top: 150, bottom: 180, right: 900, width: 150 };
-    const place = selectMenuPlacement(squeezed, { width: 1280, height: 360 }, LANGS.length);
-    assert.equal(place.drop, "down", "180px below beats 150px above");
+    /** floor 400: 206px below, 100px above, and the list needs 276. */
+    const place = selectMenuPlacement(squeezed, { top: 36, left: 0, width: 1280, height: 364 }, LANGS.length);
+    assert.equal(place.drop, "down", "206px below beats 100px above, though neither fits");
   });
 
   check(() => {
-    const squeezed = { top: 300, bottom: 330, right: 900, width: 150 };
-    const place = selectMenuPlacement(squeezed, { width: 1280, height: 380 }, LANGS.length);
-    assert.equal(place.drop, "up", "300px above beats 50px below");
+    const squeezed = { top: 336, bottom: 366, right: 900, width: 150 };
+    /** floor 380: nothing below at all, 286px above. */
+    const place = selectMenuPlacement(squeezed, { top: 36, left: 0, width: 1280, height: 344 }, LANGS.length);
+    assert.equal(place.drop, "up", "286px above beats nothing below");
   });
 
   check(() => {
     /** A trigger hard against the right edge: the list must not hang off it. */
     const edge = { top: 200, bottom: 230, right: 1278, width: 150 };
-    const place = selectMenuPlacement(edge, VIEW, LANGS.length);
-    assert.ok(place.left + place.width <= VIEW.width - MENU_MARGIN + 1, "clamped inside the right edge");
+    const place = selectMenuPlacement(edge, SHELL, LANGS.length);
+    assert.ok(place.left + place.width <= SHELL.width - MENU_MARGIN + 1, "clamped inside the right edge");
   });
 
   check(() => {
     /** And against the left, which is where a single Math.max gets it wrong under RTL. */
     const edge = { top: 200, bottom: 230, right: 40, width: 30 };
-    const place = selectMenuPlacement(edge, VIEW, LANGS.length);
+    const place = selectMenuPlacement(edge, SHELL, LANGS.length);
     assert.ok(place.left >= MENU_MARGIN, "never off the left edge");
   });
 
   check(() => {
-    /** A narrow window where the list cannot fit at all still starts on-screen, not at -120. */
-    const place = selectMenuPlacement({ top: 200, bottom: 230, right: 180, width: 150 }, { width: 200, height: 800 }, 7);
-    assert.ok(place.left >= MENU_MARGIN, `left should stay on-screen, got ${place.left}`);
+    /** A container too narrow for the list still starts inside it, not at -120. */
+    const place = selectMenuPlacement(
+      { top: 200, bottom: 230, right: 180, width: 150 },
+      { top: 36, left: 0, width: 200, height: 764 },
+      7,
+    );
+    assert.ok(place.left >= MENU_MARGIN, `left should stay inside the container, got ${place.left}`);
   });
 
   check(() => {
-    assert.ok(menuHeight(50) <= 320, "a long list is capped and scrolls, rather than growing past the window");
+    /** A container inset from the left must not push the popup off its own edge. */
+    const place = selectMenuPlacement(
+      { top: 200, bottom: 230, right: 300, width: 40 },
+      { top: 36, left: 240, width: 1040, height: 764 },
+      LANGS.length,
+    );
+    assert.ok(place.left >= MENU_MARGIN, "clamped to the container's left edge, not the window's");
+  });
+
+  check(() => {
+    assert.ok(menuHeight(50) <= 320, "a long list is capped and scrolls, rather than growing past the panel");
     assert.ok(menuHeight(2) < menuHeight(7), "a short list is not padded to full height");
   });
 
