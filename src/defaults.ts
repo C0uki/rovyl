@@ -189,16 +189,6 @@ export const DEFAULT_WORKSPACES: Workspace[] = [
         description: "Live streaming",
       },
       {
-        id: "stream-3",
-        type: "app",
-        label: "Prime Video",
-        iconName: "MonitorPlay",
-        iconSource: "lucide",
-        command: "https://www.primevideo.com/",
-        commandType: "url",
-        description: "Amazon Streaming",
-      },
-      {
         id: "stream-4",
         type: "app",
         label: "Netflix",
@@ -210,6 +200,103 @@ export const DEFAULT_WORKSPACES: Workspace[] = [
       },
     ],
     color: "#EF4444", // Red
+  },
+  /**
+   * The wheel Rovyl is shown with: AI tools, editors and design, on 3.
+   * Every command here is a Start Menu AppID rather than a path, because that is what Windows
+   * hands back for these installers and what `normalizeAumidIdeCommands` already knows how to
+   * turn into an executable. An entry whose app is not installed simply fails to launch — the
+   * user deletes it, the same as any other item on the wheel.
+   */
+  {
+    id: "workspace-3",
+    name: "Build",
+    hotkey: 3,
+    enabled: true,
+    pickerIconName: "Stars",
+    apps: [
+      {
+        id: "build-1",
+        type: "app",
+        label: "Claude",
+        iconName: "Bot",
+        iconSource: "native",
+        command: "Claude_pzs8sxrjxfjjc!Claude",
+        commandType: "app",
+        description: "AI assistant",
+      },
+      {
+        id: "build-2",
+        type: "app",
+        label: "ChatGPT",
+        iconName: "MessageCircle",
+        iconSource: "lucide",
+        command: "https://chatgpt.com/",
+        commandType: "url",
+        description: "AI chat",
+      },
+      {
+        id: "build-3",
+        type: "app",
+        label: "Gemini",
+        iconName: "Sparkles",
+        iconSource: "lucide",
+        command: "https://gemini.google.com/app",
+        commandType: "url",
+        description: "AI chat",
+      },
+      {
+        id: "build-4",
+        type: "app",
+        label: "Cursor",
+        iconName: "Code2",
+        iconSource: "native",
+        command: "Anysphere.Cursor",
+        commandType: "app",
+        description: "AI code editor",
+      },
+      {
+        id: "build-5",
+        type: "app",
+        label: "Antigravity",
+        iconName: "Binary",
+        iconSource: "native",
+        command: "electron.app.Antigravity",
+        commandType: "app",
+        description: "AI IDE",
+      },
+      {
+        id: "build-6",
+        type: "app",
+        label: "Visual Studio Code",
+        iconName: "FileCode",
+        iconSource: "native",
+        command: "Microsoft.VisualStudioCode",
+        commandType: "app",
+        description: "Code editor",
+      },
+      {
+        id: "build-7",
+        type: "app",
+        label: "Comet",
+        iconName: "Compass",
+        iconSource: "native",
+        command: "Comet.XC3C7ZDCXKJMBTAJSSDCPHARG4",
+        commandType: "app",
+        description: "AI browser",
+      },
+      {
+        id: "build-8",
+        type: "app",
+        label: "Figma",
+        iconName: "Figma",
+        iconSource: "native",
+        command: "com.squirrel.Figma.Figma",
+        commandType: "app",
+        description: "Design",
+      },
+    ],
+    color: "#FFFFFF",
   },
 ];
 
