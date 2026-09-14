@@ -1434,6 +1434,19 @@ function setupMainWindow(window) {
       sendMainWindowMinimizedState();
     });
   });
+
+  /**
+   * Get the wheel's idle box off Settings for as long as Settings is there. See
+   * `overlayParkedBounds` — two topmost layered surfaces over the same pixels is a composition the
+   * DWM is entitled to get wrong, and one of them has nothing to draw.
+   *
+   * These four events are the whole truth about whether the panel occupies screen space, including
+   * the paths that never go through `openSettingsFromMainProcess`: the tray, Alt+Tab, the taskbar
+   * button, and the close-to-tray in `createWindow`.
+   */
+  for (const event of ["show", "hide", "minimize", "restore"]) {
+    window.on(event, () => syncOverlayParkedForSettings(window));
+  }
 }
 
 let radialOpenPaintSequence = 0;
@@ -1461,22 +1474,98 @@ let overlayWindowCreation = null;
 let radialOpen = false;
 
 /**
- * Idle geometry: the box the next wheel will use, on the monitor it will use, already in place.
+ * Where the idle box waits while Settings is on screen: just past the right edge of the desktop.
+ *
+ * The idle overlay is a ~988px transparent square, topmost, parked over the middle of the display
+ * for the whole life of the app. Over the bare desktop that is free and invisible, which is the
+ * trade the comment above describes. Over ANOTHER of our own windows it is not: Settings opens
+ * underneath it, and the DWM then has to compose an 880×600 layered panel through a 988×988
+ * layered surface sitting on top of it. On some machines that reads as a dark square around the
+ * panel — centred on it, wider than it on every side, click-through, and impossible to attribute
+ * to Settings, because nothing Settings draws can paint outside its own window.
+ *
+ * Moving rather than hiding is the escape hatch "Stable idle" already names: the surface stays
+ * composed and warm, so the open handshake and its first frame are untouched. It is parked
+ * ADJACENT to the desktop union rather than far away for the same reason — far enough that no
+ * monitor arrangement can see it, near enough that Windows has no new reason to call it occluded.
+ */
+function overlayParkedBounds(side) {
+  let right = -Infinity;
+  let top = Infinity;
+  for (const display of screen.getAllDisplays()) {
+    right = Math.max(right, display.bounds.x + display.bounds.width);
+    top = Math.min(top, display.bounds.y);
+  }
+  if (!Number.isFinite(right) || !Number.isFinite(top)) {
+    right = 0;
+    top = 0;
+  }
+  return { x: Math.round(right) + 32, y: Math.round(top), width: side, height: side };
+}
+
+/** True while Settings occupies screen space the idle overlay would otherwise sit on top of. */
+let overlayParkedForSettings = false;
+
+/**
+ * Idle geometry: the box the next wheel will use, on the monitor it will use, already in place —
+ * unless Settings is on screen, in which case it waits off the desktop instead.
  *
  * Kept VISIBLE and click-through rather than hidden — the same trade the old `small` mode made, and
  * for the same reason: a hidden transparent window has no warm surface, so the first frame after
  * `show()` is whatever the DWM last held. Since the mouse is ignored, a transparent box over the
  * desktop blocks nothing.
  */
-function applyOverlayIdleBounds(anchorScreenPoint) {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+function applyOverlayIdleBounds(anchorScreenPoint, targetWindow) {
+  /** `targetWindow` is for the one caller that runs before `overlayWindow` has been assigned. */
+  const win = targetWindow || overlayWindow;
+  if (!win || win.isDestroyed()) return;
   const targetDisplay = radialTargetDisplay(anchorScreenPoint);
-  const next = smallModeBounds(targetDisplay.bounds);
+  const onScreen = smallModeBounds(targetDisplay.bounds);
+  const next = overlayParkedForSettings
+    ? overlayParkedBounds(onScreen.width)
+    : onScreen;
   try {
-    if (!boundsApproxEqual(overlayWindow.getBounds(), next)) overlayWindow.setBounds(next);
+    if (!boundsApproxEqual(win.getBounds(), next)) win.setBounds(next);
   } catch (e) {
     /* ignore */
   }
+}
+
+/**
+ * Settings came on screen, or left it. Driven by the window's own `show`/`hide`/`minimize`/
+ * `restore` events rather than by each of the several call sites that open and close the panel —
+ * there are four ways in and three ways out, and one of them forgetting to say so is a dark square
+ * nobody can trace back to this.
+ */
+function syncOverlayParkedForSettings(settingsWindow) {
+  /**
+   * The event's own window, not the module's `mainWindow`.
+   *
+   * These listeners are attached inside `setupMainWindow`, which runs while `createWindow` is still
+   * being awaited — `mainWindow` is not assigned until 200ms after `ready-to-show`, so an early
+   * `show` reading the global would find `null` and conclude the panel is not on screen.
+   */
+  const win = settingsWindow || mainWindow;
+  let onScreen = false;
+  try {
+    onScreen = !!win && !win.isDestroyed() && win.isVisible() && !win.isMinimized();
+  } catch (e) {
+    onScreen = false;
+  }
+  if (overlayParkedForSettings === onScreen) return;
+  overlayParkedForSettings = onScreen;
+  diagLog(
+    onScreen
+      ? "[Overlay] parked off-desktop (Settings on screen)"
+      : "[Overlay] back to the idle box (Settings off screen)",
+  );
+  /**
+   * An OPEN wheel owns its own bounds — it is the thing the user is looking at, and it is allowed
+   * to be over Settings. `collapseOverlayToIdle` runs `applyOverlayIdleBounds` on the way back, so
+   * the park lands the moment the wheel is done.
+   */
+  if (radialOpen) return;
+  applyOverlayIdleBounds();
 }
 
 /** Back to an invisible, click-through box on the desktop. */
@@ -1502,7 +1591,13 @@ function collapseOverlayToIdle(anchorScreenPoint) {
 
 async function createOverlayWindow() {
   const targetDisplay = radialTargetDisplay();
-  const initial = smallModeBounds(targetDisplay.bounds);
+  const idle = smallModeBounds(targetDisplay.bounds);
+  /**
+   * Born parked when Settings is already up — which is the ordinary first run, where the panel is
+   * on screen before this window is created at all. Without this the very first idle box lands on
+   * top of it and stays there until the first wheel closes.
+   */
+  const initial = overlayParkedForSettings ? overlayParkedBounds(idle.width) : idle;
   const win = new BrowserWindow({
     ...initial,
     frame: false,
@@ -1577,6 +1672,13 @@ async function createOverlayWindow() {
        * first gesture ever asks for it. This is the whole reason the idle window exists.
        */
       try {
+        /**
+         * Settings can have appeared or gone during the load — `overlayWindow` is not assigned yet,
+         * so the `show`/`hide` sync above found nothing to move. Place the box for the state that
+         * is true now, BEFORE the first `showInactive`: parked or not, it must never be seen
+         * arriving over the panel.
+         */
+        applyOverlayIdleBounds(undefined, win);
         win.showInactive();
         win.webContents.setBackgroundThrottling(true);
       } catch (e) {
