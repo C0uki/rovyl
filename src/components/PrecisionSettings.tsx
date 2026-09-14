@@ -1236,31 +1236,6 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
 
   const isEmpty = results.length === 0;
 
-  /**
-   * Which sections hold something the user has changed, so the sidebar stops being five words with
-   * nothing behind them.
-   *
-   * The dot marks a section holding something that no longer matches `DEFAULT_UI_CONFIG` — which is
-   * a better answer to "what have I changed here" than a recency stamp would be: it needs no clock,
-   * no per-setting timestamp in the config, and it stays true a month later, when "recently" has
-   * stopped meaning anything.
-   *
-   * A row count sat beside it once and was dropped: how many settings a section has is decided by
-   * this file, not by the user, so the number read the same on every visit and answered nothing.
-   *
-   * It reuses exactly what the per-row revert reuses, so a row and its section can never disagree
-   * about whether it has been touched.
-   */
-  const sectionChanged = useMemo(() => {
-    const changed = {} as Record<SectionId, boolean>;
-    for (const section of sectionsList) {
-      changed[section.id] = (sections[section.id] ?? []).some(
-        (row) => row.configKey && !isAtDefault(row.configKey),
-      );
-    }
-    return changed;
-  }, [sections, isAtDefault, sectionsList]);
-
   if (!isOpen) return null;
 
   return (
@@ -1313,13 +1288,6 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
                 >
                   <Icon size={15} strokeWidth={1.8} />
                   <span className="zs-nav-label">{section.label}</span>
-                  {/*
-                    The dot is deliberately not a `span`: the collapse rule above takes those away
-                    with the label, and this is the half that still reads on a 60px rail.
-                  */}
-                  {sectionChanged[section.id] && (
-                    <i className="zs-nav-dot" role="img" aria-label="Changed from default" title="Changed from default" />
-                  )}
                 </button>
               );
             })}
