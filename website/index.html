@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Rovyl — One gesture. Any destination.</title>
+<title>Rovyl - One gesture. Any destination.</title>
 <meta name="description" content="A radial launcher for Windows. Hold the middle mouse button anywhere, aim, release.">
 <meta name="theme-color" content="#151515">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
-<meta property="og:title" content="Rovyl — One gesture. Any destination.">
+<meta property="og:title" content="Rovyl - One gesture. Any destination.">
 <meta property="og:description" content="A radial launcher for Windows. One gesture. Any destination.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://rovyl-red.vercel.app/assets/og.png">
@@ -20,7 +20,7 @@
 </head>
 <body>
 
-<!-- ══ Icon sprite. Lucide geometry — the same set the app draws with. ════ -->
+<!-- ══ Icon sprite. Lucide geometry - the same set the app draws with. ════ -->
 <svg class="sprite" aria-hidden="true" focusable="false"><defs>
   <symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
@@ -44,6 +44,12 @@
   <symbol id="i-cog" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
   <symbol id="i-github" viewBox="0 0 24 24"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/></symbol>
   <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68M6.61 6.61A13.5 13.5 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><path d="M14.08 14.08a3 3 0 1 1-4.16-4.16M2 2l20 20"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="18" r="1"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 3v12M7 8l5-5 5 5M4 21h16"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 21V9M7 16l5 5 5-5M4 3h16"/></symbol>
   <symbol id="i-back" viewBox="0 0 24 24"><path d="m9 14-5-5 5-5"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></symbol>
   <symbol id="i-app" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="5"/></symbol>
   <symbol id="i-cursor" viewBox="0 0 24 24"><path d="M4.04 4.33a.5.5 0 0 1 .63-.63l14.5 5.1a.5.5 0 0 1-.05.96l-6.2 1.4a1 1 0 0 0-.76.76l-1.4 6.2a.5.5 0 0 1-.96.05z"/></symbol>
@@ -177,7 +183,7 @@
     <p>Switch with a number key.</p>
   </div>
   <div class="ws-strip reveal" id="wsStrip" role="img"
-    aria-label="Three workspaces — Main, Streaming and Build — each previewing its own wheel, switched by number keys one to three"></div>
+    aria-label="Three workspaces - Main, Streaming and Build - each previewing its own wheel, switched by number keys one to three"></div>
 </section>
 
 <!-- ══ Aiming modes ══════════════════════════════════════════════════════ -->
@@ -217,7 +223,8 @@
 <!-- ══ Settings window ═══════════════════════════════════════════════════ -->
 <section class="section" id="settings">
   <h2 class="section-title reveal">Tune every part of it</h2>
-  <div class="win reveal" role="img" aria-label="The Rovyl settings window: a sidebar of sections beside rows of controls for activation">
+  <p class="section-note reveal">The real panel. Click through it.</p>
+  <div class="win reveal" id="settingsWin" data-zn-theme="black">
     <div class="win-bar">
       <span class="win-bar-lead"><svg class="ico"><use href="#i-sliders"/></svg></span>
       <span class="win-bar-title">Rovyl</span>
@@ -227,43 +234,10 @@
       <aside class="win-side">
         <h4>Settings</h4>
         <div class="win-search"><svg class="ico"><use href="#i-search"/></svg>Search</div>
-        <ul class="win-nav">
-          <li><svg class="ico"><use href="#i-cog"/></svg>General</li>
-          <li class="is-active"><svg class="ico"><use href="#i-mouse"/></svg>Activation</li>
-          <li><svg class="ico"><use href="#i-sliders"/></svg>Appearance</li>
-          <li><svg class="ico"><use href="#i-layers"/></svg>Workspaces</li>
-          <li><svg class="ico"><use href="#i-shield"/></svg>Advanced</li>
-        </ul>
-        <div class="win-foot"><span class="win-foot-brand"><span class="brand-mark is-sm"></span>Rovyl</span><em id="setVersion">1.9</em></div>
+        <ul class="win-nav" id="winNav"></ul>
+        <div class="win-foot"><span class="win-foot-brand"><span class="brand-mark is-sm"></span>Rovyl</span><em id="setVersion">1.8.0</em></div>
       </aside>
-      <div class="win-main">
-        <div class="win-head"><h3>Activation</h3><p>How and where the wheel appears.</p></div>
-        <p class="win-group">Keyboard</p>
-        <div class="win-rows">
-          <div class="win-row"><span class="win-copy"><b>Global shortcut</b><small>Open the wheel over any application.</small></span><span class="kbd-set" id="setShortcut"><kbd>Alt</kbd><kbd>F</kbd></span></div>
-        </div>
-        <p class="win-group">Mouse</p>
-        <div class="win-rows">
-          <div class="win-row"><span class="win-copy"><b>Mouse trigger</b><small>Open Rovyl with a mouse button instead of the keyboard.</small></span><span class="toggle" id="setMouse"></span></div>
-          <div class="win-row"><span class="win-copy"><b>Trigger button</b><small>Side buttons are usually free; left and right stay with Windows.</small></span><span class="seg" id="setButton"><i data-v="middle">Wheel</i><i data-v="back">Back</i><i data-v="forward">Forward</i></span></div>
-          <div class="win-row"><span class="win-copy"><b>Gesture behavior</b><small>Click keeps the wheel open; hold runs the selection on release.</small></span><span class="seg" id="setGesture"><i data-v="click">Click</i><i data-v="hold">Hold</i></span></div>
-        </div>
-        <p class="win-group">Position</p>
-        <div class="win-rows">
-          <div class="win-row"><span class="win-copy"><b>Monitor</b><small>Where the wheel appears on a multi-monitor desk.</small></span><span class="seg" id="setMonitor"><i data-v="primary">Main screen</i><i data-v="cursor">Follow pointer</i></span></div>
-          <div class="win-row is-slider">
-            <span class="win-copy"><b>Activation zone</b><small>Cursor distance required to confirm a target.</small></span>
-            <span class="readout" id="setZone">45 px</span>
-            <span class="slider"><i class="track"><i class="fill" id="setZoneFill"></i></i><i class="thumb" id="setZoneThumb"></i></span>
-          </div>
-        </div>
-        <p class="win-group">Hands-free</p>
-        <div class="win-rows">
-          <div class="win-row"><span class="win-copy"><b>Launch without clicking</b><small>Hides the pointer and picks by direction &mdash; move toward a target and it opens by itself.</small></span><span class="toggle" id="setHandsFree"></span></div>
-          <div class="win-row" id="setSensitivityRow" hidden><span class="win-copy"><b>Direction sensitivity</b><small>How far your hand must travel before that direction is chosen.</small></span><span class="seg" id="setSensitivity"><i data-v="low">Low</i><i data-v="medium">Medium</i><i data-v="high">High</i></span></div>
-          <div class="win-row" id="setHoverRow" hidden><span class="win-copy"><b>Hover time</b><small>How long a target must stay aimed before it opens.</small></span><span class="readout" id="setHover">Instant</span></div>
-        </div>
-      </div>
+      <div class="win-main" id="winMain"></div>
     </div>
   </div>
 </section>
@@ -303,6 +277,7 @@
 </footer>
 
 <script src="workspaces.js"></script>
+<script src="settings.js"></script>
 <script src="site.js"></script>
 </body>
 </html>

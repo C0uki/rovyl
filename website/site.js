@@ -1,10 +1,10 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   Rovyl — website behaviour
+   Rovyl - website behaviour
 
    The hero wheel is the page's one real argument: the product is a gesture, and
    a gesture cannot be described in a paragraph. So it is rebuilt here with the
-   app's own geometry and state machine — bloom, presence, sustained aim, launch
-   echo — and it hands over to the pointer the moment one arrives, because
+   app's own geometry and state machine - bloom, presence, sustained aim, launch
+   echo - and it hands over to the pointer the moment one arrives, because
    aiming it yourself is the demonstration.
 
    Everything animated is `transform` + `opacity`, and nothing runs while it is
@@ -101,58 +101,9 @@
     }
   }
 
-  /* ── The settings window ────────────────────────────────────────────────
-     The mock is static markup, but its VALUES come from the same generated
-     config as the wheel: a screenshot of a settings page drifts from the
-     product the first time a default changes, and this one cannot. */
-  (() => {
-    const set = (id, fn) => { const el = document.getElementById(id); if (el) fn(el); };
-
-    set('setShortcut', (el) => {
-      el.replaceChildren(...(LOOK.globalShortcut || 'Alt+Z').split('+').map((key) => {
-        const kbd = document.createElement('kbd');
-        kbd.textContent = key.trim();
-        return kbd;
-      }));
-    });
-
-    set('setMouse', (el) => el.classList.toggle('is-on', LOOK.mouseTrigger === true));
-    set('setVersion', (el) => { if (LOOK.version) el.textContent = LOOK.version; });
-
-    const pick = (id, value) => set(id, (el) => {
-      for (const opt of el.children) opt.classList.toggle('is-on', opt.dataset.v === value);
-    });
-    pick('setButton', LOOK.mouseButton);
-    pick('setGesture', LOOK.mouseMode);
-    pick('setMonitor', LOOK.radialMonitor === 'cursor' ? 'cursor' : 'primary');
-
-    /* Launch without clicking, and the two tunings the app only shows while the
-       gesture itself is on: leaving them visible with it off would be offering
-       controls that control nothing. */
-    set('setHandsFree', (el) => el.classList.toggle('is-on', LOOK.handsFree === true));
-    set('setSensitivityRow', (el) => { el.hidden = !LOOK.handsFree; });
-    set('setHoverRow', (el) => { el.hidden = !LOOK.handsFree; });
-    pick('setSensitivity', LOOK.handsFreeSensitivity);
-    /* "0 ms" would read as one number among others, and what zero does is not
-       to wait less — it is to have no wait at all. */
-    set('setHover', (el) => {
-      const ms = Math.round(LOOK.handsFreeDwellMs ?? 0);
-      el.textContent = ms === 0 ? 'Instant' : `${ms} ms`;
-    });
-
-    /* The slider's own range, from the app's Activation page. */
-    const MIN = 20;
-    const MAX = 120;
-    const zone = LOOK.activationThreshold ?? 60;
-    const pct = `${clamp(((zone - MIN) / (MAX - MIN)) * 100, 0, 100).toFixed(1)}%`;
-    set('setZone', (el) => { el.textContent = `${zone} px`; });
-    set('setZoneFill', (el) => { el.style.width = pct; });
-    set('setZoneThumb', (el) => { el.style.left = pct; });
-  })();
-
   /* ══ The wheel ═════════════════════════════════════════════════════════
-     Rebuilt with the app's own state machine — bloom, presence, sustained aim,
-     launch echo — and, because the config says `workspaceSwitchMode: "picker"`,
+     Rebuilt with the app's own state machine - bloom, presence, sustained aim,
+     launch echo - and, because the config says `workspaceSwitchMode: "picker"`,
      with the app's own two levels: the wheel OPENS on the workspaces, and the
      one you aim at replaces the ring with its shortcuts. There is no separate
      switcher on the page because there is none in the product.
@@ -189,7 +140,7 @@
   const SPACING = LOOK.appSpacing ?? 10;
 
   /**
-   * Rounded rectangle that STARTS at the top, centred — ported from the app's
+   * Rounded rectangle that STARTS at the top, centred - ported from the app's
    * `roundedRectPathFromTop`. A `<rect>`'s implicit path begins after the
    * top-left arc, so a progress ring drawn on one starts at an arbitrary point
    * of the top edge. A clock that does not start at twelve reads as a bug.
@@ -229,7 +180,7 @@
   }
 
   /* ── Levels ─────────────────────────────────────────────────────────────
-     Level 0 is the workspace picker — synthetic slices, one per workspace,
+     Level 0 is the workspace picker - synthetic slices, one per workspace,
      carrying the number key as a hint exactly as `buildWorkspacePickerItems`
      does. Level 1 is the workspace you aimed at. */
 
@@ -265,7 +216,7 @@
     const tile = document.createElement('div');
     tile.className = 'tile';
     if (item.icon) {
-      /* The rounded mask only goes on when there IS a raster icon to clip —
+      /* The rounded mask only goes on when there IS a raster icon to clip -
          Chromium antialiases masks worse than borders, so the app turns it on
          for the same reason and no other. */
       tile.classList.add('has-icon');
@@ -285,7 +236,7 @@
       tile.append(fallback);
     }
 
-    /* The label plate, with the app's optional chip beside the name — the
+    /* The label plate, with the app's optional chip beside the name - the
        workspace slices are what that chip exists for. */
     const label = document.createElement('span');
     label.className = 'slice-label';
@@ -324,8 +275,8 @@
      ratio between them is the app's default pair (radius 140, icon 64).
 
      Sizing off `min(width, height)` alone was not enough. The wheel is not the
-     only thing in the stage — the aimed slice puts a label under its tile, and
-     the workspace pill sits under the whole wheel — so a radius that fitted the
+     only thing in the stage - the aimed slice puts a label under its tile, and
+     the workspace pill sits under the whole wheel - so a radius that fitted the
      TILES still pushed the pill onto the bottom edge and the bottom label into
      the pill. The radius is therefore solved from a budget: reserve the bands
      those two need, keep a gutter no element may cross, and give the wheel what
@@ -336,8 +287,8 @@
   const PILL_GAP = 18;   // between that label and the workspace pill
   const PILL_H = 26;     // the workspace pill itself
 
-  /* Everything extra hangs BELOW the hub — the label under the aimed tile, then
-     the pill under the whole wheel — so a hub parked at the stage's centre puts
+  /* Everything extra hangs BELOW the hub - the label under the aimed tile, then
+     the pill under the whole wheel - so a hub parked at the stage's centre puts
      the composition low and leaves a void up top. Lifting the hub by half of
      what hangs below centres the composition instead of the wheel, and because
      the two margins then match, the same gutter buys a visibly larger wheel. */
@@ -354,11 +305,11 @@
        With the lift applied, the top and bottom budgets are the same number. */
     const reach = 1 + TILE_RATIO / 2;
     const vBudget = box.height / 2 - GUTTER - RING - LIFT;
-    /* Sideways only the widest label overhangs its tile — half of one pill. */
+    /* Sideways only the widest label overhangs its tile - half of one pill. */
     const hBudget = box.width / 2 - GUTTER - RING - 46;
     radius = clamp(Math.min(vBudget, hBudget) / reach, 62, 168);
     /* Neighbours must not touch, and a workspace with eight shortcuts packs
-       tighter than one with three — the chord between two slices is the ceiling
+       tighter than one with three - the chord between two slices is the ceiling
        on the tile, exactly as `packedRadius` is in the app. */
     const n = Math.max(slices.length, 1);
     const chord = n > 1 ? 2 * radius * Math.sin(Math.PI / n) - SPACING : Infinity;
@@ -443,7 +394,7 @@
     active = index;
     paint();
     /* A new aim restarts the clock; the dead zone stops it. Only in manual
-       mode — the unattended loop drives its own arc. */
+       mode - the unattended loop drives its own arc. */
     if (manual) armDwell(index);
   }
 
@@ -458,7 +409,7 @@
   }
 
   /** The launch echo: everything else leaves, the confirmed tile kicks and two
-      waves go out of it. Nothing else is on screen by then — which is the whole
+      waves go out of it. Nothing else is on screen by then - which is the whole
       point of the echo. */
   function fire(index) {
     if (firing || index < 0) return;
@@ -471,7 +422,7 @@
   }
 
   /* ── The unattended loop ────────────────────────────────────────────────
-     It plays the full gesture — hold, aim, sustained aim, release — and hands
+     It plays the full gesture - hold, aim, sustained aim, release - and hands
      over the instant a pointer enters the stage. */
 
   let timers = [];
@@ -482,7 +433,7 @@
   let looping = false;
 
   /**
-   * Enter the workspace a picker slice points at — the app's own handler: it
+   * Enter the workspace a picker slice points at - the app's own handler: it
    * pushes that workspace onto the stack and swaps the ring for its shortcuts.
    */
   function enterSpace(index) {
@@ -568,7 +519,7 @@
 
   /* ── Aiming it yourself ─────────────────────────────────────────────────
      By direction, like the app's default: the slice is chosen from the vector
-     out of the centre, and inside the activation zone nothing is aimed at —
+     out of the centre, and inside the activation zone nothing is aimed at -
      that dead zone is what cancels. */
 
   let manual = false;
@@ -581,7 +532,7 @@
   let handsFree = LOOK.handsFree === true;
   let dwellTimer = 0;
   /* A level swap puts new slices under a still pointer. Without a settling
-     window the first move after it would resolve an aim the user never made —
+     window the first move after it would resolve an aim the user never made -
      the app wins the same window back on every level, not only on every open. */
   let armReadyAt = 0;
 
@@ -591,7 +542,7 @@
     for (const slice of slices) slice.root.classList.remove('is-dwelling');
   }
 
-  /** What a sustained aim resolves to — a workspace opens, a shortcut launches. */
+  /** What a sustained aim resolves to - a workspace opens, a shortcut launches. */
   function commit(index) {
     const chosen = slices[index];
     if (!chosen || firing) return;
@@ -683,7 +634,7 @@
     setActive(index);
   }
 
-  /* The centre, inside a level, is the way back out — the pill's "Back" chip
+  /* The centre, inside a level, is the way back out - the pill's "Back" chip
      names the same gesture. At the root it is inert here, and says so. */
   hub.addEventListener('click', (event) => {
     if (level === 0) return;
@@ -707,7 +658,7 @@
       if (firing || active < 0) return;
       event.preventDefault();
 
-      /* On the picker a release does not launch anything — it opens that
+      /* On the picker a release does not launch anything - it opens that
          workspace's ring, which is the whole point of the level. */
       const chosen = slices[active];
       if (chosen && chosen.item && chosen.item.pick !== undefined) {
@@ -747,7 +698,7 @@
     resizeTimer = window.setTimeout(() => { measure(); paint(); }, 140);
   }, { passive: true });
 
-  /* Under reduced motion the loop still runs — the gesture is the content —
+  /* Under reduced motion the loop still runs - the gesture is the content -
      but the CSS above strips the echo and the transitions down to nothing. */
   reduced.addEventListener('change', resume);
 })();
