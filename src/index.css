@@ -75,6 +75,9 @@
   --zn-icon: 16px;
 
   --zn-ease: cubic-bezier(.22, 1, .36, 1);
+  /* One duration for everything that opens or closes in place. `Collapse.tsx` holds the same
+     number: the exit has to keep the node mounted for exactly as long as this paints. */
+  --zn-collapse: 240ms;
 }
 
 [data-zn-theme="white"] {
@@ -285,6 +288,26 @@
 
 /* Continuous composition: dividers separate, not boxes. */
 .zs-rows { border-top: 1px solid var(--zn-line); }
+
+/* ── Reveal in place ────────────────────────────────────────────────────────
+   A row that exists because another switch is on arrives by opening, not by being there.
+
+   `0fr → 1fr` on the single grid row rather than an animated height: the track resolves to
+   whatever the content measures, so nothing has to be measured in JS and — the part a JS height
+   cannot do — the box goes on tracking its content after the transition ends, when the row
+   restacks at a narrow width or a confirm opens inside it. */
+.zs-collapse {
+  display: grid; grid-template-rows: 1fr;
+  transition: grid-template-rows var(--zn-collapse) var(--zn-ease),
+              opacity calc(var(--zn-collapse) * .65) var(--zn-ease);
+}
+.zs-collapse[data-open="false"] { grid-template-rows: 0fr; opacity: 0; }
+.zs-collapse-inner { min-height: 0; overflow: hidden; }
+/* Clipping is only needed while the box is shorter than its contents. Left on it would cut the
+   focus ring of the last row and the drop marker that sits a pixel above it. */
+.zs-collapse[data-settled="true"] > .zs-collapse-inner { overflow: visible; }
+/* A reveal inside a row (the confirm body) takes the row's full width, as the block it wraps did. */
+.zs-row > .zs-collapse { grid-column: 1 / -1; }
 
 /* ── Wheel preview (Appearance) ─────────────────────────────────────────────
    Sticky, because the sliders it answers to run past the fold: "Background
@@ -942,7 +965,17 @@
 .zs-folder-picker small { margin-top: 2px; color: var(--zn-text-3); font-size: 9.5px; }
 
 .zs-workspace-items { overflow: hidden; border-top: 1px solid var(--zn-line); }
-.zs-workspace-item { border-bottom: 1px solid var(--zn-line); }
+/* The card below assembles at the pace the editor opens. Snapping its margin, inset, corners and
+   wash into place while the form underneath eased open read as two separate things happening to
+   the same row. (The border's own 1px is not in the list: width has no in-between worth easing.) */
+.zs-workspace-item {
+  border-bottom: 1px solid var(--zn-line);
+  transition: margin var(--zn-collapse) var(--zn-ease),
+              padding-inline var(--zn-collapse) var(--zn-ease),
+              border-color var(--zn-collapse) var(--zn-ease),
+              border-radius var(--zn-collapse) var(--zn-ease),
+              background var(--zn-collapse) var(--zn-ease);
+}
 /* While editing the row becomes a card. Before it was only a full-width background wash: a
    rectangle with no outline that butted against the neighbouring rows and did not say where
    the editable zone started or ended. The 4px inner inset adds to the header's and the

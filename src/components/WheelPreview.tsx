@@ -144,8 +144,13 @@ export const WheelPreview: React.FC<{ config: UIConfig; apps: AppItem[] }> = ({ 
     Math.max(actualMenuRadius * scale, 1),
   );
 
+  /**
+   * `data-sticky-top` is read by `Collapse`. Pinned to the top of the list, the preview covers the
+   * first rows of the scroller, and a revealed row brought to the very top would be brought behind
+   * it — visible to the arithmetic, not to the user.
+   */
   return (
-    <div className="zs-wheel-preview">
+    <div className="zs-wheel-preview" data-sticky-top>
       <div className="zs-wheel-stage" ref={stageRef} style={{ height: STAGE_HEIGHT }} aria-hidden>
         {/* Stand-in for the desktop. Neutral on purpose: the dimming has to be readable against
             something, and a mock wallpaper with character would be judged instead of the setting. */}

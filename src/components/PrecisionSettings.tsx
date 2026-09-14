@@ -48,6 +48,7 @@ import { getIcon } from '../iconMap';
 import { resolveWebsiteIconFields } from '../siteFavicon';
 import { hostLabelFromUrl, looksFetchable, normalizeSiteUrl, resolveWebsiteTitle } from '../siteTitle';
 import { SmartIcon } from './SmartIcon';
+import { Collapse, isRevealScrolling } from './Collapse';
 import { IconPicker } from './IconPicker';
 import { RovylLogo } from './RovylLogo';
 import '../fonts-display.css';
@@ -1208,6 +1209,11 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
       element.scrollTop = 0;
       return;
     }
+    /**
+     * A reveal is moving this box on purpose, and the position it is moving away from is the one
+     * saved here — restoring it would undo the scroll frame by frame as it happened.
+     */
+    if (isRevealScrolling()) return;
     /** Write only when it has drifted: an equal `scrollTop` would still cancel a smooth scroll. */
     if (element.scrollTop !== scrollTopRef.current) element.scrollTop = scrollTopRef.current;
   });
@@ -1411,30 +1417,40 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
                         />
                       ) : (
                         <div className="zs-rows">
-                          {group.items.map((item) => (
-                            <SettingRow
-                              key={item.key}
-                              item={item}
-                              /**
-                               * Derived here rather than in each row's definition: one rule for
-                               * seventeen rows, and a row that stops matching `DEFAULT_UI_CONFIG`
-                               * cannot go on claiming it is at its default.
-                               */
-                              onResetToDefault={
-                                item.configKey && !isAtDefault(item.configKey)
-                                  ? () => {
-                                      const key = item.configKey as keyof UIConfig;
-                                      update(key, DEFAULT_UI_CONFIG[key]);
-                                      if (key === 'openAtLogin') {
-                                        window.electron?.setLoginItemSettings?.({
-                                          openAtLogin: Boolean(DEFAULT_UI_CONFIG.openAtLogin),
-                                        });
-                                      }
-                                    }
-                                  : undefined
-                              }
-                            />
-                          ))}
+                          {/*
+                            `initial={false}` is what tells a reveal apart from a repaint. The rows
+                            already here when the section opened were not toggled into existence,
+                            and opening all of them together would be a curtain over the list —
+                            only the ones that arrive later, because a switch above them moved,
+                            have anything to animate.
+                          */}
+                          <AnimatePresence initial={false}>
+                            {group.items.map((item) => (
+                              <Collapse key={item.key}>
+                                <SettingRow
+                                  item={item}
+                                  /**
+                                   * Derived here rather than in each row's definition: one rule for
+                                   * seventeen rows, and a row that stops matching `DEFAULT_UI_CONFIG`
+                                   * cannot go on claiming it is at its default.
+                                   */
+                                  onResetToDefault={
+                                    item.configKey && !isAtDefault(item.configKey)
+                                      ? () => {
+                                          const key = item.configKey as keyof UIConfig;
+                                          update(key, DEFAULT_UI_CONFIG[key]);
+                                          if (key === 'openAtLogin') {
+                                            window.electron?.setLoginItemSettings?.({
+                                              openAtLogin: Boolean(DEFAULT_UI_CONFIG.openAtLogin),
+                                            });
+                                          }
+                                        }
+                                      : undefined
+                                  }
+                                />
+                              </Collapse>
+                            ))}
+                          </AnimatePresence>
                         </div>
                       )}
                     </section>
@@ -1703,12 +1719,16 @@ function SettingRow({
       </div>
 
       {/* Under the row, not over it: what it says is the reason the second press exists. */}
-      {item.kind === 'action' && item.confirm && confirming && (
-        <p className="zs-confirm-body" role="alert">
-          <AlertTriangle size={13} strokeWidth={1.9} aria-hidden />
-          <span>{item.confirm.body}</span>
-        </p>
-      )}
+      <AnimatePresence initial={false}>
+        {item.kind === 'action' && item.confirm && confirming && (
+          <Collapse key="confirm">
+            <p className="zs-confirm-body" role="alert">
+              <AlertTriangle size={13} strokeWidth={1.9} aria-hidden />
+              <span>{item.confirm.body}</span>
+            </p>
+          </Collapse>
+        )}
+      </AnimatePresence>
 
       {item.kind === 'range' && (
         <div className="zs-slider">
@@ -3418,166 +3438,185 @@ function WorkspaceManager({
                   <button type="button" onClick={() => removeItem(index)} aria-label={`Remove ${item.label}`}><Trash2 size={13} /></button>
                 </div>
               </div>
+              {/*
+                The editor opens the row rather than replacing it, and brings itself into view:
+                the pencil sits at the right of a row that is often the last one on screen, so the
+                form it opens was frequently below the fold the instant it existed.
+              */}
+              <AnimatePresence initial={false}>
               {editingIndex === index && (
-                <div className="zs-workspace-item-editor">
-                  <label className="zs-field"><span>Name</span><input value={item.label} onChange={(event) => updateItem(index, { label: event.target.value })} /></label>
-                  {/*
-                    Applications do not show the command: whoever added the shortcut already chose
-                    the app, and the value is an AUMID (`Microsoft.WindowsTerminal_…!App`) that
-                    tells nobody anything and only fills half a line. URL and folder stay editable
-                    — there the value is readable and is the only way to fix the target.
-                  */}
-                  {item.type !== 'folder' && item.commandType !== 'app' && item.commandType !== 'file' && (
-                    <label className="zs-field">
-                      <span>{item.commandType === 'url' ? 'URL' : 'Folder path'}</span>
-                      <input value={item.command} onChange={(event) => updateItem(index, { command: event.target.value })} />
-                    </label>
-                  )}
-                  {/*
-                    A file keeps the picker next to the field, because that is how the target got
-                    there and because a re-pick is the whole repair when the document has moved.
-                    The path stays typeable: correcting one folder name beats walking a dialog.
-                  */}
-                  {item.type !== 'folder' && item.commandType === 'file' && (
-                    <label className="zs-field is-with-action">
-                      <span>File path</span>
-                      <div className="zs-field-row">
-                        <input
-                          value={item.command}
-                          spellCheck={false}
-                          onChange={(event) => updateItem(index, { command: event.target.value })}
-                        />
-                        <button
-                          type="button"
-                          className="zs-btn"
-                          onClick={async () => {
-                            const picked = await window.electron?.selectFile?.({ mode: 'any' });
-                            if (picked) updateItem(index, { command: picked });
-                          }}
-                        ><FolderOpen size={13} /> Change</button>
-                      </div>
-                    </label>
-                  )}
-                  {item.type !== 'folder' && item.commandType === 'app' && isPathLikeCommand(item.command) && (
-                    <label className="zs-field is-with-action">
-                      <span>Target</span>
-                      <div className="zs-field-row">
-                        <input
-                          value={item.command}
-                          spellCheck={false}
-                          onChange={(event) => updateItem(index, { command: event.target.value })}
-                        />
-                        <button
-                          type="button"
-                          className="zs-btn"
-                          onClick={async () => {
-                            const picked = await window.electron?.selectFile?.();
-                            if (picked) updateItem(index, { command: picked });
-                          }}
-                        ><FolderOpen size={13} /> Change</button>
-                      </div>
-                    </label>
-                  )}
-                  {/*
-                    No launch mode for files, same reason folders have none: every one of the three
-                    describes what to do with a PROCESS, and a document has none — Windows picks the
-                    program, and `shell.openPath` is the only rung the launch ever gets.
-                  */}
-                  {item.type !== 'folder' && item.commandType !== 'folder' && item.commandType !== 'file' && (
-                    <div className="zs-launch-options">
-                      <div>
-                        <b>Launch mode</b>
-                        <small>
-                          {item.commandType === 'url' && (item.launchMode ?? 'normal') === 'reuse'
-                            ? 'Uses the existing default browser process when available.'
-                            : (item.launchMode ?? 'normal') === 'prewarm'
-                            ? 'Warms the Windows file cache for this app and reuses an existing process when supported.'
-                            : (item.launchMode ?? 'normal') === 'reuse'
-                              ? 'Prefers the existing IDE, app, or browser process.'
-                              : 'Uses the standard Windows launch behavior.'}
-                        </small>
-                      </div>
-                      <div className="zs-segmented" role="radiogroup" aria-label="Launch mode">
-                        {(item.commandType === 'url'
-                          ? ([['normal', 'Normal'], ['reuse', 'Reuse']] as const)
-                          : ([['normal', 'Normal'], ['reuse', 'Reuse'], ['prewarm', 'Warm']] as const)
-                        ).map(([value, label]) => (
+                <Collapse key="editor">
+                  <div className="zs-workspace-item-editor">
+                    <label className="zs-field"><span>Name</span><input value={item.label} onChange={(event) => updateItem(index, { label: event.target.value })} /></label>
+                    {/*
+                      Applications do not show the command: whoever added the shortcut already chose
+                      the app, and the value is an AUMID (`Microsoft.WindowsTerminal_…!App`) that
+                      tells nobody anything and only fills half a line. URL and folder stay editable
+                      — there the value is readable and is the only way to fix the target.
+                    */}
+                    {item.type !== 'folder' && item.commandType !== 'app' && item.commandType !== 'file' && (
+                      <label className="zs-field">
+                        <span>{item.commandType === 'url' ? 'URL' : 'Folder path'}</span>
+                        <input value={item.command} onChange={(event) => updateItem(index, { command: event.target.value })} />
+                      </label>
+                    )}
+                    {/*
+                      A file keeps the picker next to the field, because that is how the target got
+                      there and because a re-pick is the whole repair when the document has moved.
+                      The path stays typeable: correcting one folder name beats walking a dialog.
+                    */}
+                    {item.type !== 'folder' && item.commandType === 'file' && (
+                      <label className="zs-field is-with-action">
+                        <span>File path</span>
+                        <div className="zs-field-row">
+                          <input
+                            value={item.command}
+                            spellCheck={false}
+                            onChange={(event) => updateItem(index, { command: event.target.value })}
+                          />
                           <button
-                            key={value}
                             type="button"
-                            role="radio"
-                            aria-checked={(item.launchMode ?? 'normal') === value}
-                            className={(item.launchMode ?? 'normal') === value ? 'is-selected' : ''}
-                            onClick={() => updateItem(index, { launchMode: value })}
-                          >{label}</button>
-                        ))}
-                      </div>
-                      {(() => {
-                        const risk = launchModeRisk(item.commandType, item.launchMode ?? 'normal');
-                        if (!risk) return null;
-                        return (
-                          <p className="zs-launch-risk" role="note">
-                            <AlertTriangle size={13} strokeWidth={1.9} aria-hidden />
-                            <span>{risk}</span>
-                          </p>
-                        );
-                      })()}
-                    </div>
-                  )}
-                  {isIde && (
-                    <div className="zs-ide-options">
-                      <div className="zs-ide-options-head">
-                        <div><b>IDE integration</b><small>Recent projects and automated terminal commands.</small></div>
-                      </div>
-                      <div className="zs-ide-toggle-row">
-                        <div><b id={`ide-recents-${item.id}`}>Show recent folders</b><small>Open the IDE as a submenu containing its recent projects.</small></div>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={Boolean(item.hasRecents)}
-                          aria-labelledby={`ide-recents-${item.id}`}
-                          className="zs-switch"
-                          onClick={() => updateItem(index, { hasRecents: !item.hasRecents })}
-                        ><i /></button>
-                      </div>
-                      <div className="zs-ide-toggle-row">
-                        <div><b id={`ide-terminal-${item.id}`}>Open terminal for recent folders</b><small>Starts a terminal in the selected project directory.</small></div>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={Boolean(item.openTerminalForRecents)}
-                          aria-labelledby={`ide-terminal-${item.id}`}
-                          className="zs-switch"
-                          disabled={!item.hasRecents}
-                          onClick={() => updateItem(index, { openTerminalForRecents: !item.openTerminalForRecents })}
-                        ><i /></button>
-                      </div>
-                      <div className="zs-ide-commands">
-                        <div className="zs-ide-commands-head">
-                          <div><b>Automated commands</b><small>Executed in the selected recent project folder.</small></div>
-                          <button type="button" className="zs-btn" onClick={() => updateItem(index, { terminalCommands: [...(item.terminalCommands || []), ''] })}><Plus size={13} /> Add command</button>
+                            className="zs-btn"
+                            onClick={async () => {
+                              const picked = await window.electron?.selectFile?.({ mode: 'any' });
+                              if (picked) updateItem(index, { command: picked });
+                            }}
+                          ><FolderOpen size={13} /> Change</button>
                         </div>
-                        {(item.terminalCommands || []).map((command, commandIndex) => (
-                          <div className="zs-command-row" key={`${item.id}-command-${commandIndex}`}>
-                            <input
-                              value={command}
-                              placeholder={commandIndex === 0 ? 'npm install' : 'npm run dev'}
-                              aria-label={`Automated command ${commandIndex + 1}`}
-                              onChange={(event) => updateItem(index, {
-                                terminalCommands: (item.terminalCommands || []).map((current, i) => i === commandIndex ? event.target.value : current),
-                              })}
-                            />
-                            <button type="button" aria-label={`Remove command ${commandIndex + 1}`} onClick={() => updateItem(index, {
-                              terminalCommands: (item.terminalCommands || []).filter((_, i) => i !== commandIndex),
-                            })}><X size={13} /></button>
-                          </div>
-                        ))}
-                        {!item.terminalCommands?.length && <p className="zs-ide-empty">No automated commands configured.</p>}
+                      </label>
+                    )}
+                    {item.type !== 'folder' && item.commandType === 'app' && isPathLikeCommand(item.command) && (
+                      <label className="zs-field is-with-action">
+                        <span>Target</span>
+                        <div className="zs-field-row">
+                          <input
+                            value={item.command}
+                            spellCheck={false}
+                            onChange={(event) => updateItem(index, { command: event.target.value })}
+                          />
+                          <button
+                            type="button"
+                            className="zs-btn"
+                            onClick={async () => {
+                              const picked = await window.electron?.selectFile?.();
+                              if (picked) updateItem(index, { command: picked });
+                            }}
+                          ><FolderOpen size={13} /> Change</button>
+                        </div>
+                      </label>
+                    )}
+                    {/*
+                      No launch mode for files, same reason folders have none: every one of the three
+                      describes what to do with a PROCESS, and a document has none — Windows picks the
+                      program, and `shell.openPath` is the only rung the launch ever gets.
+                    */}
+                    {item.type !== 'folder' && item.commandType !== 'folder' && item.commandType !== 'file' && (
+                      <div className="zs-launch-options">
+                        <div>
+                          <b>Launch mode</b>
+                          <small>
+                            {item.commandType === 'url' && (item.launchMode ?? 'normal') === 'reuse'
+                              ? 'Uses the existing default browser process when available.'
+                              : (item.launchMode ?? 'normal') === 'prewarm'
+                              ? 'Warms the Windows file cache for this app and reuses an existing process when supported.'
+                              : (item.launchMode ?? 'normal') === 'reuse'
+                                ? 'Prefers the existing IDE, app, or browser process.'
+                                : 'Uses the standard Windows launch behavior.'}
+                          </small>
+                        </div>
+                        <div className="zs-segmented" role="radiogroup" aria-label="Launch mode">
+                          {(item.commandType === 'url'
+                            ? ([['normal', 'Normal'], ['reuse', 'Reuse']] as const)
+                            : ([['normal', 'Normal'], ['reuse', 'Reuse'], ['prewarm', 'Warm']] as const)
+                          ).map(([value, label]) => (
+                            <button
+                              key={value}
+                              type="button"
+                              role="radio"
+                              aria-checked={(item.launchMode ?? 'normal') === value}
+                              className={(item.launchMode ?? 'normal') === value ? 'is-selected' : ''}
+                              onClick={() => updateItem(index, { launchMode: value })}
+                            >{label}</button>
+                          ))}
+                        </div>
+                        {(() => {
+                          const risk = launchModeRisk(item.commandType, item.launchMode ?? 'normal');
+                          if (!risk) return null;
+                          return (
+                            <p className="zs-launch-risk" role="note">
+                              <AlertTriangle size={13} strokeWidth={1.9} aria-hidden />
+                              <span>{risk}</span>
+                            </p>
+                          );
+                        })()}
                       </div>
-                    </div>
-                  )}
-                </div>
+                    )}
+                    {/*
+                      Main's answer arrives after the editor is already open, so this block appears
+                      on its own — the one reveal in the panel nobody asked for by clicking. It
+                      opens like the rest, and does not drag the form around while it does: what the
+                      user is looking at is the name field above it.
+                    */}
+                    <AnimatePresence initial={false}>
+                    {isIde && (
+                      <Collapse key="ide" reveal={false}>
+                        <div className="zs-ide-options">
+                          <div className="zs-ide-options-head">
+                            <div><b>IDE integration</b><small>Recent projects and automated terminal commands.</small></div>
+                          </div>
+                          <div className="zs-ide-toggle-row">
+                            <div><b id={`ide-recents-${item.id}`}>Show recent folders</b><small>Open the IDE as a submenu containing its recent projects.</small></div>
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={Boolean(item.hasRecents)}
+                              aria-labelledby={`ide-recents-${item.id}`}
+                              className="zs-switch"
+                              onClick={() => updateItem(index, { hasRecents: !item.hasRecents })}
+                            ><i /></button>
+                          </div>
+                          <div className="zs-ide-toggle-row">
+                            <div><b id={`ide-terminal-${item.id}`}>Open terminal for recent folders</b><small>Starts a terminal in the selected project directory.</small></div>
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={Boolean(item.openTerminalForRecents)}
+                              aria-labelledby={`ide-terminal-${item.id}`}
+                              className="zs-switch"
+                              disabled={!item.hasRecents}
+                              onClick={() => updateItem(index, { openTerminalForRecents: !item.openTerminalForRecents })}
+                            ><i /></button>
+                          </div>
+                          <div className="zs-ide-commands">
+                            <div className="zs-ide-commands-head">
+                              <div><b>Automated commands</b><small>Executed in the selected recent project folder.</small></div>
+                              <button type="button" className="zs-btn" onClick={() => updateItem(index, { terminalCommands: [...(item.terminalCommands || []), ''] })}><Plus size={13} /> Add command</button>
+                            </div>
+                            {(item.terminalCommands || []).map((command, commandIndex) => (
+                              <div className="zs-command-row" key={`${item.id}-command-${commandIndex}`}>
+                                <input
+                                  value={command}
+                                  placeholder={commandIndex === 0 ? 'npm install' : 'npm run dev'}
+                                  aria-label={`Automated command ${commandIndex + 1}`}
+                                  onChange={(event) => updateItem(index, {
+                                    terminalCommands: (item.terminalCommands || []).map((current, i) => i === commandIndex ? event.target.value : current),
+                                  })}
+                                />
+                                <button type="button" aria-label={`Remove command ${commandIndex + 1}`} onClick={() => updateItem(index, {
+                                  terminalCommands: (item.terminalCommands || []).filter((_, i) => i !== commandIndex),
+                                })}><X size={13} /></button>
+                              </div>
+                            ))}
+                            {!item.terminalCommands?.length && <p className="zs-ide-empty">No automated commands configured.</p>}
+                          </div>
+                        </div>
+                      </Collapse>
+                    )}
+                    </AnimatePresence>
+                  </div>
+                </Collapse>
               )}
+              </AnimatePresence>
             </div>
           );})}
           {!workspace.apps.length && (
