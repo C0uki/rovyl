@@ -282,6 +282,18 @@ const DWELL_ARC_MIN_MS = 90;
  */
 const DIRECTION_CLAMP_FACTOR = 2.5;
 /**
+ * The slack, in absolute terms, has a ceiling of its own.
+ *
+ * A pure multiple was fine while the thresholds were small, but it scales the COST OF REVERSING
+ * with the sensitivity: at "low" (200px) a saturated vector would sit 500px out, and turning to the
+ * item on the opposite side would mean dragging 700px through the wheel. The slack only has one job
+ * — be comfortably wider than `DWELL_HOLD_PX`, so a tremor the count still accepts as a still hand
+ * cannot drag the vector back under the threshold — and 60px does that at every setting. The
+ * multiple still rules where it is the smaller of the two, which is "high", where it was never the
+ * problem.
+ */
+const DIRECTION_CLAMP_SLACK_MAX_PX = 60;
+/**
  * The parking `SetCursorPos` reaches the DOM as an ordinary `mousemove` — and as a jump of
  * hundreds of pixels, which added to the vector would point opposite to the gesture. While a
  * parking is pending, the sample that lands at the centre (or that jumps further than a hand can
@@ -1562,7 +1574,10 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
          * The vector's ceiling. Only the direction counts — the virtual pointer never needs to
          * reach the icon ring, because by direction the aim is the sector and not the icon.
          */
-        const clamp = directionCommitRef.current * DIRECTION_CLAMP_FACTOR;
+        const clamp = Math.min(
+          directionCommitRef.current * DIRECTION_CLAMP_FACTOR,
+          directionCommitRef.current + DIRECTION_CLAMP_SLACK_MAX_PX,
+        );
         const lengthSq = nextX * nextX + nextY * nextY;
         const clampSq = clamp * clamp;
         if (lengthSq > clampSq) {

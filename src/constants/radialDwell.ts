@@ -58,11 +58,22 @@ export const DIRECTION_SENSITIVITY_DEFAULT: DirectionSensitivity = 'medium';
 /**
  * High is short on purpose — but not below ~16px: a gaming mouse at 1600 DPI produces a dozen
  * pixels just from the hand settling, and a wheel that chooses on that chooses by itself.
+ *
+ * Low and medium used to sit at 84 and 42, and both fired on a flick. The numbers are read in CSS
+ * pixels of CURSOR travel, not of hand travel: Windows pointer acceleration multiplies a fast push,
+ * so 84px of cursor is a few centimetres of desk at most — "Low" felt indistinguishable from the
+ * hair trigger it is supposed to be the opposite of. These are the distances that actually make Low
+ * a deliberate shove and Medium a decision rather than a twitch, with High left alone as the
+ * hair trigger it advertises.
+ *
+ * Ceiling: they have to stay clear of the re-park radius (`PARK_STRAY_MARGIN_PX` in `RadialMenu`,
+ * ~354px inside the 988px radial box), or the direction could never commit before the cursor is
+ * warped back to the centre.
  */
 const DIRECTION_COMMIT_PX: Record<DirectionSensitivity, number> = {
   high: 18,
-  medium: 42,
-  low: 84,
+  medium: 96,
+  low: 200,
 };
 
 export function clampDirectionSensitivity(value: unknown): DirectionSensitivity {
