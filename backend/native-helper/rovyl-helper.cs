@@ -296,7 +296,12 @@ namespace Rovyl.NativeHelper {
         private static extern bool CloseHandle(IntPtr handle);
         [DllImport("user32.dll")]
         private static extern short GetKeyState(int nVirtKey);
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int nVirtKey);
 
+        private const int VK_LBUTTON = 0x01;
+        private const int VK_RBUTTON = 0x02;
+        private const int VK_MBUTTON = 0x04;
         private const int VK_SHIFT = 0x10;
         private const int VK_CONTROL = 0x11;
         private const int VK_MENU = 0x12;
@@ -321,6 +326,17 @@ namespace Rovyl.NativeHelper {
         private static volatile bool Blocking;
         private static int Left, Top, Right, Bottom;
         private static int MonitorLeft, MonitorTop, MonitorRight, MonitorBottom;
+
+        /**
+         * One-shot: "tell me when no mouse button is held any more".
+         *
+         * Polled rather than hooked, because the asker is the tray menu and the hook is not even
+         * installed while the app idles. `GetAsyncKeyState` reads the PHYSICAL buttons, so a
+         * swapped-buttons mouse needs no special case as long as all three are watched.
+         */
+        private static volatile bool AwaitingButtonsUp;
+        /** `Environment.TickCount` at which the wait gives up and answers anyway. */
+        private static volatile int ButtonsUpDeadline;
 
         private static volatile bool RecordingMode;
         private static volatile int ShortcutTriggerButton;
@@ -655,6 +671,20 @@ namespace Rovyl.NativeHelper {
                     InstallHook();
                     Emit(Hook != IntPtr.Zero ? "SHORTCUT_TRIGGER_READY" : "SHORTCUT_TRIGGER_FAILED");
                 }
+            } else if (parts[0] == "BUTTONS_UP") {
+                /**
+                 * One-shot wait, answered on the timer thread. The tray menu asks for it before it
+                 * steals the foreground: taking it while the button is still down cancels the
+                 * notification area's own click and the taskbar pops ITS menu on the release.
+                 */
+                int timeoutMs;
+                if (parts.Length < 2 ||
+                    !int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out timeoutMs) ||
+                    timeoutMs <= 0) {
+                    timeoutMs = 400;
+                }
+                ButtonsUpDeadline = Environment.TickCount + timeoutMs;
+                AwaitingButtonsUp = true;
             } else if (parts.Length == 3 && parts[0] == "WARP") {
                 int wx, wy;
                 if (int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out wx) &&
@@ -662,6 +692,7 @@ namespace Rovyl.NativeHelper {
                     SetCursorPos(wx, wy);
                 }
             } else if (parts[0] == "EXIT") {
+                AwaitingButtonsUp = false;
                 ReleaseInjectedButton();
                 TriggerButton = 0;
                 ShortcutTriggerButton = 0;
@@ -708,6 +739,17 @@ namespace Rovyl.NativeHelper {
             timer.Tick += (sender, args) => {
                 string command;
                 while (Commands.TryDequeue(out command)) Apply(command, context);
+
+                if (AwaitingButtonsUp) {
+                    bool anyDown = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0 ||
+                                   (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0 ||
+                                   (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0;
+                    /** Subtraction, not `>`: TickCount wraps every 49 days and a wrap must not hang the wait. */
+                    if (!anyDown || Environment.TickCount - ButtonsUpDeadline >= 0) {
+                        AwaitingButtonsUp = false;
+                        Emit("BUTTONS_UP");
+                    }
+                }
 
                 int armed = TriggerButton;
                 if (armed != 0 && !TriggerHoldMode && ClickPressArmed && ClickInjectedButton == 0) {

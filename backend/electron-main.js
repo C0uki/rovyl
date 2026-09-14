@@ -2077,6 +2077,8 @@ function ensureRadialMouseBlocker() {
         } catch (e) {
           diagLog(`[RadialBlocker] shortcut up: ${e.message}`);
         }
+      } else if (line === "BUTTONS_UP") {
+        settleMouseButtonsUp();
       }
     }
     if (radialTriggerListener && text.includes("TRIGGER_")) {
@@ -2112,6 +2114,58 @@ function ensureRadialMouseBlocker() {
       radialCursorParkPoint = null;
       radialCursorRestorePoint = null;
       pendingRadialCursorCommand = null;
+    }
+  });
+}
+
+/**
+ * Everyone waiting on the helper's next `BUTTONS_UP`. One answer settles all of them: the question
+ * is about the mouse, not about the asker.
+ */
+let mouseButtonsUpWaiters = [];
+
+function settleMouseButtonsUp() {
+  const waiters = mouseButtonsUpWaiters;
+  mouseButtonsUpWaiters = [];
+  for (const resolve of waiters) resolve();
+}
+
+/**
+ * Resolves once no mouse button is held — or after `timeoutMs`, whichever comes first.
+ *
+ * For whoever is about to take the foreground out from under a click that is still in progress.
+ * Windows hands the notification area's right-click to us on the button DOWN, and Electron pops
+ * the tray menu right there, which deactivates the taskbar mid-click; explorer then never gets to
+ * finish its own click, and the release falls through to `Shell_TrayWnd` as a WM_CONTEXTMENU — the
+ * taskbar's own menu, on top of ours. Waiting out the press costs ~20ms and the whole race with it.
+ *
+ * Deliberately does NOT start the helper: with no helper this resolves at once and the behaviour
+ * is exactly what it was before, rather than a tray menu that will not open.
+ */
+function waitForMouseButtonsUp(timeoutMs = 400) {
+  if (process.platform !== "win32") return Promise.resolve();
+  if (!radialMouseBlocker || !radialMouseBlockerReady || !radialMouseBlocker.stdin?.writable) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    let timer = null;
+    const finish = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      resolve();
+    };
+    mouseButtonsUpWaiters.push(finish);
+    /** The helper answers at its own deadline too; this only covers a helper that has gone quiet. */
+    timer = setTimeout(finish, timeoutMs + 100);
+    timer.unref?.();
+    try {
+      /** Straight to stdin: `writeRadialMouseBlocker`'s one pending slot belongs to BLOCK/TRIGGER. */
+      radialMouseBlocker.stdin.write(`BUTTONS_UP ${timeoutMs}\n`);
+    } catch (e) {
+      diagLog(`[RadialBlocker] buttons-up failed: ${e.message}`);
+      finish();
     }
   });
 }
@@ -4370,6 +4424,13 @@ app.whenReady().then(async () => {
    * second click means the user dismissed Settings in between, so it finds one hidden and passes.
    */
   const TRAY_OPEN_SETTINGS_COOLDOWN_MS = 900;
+
+  /**
+   * How long the tray menu will sit out a right button that is still held. Past this it opens
+   * anyway: a press that long is someone resting on the button, and a menu that never appears is
+   * worse than the taskbar's own menu appearing beside it.
+   */
+  const TRAY_MENU_BUTTON_WAIT_MS = 400;
   let trayOpenSettingsAt = 0;
   const openSettingsFromTray = async () => {
     if (isAppQuitting) return;
@@ -4484,16 +4545,51 @@ app.whenReady().then(async () => {
     );
 
   /**
-   * The menu is a snapshot: item labels, icons and checkmarks are fixed when it is built, so every
-   * state it shows — the pause countdown, which workspace is current — means rebuilding it.
+   * The live menu, kept in a variable for exactly as long as it is on screen: Electron holds the
+   * model behind a weak pointer, and a menu collected while the user is reading it is a crash.
+   */
+  let trayMenu = null;
+  /** One popup in flight at a time — a second right-click during the wait is the same request. */
+  let trayMenuOpening = false;
+
+  /**
+   * The tray menu pops on the RELEASE, not on the press, and that is the whole point.
+   *
+   * Windows forwards the notification area's right-click to us on WM_RBUTTONDOWN, and Electron's
+   * own `setContextMenu` path shows the menu right there — inside the button-down — where
+   * `SetForegroundWindow` deactivates the taskbar while explorer is still tracking the click.
+   * Explorer never completes it, the release lands on `Shell_TrayWnd` instead, and the taskbar's
+   * own context menu opens behind ours. Hence: no `setContextMenu`, so Electron emits `right-click`
+   * and returns; we wait out the press, then pop the menu ourselves.
+   *
+   * Built here rather than kept around, so the pause countdown and the workspace tick are read at
+   * the moment the menu opens instead of whenever something last thought to refresh it.
+   */
+  const popUpTrayMenu = async () => {
+    if (trayMenuOpening) return;
+    trayMenuOpening = true;
+    try {
+      await waitForMouseButtonsUp(TRAY_MENU_BUTTON_WAIT_MS);
+      if (!tray || tray.isDestroyed() || isAppQuitting) return;
+      trayMenu = buildTrayMenu();
+      tray.popUpContextMenu(trayMenu);
+    } catch (e) {
+      diagLog(`[Tray] pop up menu: ${e.message}`);
+    } finally {
+      trayMenuOpening = false;
+    }
+  };
+
+  /**
+   * Only the tooltip now: the menu itself is built when it opens, so nothing about it can go stale.
+   * The call sites stay — they are the places that know the state changed.
    */
   const refreshTrayMenu = () => {
     if (!tray || tray.isDestroyed()) return;
     try {
-      tray.setContextMenu(buildTrayMenu());
       tray.setToolTip(triggersArePaused() ? "Rovyl — trigger paused" : "Rovyl");
     } catch (e) {
-      diagLog(`[Tray] rebuild menu: ${e.message}`);
+      diagLog(`[Tray] refresh: ${e.message}`);
     }
   };
   refreshTrayMenuRef = refreshTrayMenu;
@@ -4507,16 +4603,19 @@ app.whenReady().then(async () => {
     const resizedIcon = trayIcon.resize({ width: 16, height: 16 });
     tray = new Tray(resizedIcon);
     tray.setToolTip("Rovyl");
-    tray.setContextMenu(buildTrayMenu());
 
-    /** A menu item's icon is fixed at build time, so a theme flip means rebuilding the menu. */
-    nativeTheme.on("updated", refreshTrayMenu);
+    /**
+     * No `setContextMenu`: that is what makes Electron emit `right-click` instead of popping the
+     * menu inside the button-down. See `popUpTrayMenu`.
+     */
+    tray.on("right-click", () => {
+      void popUpTrayMenu();
+    });
 
     /**
      * On Windows a context menu does NOT swallow the left button — that constraint is macOS's.
-     * The right button pops the menu by itself and stops emitting `right-click`, so there is no
-     * listener for it here. Both listeners below share one cooldown on purpose: whether a
-     * double-click really yields click+double-click or click+click, the outcome is the same.
+     * Both listeners below share one cooldown on purpose: whether a double-click really yields
+     * click+double-click or click+click, the outcome is the same.
      */
     tray.on("click", () => {
       void openSettingsFromTray();
