@@ -57,6 +57,12 @@ import { NativeAppIcon, useInstalledApps, clearInstalledAppsMemory, type Install
 import { radialCrowding } from '../utils/workspaceRadial';
 import { startMenuAppIdToLaunchCommand } from '../utils/windowsLaunchCommand';
 import { WheelPreview } from './WheelPreview';
+import {
+  BACK_KEY_OFF,
+  DEFAULT_BACK_KEY,
+  normalizeBackKey,
+  rejectBackKey,
+} from '../constants/radialBackKey';
 import { nextTypeAheadBuffer, selectMenuPlacement, typeAheadIndex } from './selectMenu';
 import { LANGUAGES, normalizeLanguage, translations, useTranslation } from '../i18n/useTranslation';
 
@@ -122,6 +128,7 @@ export type WorkspaceUpdater = (
 /** The modal is reserved for what does not fit in a row: long lists, recording and editing. */
 type Editor =
   | { kind: 'shortcut' }
+  | { kind: 'backKey' }
   | { kind: 'blocked' }
   | { kind: 'workspace'; index: number }
   | null;
@@ -817,6 +824,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
     const keyboardTriggerOn = config.enableKeyboardTrigger !== false;
     const mouseTriggerOn = config.enableMouseTrigger !== false;
     const numberLaunchOn = config.radialNumberLaunch === true;
+    const backKey = normalizeBackKey(config.radialBackKey);
     /** The other claimant on 1–9 — see the description of the quick-launch row. */
     const workspaceHotkeysOn = (config.workspaceSwitchMode ?? 'picker') !== 'picker';
 
@@ -1062,7 +1070,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
               ? 'Press 1–9 to run the shortcut in that position — no Enter. The digits are the wheel’s now, so switching workspace by number is off; use the wheel or the scroll wheel instead.'
               : workspaceHotkeysOn
                 ? 'Press 1–9 to run the shortcut in that position, counting clockwise from the top — no Enter. It takes the number keys away from workspace switching.'
-                : 'Press 1–9 to run the shortcut in that position, counting clockwise from the top — no Enter, no aiming.',
+                : 'Press 1–9 to run the shortcut in that position, counting clockwise from the top — no Enter, no aiming. Also turns on the key that steps back out of a folder.',
           kind: 'bool', enabled: numberLaunchOn,
           onToggle: () => update('radialNumberLaunch', !numberLaunchOn),
         },
@@ -1077,6 +1085,21 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
                 kind: 'bool', enabled: config.radialNumberLabels !== false,
                 onToggle: () =>
                   update('radialNumberLabels', config.radialNumberLabels === false),
+              },
+              {
+                key: 'backKey', configKey: 'radialBackKey' as const, group: 'Number keys',
+                title: 'Key to leave a folder',
+                /**
+                 * Where it does NOT work is the whole reason a plain letter is safe to bind, so it
+                 * is the sentence the row leads with. Someone who reads only the title would
+                 * otherwise try it on the root wheel, watch it type into the filter, and file it
+                 * as broken.
+                 */
+                description: backKey
+                  ? `Press ${backKey} inside a folder to step back out, the same as clicking the hub. At the top level it stays an ordinary letter, so searching is unaffected.`
+                  : 'No key assigned. The hub still goes back when clicked, and Backspace still works.',
+                kind: 'open' as const, value: backKey || 'Off',
+                onOpen: () => setEditor({ kind: 'backKey' }),
               },
             ] as SettingItem[])
           : []),
@@ -2394,6 +2417,17 @@ function SettingsEditor({
         value={config.globalShortcut}
         onChange={(next) => update('globalShortcut', next)}
         config={config}
+      />
+    );
+  }
+
+  if (editor.kind === 'backKey') {
+    title = 'Back key';
+    description = 'One key, pressed on its own, to step out of a folder.';
+    content = (
+      <BackKeyRecorder
+        value={config.radialBackKey}
+        onChange={(next) => update('radialBackKey', next)}
       />
     );
   }
@@ -3856,6 +3890,94 @@ type ShortcutStatus =
  * Rovyl's own bindings are matched first and by name, because "already used by Cursor in Main" is
  * something the user can act on and "taken" is not.
  */
+/**
+ * Records the single key that leaves a folder.
+ *
+ * Deliberately NOT `ShortcutRecorder`. That one goes through main — pause the global shortcut,
+ * record at the OS level, probe whether Windows will hand the combination over — because a global
+ * accelerator has to be reserved system-wide. This key is only ever read by the wheel's own keydown
+ * handler while the wheel is open, so there is nothing to reserve and nobody to ask: capturing it
+ * in the panel is the whole job.
+ */
+function BackKeyRecorder({
+  value,
+  onChange,
+}: {
+  value: string | undefined;
+  onChange: (value: string) => void;
+}) {
+  const [recording, setRecording] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const current = normalizeBackKey(value);
+
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  useEffect(() => {
+    if (!recording) return;
+    const handler = (e: KeyboardEvent) => {
+      /** A bare modifier is the user still reaching for the key, not the key. Keep listening. */
+      if (['Shift', 'Control', 'Alt', 'Meta', 'AltGraph'].includes(e.key)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      /** Escape leaves the recorder rather than being refused as a reserved key. */
+      if (e.key === 'Escape') {
+        setRecording(false);
+        setError(null);
+        return;
+      }
+      const reason = rejectBackKey(e.key, e.ctrlKey, e.altKey, e.metaKey);
+      if (reason) {
+        setError(reason);
+        /** Still recording: a refusal is an invitation to try another key, not a dead card. */
+        return;
+      }
+      setRecording(false);
+      setError(null);
+      onChangeRef.current(normalizeBackKey(e.key));
+    };
+    /** Capture, so the panel's own shortcuts and focused controls do not eat the keystroke first. */
+    window.addEventListener('keydown', handler, { capture: true });
+    return () => window.removeEventListener('keydown', handler, { capture: true });
+  }, [recording]);
+
+  return (
+    <div className="zs-shortcut">
+      <div className="zs-shortcut-keys">
+        {current ? <kbd>{current}</kbd> : <kbd>None</kbd>}
+      </div>
+      <button
+        type="button"
+        className={`zs-btn${recording ? '' : ' is-primary'}`}
+        onClick={() => {
+          setError(null);
+          setRecording((on) => !on);
+        }}
+      >
+        {recording ? 'Press any key… (Escape to stop)' : 'Record new key'}
+      </button>
+      {/* Both ways back to a sane state: the shipped default, or nothing at all. */}
+      <button
+        type="button"
+        className="zs-btn"
+        onClick={() => {
+          setRecording(false);
+          setError(null);
+          onChange(current === BACK_KEY_OFF ? DEFAULT_BACK_KEY : BACK_KEY_OFF);
+        }}
+      >
+        {current === BACK_KEY_OFF ? `Use ${DEFAULT_BACK_KEY}` : 'Remove key'}
+      </button>
+      {error && (
+        <p className="zs-shortcut-note is-warn" role="status">
+          <AlertTriangle size={13} strokeWidth={1.9} aria-hidden />
+          <span>{error}</span>
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ShortcutRecorder({
   value,
   onChange,

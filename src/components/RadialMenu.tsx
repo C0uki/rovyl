@@ -13,6 +13,7 @@ import {
   parseWorkspacePickIndex,
 } from '../utils/workspaceRadial';
 import { clampDwellMs, directionCommitPx } from '../constants/radialDwell';
+import { isBackKeyEvent, normalizeBackKey } from '../constants/radialBackKey';
 import { radialScrimGradient } from '../utils/radialScrim';
 import {
   annularSectorPath,
@@ -1719,6 +1720,13 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
       );
       setHasMoved(false);
       setIsCenterActive(false);
+      /**
+       * The aim belonged to the level being left. It survived here and nowhere else — every other
+       * level swap in the file clears it — and with the mouse that was invisible, because the next
+       * `mousemove` recomputed it before the frame was seen. Driven from the keyboard nothing
+       * recomputes, so the highlight simply stayed on whatever item had inherited that index.
+       */
+      setActiveIndex(null);
       return;
     }
     onClose('__CENTER__');
@@ -2379,10 +2387,18 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
           setTypeAhead((current) => current.slice(0, -1));
           return;
         }
-        if (folderStack.length > 0) {
+        /**
+         * Through the hub's own handler, which is what the centre does when clicked.
+         *
+         * This branch used to pop `folderStack` alone. The wheel draws `rawLevelApps`, a separate
+         * piece of state, and only the ROOT is re-derived from the stack (the sync effect bails
+         * whenever the stack is non-empty) — so Backspace out of a NESTED folder moved the
+         * breadcrumb up while the slices stayed on the level just left. One level deep it looked
+         * fine, which is why it lasted.
+         */
+        if (stateRef.current.folderStack.length > 0) {
           e.preventDefault();
-          setFolderStack((prev) => prev.slice(0, -1));
-          setActiveIndex(null);
+          handleCenterActivate();
           return;
         }
         return;
@@ -2477,6 +2493,36 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
           handleAppClickRef.current(target);
           return;
         }
+      }
+
+      /**
+       * THE BACK KEY — the hub's keyboard equivalent. The centre could only ever be clicked.
+       *
+       * Gated on being at least one level deep, which is exactly the state in which the hub reads
+       * "Back" (`centerLabel`). That gate is what makes a plain letter safe to bind: at the root,
+       * where searching actually happens, the key falls through and the filter still gets it, so
+       * the default Q does not cost anyone `qBittorrent`. Nothing typed, for the same reason the
+       * digits check it — mid-filter every character belongs to the filter.
+       *
+       * It goes through `handleCenterActivate` rather than popping the stack here: that function is
+       * the click handler, it carries the quarantine and echo guards, and the one thing this file
+       * does not need is a fourth place that knows how to leave a folder.
+       *
+       * `radialNumberLaunch` gates it because that switch is what puts the whole keyboard-driven
+       * wheel on, and the settings row for this key only exists underneath it. The gate has to be
+       * HERE and not only in the panel: the binding defaults to a real key, so without it someone
+       * who never turned any of this on would find Q quietly stepping out of folders, with no
+       * setting on screen to explain it or take it away.
+       */
+      if (
+        configRef.current.radialNumberLaunch === true &&
+        !typeAheadRef.current &&
+        stateRef.current.folderStack.length > 0 &&
+        isBackKeyEvent(e, normalizeBackKey(configRef.current.radialBackKey))
+      ) {
+        e.preventDefault();
+        handleCenterActivate();
+        return;
       }
 
       /*

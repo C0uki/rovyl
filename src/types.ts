@@ -278,6 +278,21 @@ export interface UIConfig {
    */
   radialNumberLabels?: boolean;
   /**
+   * The single key that leaves a folder — the hub's keyboard equivalent, since the centre could
+   * only ever be clicked. Stored upper case; an empty string means no key at all.
+   *
+   * It only fires where the hub actually says "Back": one level deep or more, with nothing typed.
+   * At the root there is nothing to leave, so the key goes back to being a character the filter can
+   * have — which is what keeps `qBittorrent` reachable with the default binding.
+   *
+   * Read it through `normalizeBackKey`; a config can be hand-edited and this one is a free string.
+   *
+   * Means nothing while `radialNumberLaunch` is off, exactly like `radialNumberLabels`: that switch
+   * owns the keyboard-driven wheel and this key is part of it. The wheel checks the pair, not this
+   * alone — a binding that acts with no visible setting behind it is indistinguishable from a bug.
+   */
+  radialBackKey?: string;
+  /**
    * A gear in a corner of the open wheel, which opens Settings.
    *
    * Rovyl's other doors to Settings are all gestures you have to know about — the tray icon, a

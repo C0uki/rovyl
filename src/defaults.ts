@@ -1,6 +1,7 @@
 import { AppItem, UIConfig, Workspace } from "./types";
 import { BACKDROP_DIM_SCALE } from "./utils/radialScrim";
 import { DEFAULT_TASKBAR_OVERLAY } from "./utils/taskbarOverlay";
+import { DEFAULT_BACK_KEY } from "./constants/radialBackKey";
 
 export const DEFAULT_APPS: AppItem[] = [
   {
@@ -382,6 +383,13 @@ export const DEFAULT_UI_CONFIG: UIConfig = {
   radialNumberLaunch: false,
   /** On, so that turning the feature on is enough to see where the numbers are. */
   radialNumberLabels: true,
+  /**
+   * A key is named up front so that turning `radialNumberLaunch` on is enough to have one — the
+   * same reason `radialNumberLabels` ships true. It stays inert until then, and even once live it
+   * only answers inside a folder with the filter empty, so the single thing it costs is starting a
+   * search with this letter while already one level down.
+   */
+  radialBackKey: DEFAULT_BACK_KEY,
   enableKeyboardTrigger: true,
   enableMouseTrigger: true,
   mouseTriggerMode: 'click',
