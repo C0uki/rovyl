@@ -1652,8 +1652,11 @@ function sendToOverlay(channel, payload) {
  *
  * Position first (the window is transparent and click-through, so nobody can see or touch it
  * moving), then hand the renderer the geometry it needs, wait for it to confirm one painted frame,
- * and only then take the mouse and come to the front. The wheel is always at the centre of this
- * window; this function decides where the window is, never where the wheel is inside it.
+ * and only then take the mouse and come to the front.
+ *
+ * This function owns the wheel's screen point — the centre of the target display, or the pointer
+ * when `radialPlacement` is `cursor`. Everything downstream is derived from it: the window box
+ * around it, the taskbar screen, the parked cursor, and the `clientPosition` the renderer draws at.
  */
 function showMenuAtCursor(source = "shortcut") {
   void ensureOverlayWindow().then((win) => {
@@ -1661,11 +1664,13 @@ function showMenuAtCursor(source = "shortcut") {
     cancelIdleMemoryCleanup();
     const radialOpenStartedAt = Date.now();
 
-    const targetDisplay = radialTargetDisplay();
-    const radialCenter = {
-      x: Math.round(targetDisplay.bounds.x + targetDisplay.bounds.width / 2),
-      y: Math.round(targetDisplay.bounds.y + targetDisplay.bounds.height / 2),
-    };
+    /**
+     * One reading of the pointer, used for both answers. Asking twice would let the hand move
+     * between them and put the wheel on a screen its own centre is not on.
+     */
+    const cursorPoint = radialOpensAtCursor ? currentCursorPoint() : null;
+    const targetDisplay = radialTargetDisplay(cursorPoint ?? undefined);
+    const radialCenter = radialOpenCenter(targetDisplay.bounds, cursorPoint);
     const bounds = radialOpenBounds(targetDisplay.bounds, radialCenter);
 
     try {
@@ -1836,6 +1841,29 @@ function applyRadialMonitorSetting(value) {
   if (value === "cursor") radialFollowsCursorMonitor = true;
   else if (value === "primary") radialFollowsCursorMonitor = false;
 }
+/**
+ * Does the wheel bloom under the pointer, or at the middle of its screen?
+ *
+ * The monitor setting above answers WHICH screen; this one answers where on it. They travel
+ * together and for the same reason — main has to place the window before the renderer is told an
+ * open is happening.
+ *
+ * This is not the old free positioning coming back: nothing is stored, dragged or remembered. The
+ * pointer is read at the moment of the open and the wheel is drawn there.
+ */
+let radialOpensAtCursor = false;
+/** Same contract as the monitor: an absent value leaves the seeded-from-disk setting alone. */
+function applyRadialPlacementSetting(value) {
+  if (value === "cursor") radialOpensAtCursor = true;
+  else if (value === "center") radialOpensAtCursor = false;
+}
+/**
+ * How far the drawn wheel reaches from its centre, in px — the renderer's radius plus one tile.
+ *
+ * Only `radialOpensAtCursor` reads it, and only to keep the ring on the screen when the pointer is
+ * in a corner. The fallback matches the default radius (140) and icon size (64).
+ */
+let radialRingReach = 204;
 ipcMain.on("set-radial-viewport", (_event, payload) => {
   if (!payload || typeof payload !== "object") return;
   /**
@@ -1852,6 +1880,9 @@ ipcMain.on("set-radial-viewport", (_event, payload) => {
   }
   radialFullBleed = !!payload.fullBleed;
   applyRadialMonitorSetting(payload.monitor);
+  applyRadialPlacementSetting(payload.placement);
+  const ring = Number(payload.ring);
+  if (Number.isFinite(ring) && ring >= 60 && ring <= 2048) radialRingReach = Math.round(ring);
 });
 
 /**
@@ -1861,15 +1892,19 @@ ipcMain.on("set-radial-viewport", (_event, payload) => {
  * setting: a second monitor, the hand on it, and the wheel blooming on the primary one — behind the
  * window the user had just left, so the app they picked opened on a screen they were not looking at.
  *
- * It chooses a SCREEN, not a point. The box is still centred on whichever monitor it names
- * (`radialModeBounds`): free positioning is gone for reasons that have nothing to do with which
- * screen the wheel is on, and this must not quietly bring it back.
+ * It chooses a SCREEN, not a point — where on that screen is `radialPlacement`'s answer, applied
+ * in `showMenuAtCursor`. `radialModeBounds` still centres the box on whatever point it is handed.
+ *
+ * Placement at the pointer overrides a `primary` monitor setting, because the two cannot both be
+ * honoured: a wheel under a pointer that is on the second screen IS on the second screen. Asking
+ * for the main screen and for the pointer is asking for two different places at once, and the
+ * pointer is the one the hand can see.
  *
  * @param {{ x: number, y: number } | undefined} anchorScreenPoint — a point already known to be the
  *   one that matters (the collapse anchor). Absent, the live cursor is asked.
  */
 function radialTargetDisplay(anchorScreenPoint) {
-  if (!radialFollowsCursorMonitor) return screen.getPrimaryDisplay();
+  if (!radialFollowsCursorMonitor && !radialOpensAtCursor) return screen.getPrimaryDisplay();
   try {
     const point =
       anchorScreenPoint &&
@@ -1882,6 +1917,51 @@ function radialTargetDisplay(anchorScreenPoint) {
     /** A display list that will not be read is not a reason to refuse to open. */
     return screen.getPrimaryDisplay();
   }
+}
+
+/** The live pointer, or null when Windows will not say — every caller has a centre to fall back to. */
+function currentCursorPoint() {
+  try {
+    const point = screen.getCursorScreenPoint();
+    if (Number.isFinite(point?.x) && Number.isFinite(point?.y)) {
+      return { x: point.x, y: point.y };
+    }
+  } catch (e) {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
+ * Where the wheel is born, in screen coordinates: the middle of the display, or the pointer.
+ *
+ * The pointer is pulled back from the edges by `radialRingReach` so the whole ring stays on the
+ * screen — half a wheel hanging off the right edge is three shortcuts that cannot be aimed at. On a
+ * display too small to hold the ring at all the clamp collapses to the centre, which is the only
+ * point that keeps as much of it visible as there is room for.
+ */
+function radialOpenCenter(displayBounds, cursorPoint) {
+  const center = {
+    x: Math.round(displayBounds.x + displayBounds.width / 2),
+    y: Math.round(displayBounds.y + displayBounds.height / 2),
+  };
+  if (!radialOpensAtCursor || !cursorPoint) return center;
+  const reachX = Math.min(radialRingReach, displayBounds.width / 2);
+  const reachY = Math.min(radialRingReach, displayBounds.height / 2);
+  return {
+    x: Math.round(
+      Math.max(
+        displayBounds.x + reachX,
+        Math.min(cursorPoint.x, displayBounds.x + displayBounds.width - reachX),
+      ),
+    ),
+    y: Math.round(
+      Math.max(
+        displayBounds.y + reachY,
+        Math.min(cursorPoint.y, displayBounds.y + displayBounds.height - reachY),
+      ),
+    ),
+  };
 }
 
 /**
@@ -3434,6 +3514,7 @@ app.whenReady().then(async () => {
        * no matter what the user chose.
        */
       applyRadialMonitorSetting(fc.radialMonitor);
+      applyRadialPlacementSetting(fc.radialPlacement);
       /** Same reason as the monitor above: the first wheel of the session has to know. */
       applyTaskbarOverlaySetting(fc.taskbarOverlay);
       const ui = extractUiConfigFromPersistenceBlob(fc);
@@ -3450,6 +3531,7 @@ app.whenReady().then(async () => {
           cachedRadialFlags.mouseTriggerMode = ui.mouseTriggerMode;
         }
         applyRadialMonitorSetting(ui.radialMonitor);
+        applyRadialPlacementSetting(ui.radialPlacement);
         applyTaskbarOverlaySetting(ui.taskbarOverlay);
         if (ui.shortcutTriggerMode === "click" || ui.shortcutTriggerMode === "hold" || ui.shortcutTriggerMode === "toggle") {
           cachedRadialFlags.shortcutTriggerMode = ui.shortcutTriggerMode;
@@ -3700,6 +3782,7 @@ app.whenReady().then(async () => {
       cachedRadialFlags.mouseTriggerButton = payload.mouseTriggerButton;
     }
     applyRadialMonitorSetting(payload.radialMonitor);
+    applyRadialPlacementSetting(payload.radialPlacement);
     applyTaskbarOverlaySetting(payload.taskbarOverlay);
     const ui = extractUiConfigFromPersistenceBlob(payload);
     if (ui) {
@@ -3725,6 +3808,7 @@ app.whenReady().then(async () => {
        * on, and a save is the one event guaranteed to carry the whole config.
        */
       applyRadialMonitorSetting(ui.radialMonitor);
+      applyRadialPlacementSetting(ui.radialPlacement);
       applyTaskbarOverlaySetting(ui.taskbarOverlay);
       mergeGameModeConfig(ui.gameMode);
     }

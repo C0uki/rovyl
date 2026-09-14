@@ -156,19 +156,41 @@ why the ring and the thing that launches cannot disagree, which is the defect `r
 exists to prevent.
 
 `'swipe'` is declared in the union and implemented nowhere; every read coerces it to `'off'`. The
-gesture needs the pointer to start at the wheel centre, and it does not: the wheel opens at the
-centre of a monitor while the cursor stays where it was, and the radial window is a box
+gesture needs the pointer to start at the wheel centre, and by default it does not: the wheel opens
+at the centre of a monitor while the cursor stays where it was, and the radial window is a box
 (~988 px), so a cursor in a screen corner produces no `mousemove` at all. `radialMonitor: 'cursor'`
 does not change this — it picks the screen the pointer is on, which shortens the gap without
-closing it. Making it work means warping the cursor from the main process — that is, editing the
-mouse hook, which has already stopped all system input once.
+closing it. `radialPlacement: 'cursor'` does close it, but only while that setting is on, and a
+gesture may not be implemented for one branch of a setting. Making it work unconditionally means
+warping the cursor from the main process — that is, editing the mouse hook, which has already
+stopped all system input once.
 
-## Which monitor the wheel opens on
+## Where the wheel opens
+
+Two settings, and they answer two different questions.
 
 `radialMonitor` chooses the screen: `'primary'` (the default, and what shipped) or `'cursor'`, the
-one the pointer is on. It picks a SCREEN and never a point — `radialModeBounds` still centres the
-box on whatever monitor it is handed, and that is deliberate: free positioning was removed for
-reasons unrelated to which display is involved.
+one the pointer is on. It picks a SCREEN and never a point.
+
+`radialPlacement` chooses the point on it: `'center'` (the default, and what shipped) or `'cursor'`,
+under the pointer. This is not the old free positioning returning — that stored a point the user had
+dragged the wheel to and pinned it there across sessions, and it is still gone. `radialPlacement`
+stores no point at all; the pointer is read once, inside `showMenuAtCursor`, at the moment of the
+open. `radialModeBounds` has always taken a centre point and still does; what changed is that
+something other than the display's midpoint is now allowed to supply it.
+
+`radialOpenCenter` is where the two meet, and it holds the one piece of arithmetic worth knowing:
+the pointer is pulled back from each edge by `radialRingReach` (the renderer's radius plus one tile,
+sent through `setRadialViewport` — main cannot derive it, because `size` has the gesture margin
+baked in and is several hundred px wider than anything drawn). Without that clamp, opening in a
+corner puts half the ring off the screen, and the targets on that half cannot be aimed at. The clamp
+is also why the box, when `radialModeBounds` runs out of display and clips it, only ever clips on a
+side that coincides with the physical screen edge — so the scrim's cut-off is never visible.
+
+At the pointer, placement decides the screen too: `radialTargetDisplay` follows the cursor whenever
+either setting asks it to, since a wheel under a pointer that is on the second monitor *is* on the
+second monitor. Choosing `'primary'` and `'cursor'` together is asking for two places at once, and
+the pointer wins because it is the one the hand can see.
 
 `radialTargetDisplay()` is the single answer to "which monitor", and every caller that decides the
 wheel's geometry goes through it — `showMenuAtCursor`, `applySmallModeCollapsedBounds` and

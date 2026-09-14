@@ -181,8 +181,23 @@ export default function RadialApp() {
       fullBleed: radialScrimNeedsFullBleed(config.backdropOpacity),
       /** Which monitor the wheel is born on — main needs it BEFORE an open. */
       monitor: config.radialMonitor === 'cursor' ? 'cursor' : 'primary',
+      /** And where on it. Same reason: the box is placed before this renderer hears about the open. */
+      placement: config.radialPlacement === 'cursor' ? 'cursor' : 'center',
+      /**
+       * The visible reach of the wheel — ring plus a whole tile, so the outer edge of an icon and
+       * its label still land on the screen when the pointer is in a corner. Deliberately NOT the
+       * gesture margin that `size` carries: clamping by that would push the wheel a quarter of a
+       * screen away from the pointer and make the setting a lie.
+       */
+      ring: Math.round(radius + icon),
     });
-  }, [config.menuRadius, config.iconSize, config.backdropOpacity, config.radialMonitor]);
+  }, [
+    config.menuRadius,
+    config.iconSize,
+    config.backdropOpacity,
+    config.radialMonitor,
+    config.radialPlacement,
+  ]);
 
   /**
    * Click-free execution: this renderer is the one that knows it is on, but the one that has to

@@ -967,9 +967,11 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
            * to launch will be sitting on.
            */
           description:
-            config.radialMonitor === 'cursor'
-              ? 'The wheel opens on the screen the pointer is already on, so what you launch lands where you are working.'
-              : 'The wheel always opens on the main screen, wherever the pointer happens to be.',
+            config.radialPlacement === 'cursor'
+              ? 'Appearance opens the wheel under the pointer, so it is already on the screen the pointer is on — this choice has nothing left to decide.'
+              : config.radialMonitor === 'cursor'
+                ? 'The wheel opens on the screen the pointer is already on, so what you launch lands where you are working.'
+                : 'The wheel always opens on the main screen, wherever the pointer happens to be.',
           kind: 'segmented',
           choices: [
             { value: 'primary', label: 'Main screen' },
@@ -1141,6 +1143,27 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
           description: 'Keep every target name visible.',
           kind: 'bool', enabled: config.alwaysShowAppLabels,
           onToggle: () => update('alwaysShowAppLabels', !config.alwaysShowAppLabels),
+        },
+        {
+          key: 'radialPlacement', configKey: 'radialPlacement', group: 'Position', title: 'Where it opens',
+          /**
+           * Said as the consequence, because that is the whole of the choice: the same wheel, the
+           * same targets, a different distance for the hand. The clamp near an edge is mentioned —
+           * someone who opens it in a corner and sees the wheel sit slightly inboard should find
+           * that written down rather than think it missed.
+           */
+          description:
+            config.radialPlacement === 'cursor'
+              ? 'The wheel blooms under the pointer, so nothing is further away than the gesture that opened it. Near an edge it steps inward just enough to keep every target on screen.'
+              : 'The wheel always blooms at the middle of the screen, wherever the pointer happens to be.',
+          kind: 'segmented',
+          choices: [
+            { value: 'center', label: 'Screen center' },
+            { value: 'cursor', label: 'At pointer' },
+          ],
+          current: config.radialPlacement === 'cursor' ? 'cursor' : 'center',
+          keywords: 'mouse cursor location position place spawn appear under pointer center centre',
+          onChange: (value) => update('radialPlacement', value as UIConfig['radialPlacement']),
         },
         range('backdrop', 'Presence', 'Background dimming',
           'How much the rest of the screen recedes. At 100% it goes: the desktop is covered edge to edge.',

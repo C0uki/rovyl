@@ -130,6 +130,21 @@ export interface UIConfig {
    */
   radialMonitor?: 'primary' | 'cursor';
   /**
+   * WHERE on that monitor the wheel is born — the companion to `radialMonitor`, which chooses only
+   * the screen.
+   * 'center' — the middle of the screen (default, and what shipped).
+   * 'cursor' — under the pointer, so the wheel appears where the hand already is and no item is
+   *   further away than the gesture that opened it.
+   *
+   * This is NOT the old `fixedPosition`: that stored a point the user had dragged the wheel to and
+   * pinned it there forever. This one stores no point at all — it is read live, at every open.
+   *
+   * Near a screen edge the centre is pulled back just far enough to keep the whole ring reachable
+   * (main clamps it with the `ring` reach sent through `setRadialViewport`); a wheel half off the
+   * screen is items that cannot be aimed at.
+   */
+  radialPlacement?: 'center' | 'cursor';
+  /**
    * "Background dimming", 0..1. At 1 the desktop is gone: an opaque fill over the whole monitor.
    * Read it through `radialScrimAlphas` — the number is not an alpha, and how it maps to one
    * changed. `backdropDimScale` says which mapping the saved value belongs to.
@@ -426,6 +441,14 @@ export interface ElectronAPI {
     fullBleed?: boolean;
     /** Which monitor the wheel is born on — see `UIConfig.radialMonitor`. */
     monitor?: 'primary' | 'cursor';
+    /** Where on it — see `UIConfig.radialPlacement`. */
+    placement?: 'center' | 'cursor';
+    /**
+     * How far the drawn wheel reaches from its own centre (px). Only `placement: 'cursor'` uses it,
+     * to keep the ring on the screen when the pointer is in a corner. Main cannot derive it: `size`
+     * has the gesture margin baked in and is several hundred px wider than anything visible.
+     */
+    ring?: number;
   }) => void;
   /**
    * Click-free launching on: when the radial opens, the main stores where the cursor was, puts it

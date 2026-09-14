@@ -314,6 +314,12 @@ export const DEFAULT_UI_CONFIG: UIConfig = {
    */
   radialMonitor: 'primary',
   /**
+   * The centre of the screen, which is where every wheel has opened until now. Under the pointer is
+   * the shorter gesture, but it also moves the wheel somewhere different on every open — so it is
+   * offered rather than imposed, exactly like the monitor above.
+   */
+  radialPlacement: 'center',
+  /**
    * Not 1 any more, and not a weaker default either: 0.6 on the scale that reaches a black screen
    * paints the same alpha (0.5) that 1 painted on the scale that topped out at half. The slider
    * simply has somewhere to go above the shipped look now. See `radialScrimAlphas`.
