@@ -29,20 +29,31 @@ its section, and a retired one keeps its number rather than being reused.
   (`rovyl-red.vercel.app`), `unavatar.io` + `google.com/s2/favicons` on every web shortcut
   (`src/siteFavicon.ts`), `wttr.in` weather (`RadialMenu.tsx:1723`), GitHub update checks.
   Restate honestly, or add a strict-offline mode that hard-disables all of them.
-- [ ] **1.5** **Decide the cursor-follow architecture.** The idle 988×988 always-visible layered window
-  (`electron-main.js:~1598`) exists to avoid DWM flash — that is what forced fixed positioning.
-  Right fix: a dedicated lightweight overlay `BrowserWindow` (warm, pre-painted, repositioned per
-  display) separate from the settings window.
+- [x] **1.5** **Decide the cursor-follow architecture.** Was: one `BrowserWindow` served both Settings
+  and the wheel, so the wheel's geometry was whatever Settings left behind. Now there are two.
+  `radial.html` is a transparent, always-on-top overlay created at boot and kept warm at the exact
+  bounds the next wheel will use; `index.html` is Settings, an ordinary window that shows and hides.
 
-  §1.1 took the cheap half of this: which MONITOR is now a setting, because idle can park its box on
-  the monitor the next open will use and the mismatch that remains is an ordinary resize the
-  `nativeResizeRisk` path already hides the window for. The expensive half is untouched — opening at
-  an arbitrary POINT still means the box can straddle a screen edge, which is what one window serving
-  both Settings and the wheel cannot do. Two things found while doing §1.1 belong to whoever picks
-  this up: one HWND cannot span two monitors, so a wheel on monitor B necessarily pulls a visible
-  Settings off monitor A (`isMainWindowOnDisplay` now refuses the frame-reuse path rather than
-  blocking the wrong screen); and anything converting screen→client must use main's `windowOrigin`,
-  never `window.screenX/Y`, which lags a window that has just changed monitors.
+  What the split removed, rather than fixed: the `prepare-radial-show` / `radial-prep-paint-done`
+  handshake that got the panel off the compositor before the window could move; `nativeResizeRisk`
+  and its hide-before-resize; `keepExistingPanelWindow`, which drew the wheel inside Settings' frame
+  in client coordinates and so quietly ignored the monitor the setting asked for (and had to be
+  disabled by `radialFullBleed` — a scrim setting deciding window geometry); `panelOverlayActive`,
+  `panelOverlayKeptWindow`, `radialBoundsUnionWithPanel`, the panel rect shipped in `open-menu` and
+  remapped in the renderer; and the whole `small`/`windowed`/`fullscreen` mode machine with the
+  `setShape`, `setIgnoreMouseEvents`, always-on-top and taskbar bookkeeping each transition carried.
+  `electron-main.js` lost ~1,400 lines, `App.tsx` ~1,500.
+
+  Measured, `scripts/window-split-smoke.mjs`: the wheel opens at identical bounds with and without
+  Settings on screen — which is the whole claim — and reveal latency is 28ms idle, 30-40ms over a
+  visible panel, where the panel path used to pay an extra IPC round trip plus a frame.
+
+  Still open, and now cheap: opening at an arbitrary POINT rather than the centre of the target
+  monitor. `showMenuAtCursor` computes `radialCenter` as the display centre and hands it to
+  `radialOpenBounds`; a cursor point goes in the same place, and the box straddling a screen edge is
+  now just a `setBounds` on a window nobody is looking at. The rule that survives from §1.1: anything
+  converting screen→client must use main's `windowOrigin`, never `window.screenX/Y`, which lags a
+  window that has just moved.
 
 ## 2. Dead code and orphaned features
 

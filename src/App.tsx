@@ -1,12 +1,10 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { flushSync } from 'react-dom';
-import { RadialMenu } from './components/RadialMenu';
-import { Coordinates, AppItem, UIConfig, UserProfile, Workspace } from './types';
+import { AppItem, UIConfig, UserProfile, Workspace } from './types';
 import {
   DEFAULT_UI_CONFIG,
   MINIMAL_MAIN_WORKSPACE_APPS,
   stripInternalWidgetApps,
-  stripInternalWidgetsFromConfig,
   workspaceContainsBundledDemoApp,
 } from './defaults';
 import { Minus, X, Maximize, Square, ArrowLeft, ArrowRight, PanelLeftClose } from 'lucide-react';
@@ -14,6 +12,8 @@ import { preloadIconsByName } from './iconMap';
 import { isRemoteIconUrl, isStoredIconRef, isWebShortcutItem } from './iconRef';
 import { useIconHealing } from './hooks/useIconHealing';
 import { mirrorPersistenceToLocalStorage } from './persistenceMirror';
+import { normalizeStoredConfig } from './configHydration';
+import type { DiscoveryPhase } from './discovery';
 import { startMenuAppIdToLaunchCommand } from './utils/windowsLaunchCommand';
 /**
  * Codes and metadata only — never `./i18n/translations`, which would put all seven locale tables
@@ -21,11 +21,6 @@ import { startMenuAppIdToLaunchCommand } from './utils/windowsLaunchCommand';
  * file; `scripts/verify-renderer-budget.mjs` fails the build if it is ignored.
  */
 import { normalizeLanguage } from './i18n/languages';
-import {
-  BACKDROP_DIM_SCALE,
-  legacyBackdropOpacityToDim,
-  radialScrimNeedsFullBleed,
-} from './utils/radialScrim';
 /** `import type` is erased at compile time: `launchFailure.ts` stays only in the late card chunk. */
 import type { ExecutionErrorDetails, FaultShortcutRef, SurfacedFault } from './launchFailure';
 /** Erased too — a value import here would put the whole settings module in the wheel's chunk. */
@@ -39,12 +34,11 @@ const PrecisionSettings = React.lazy(() =>
 );
 
 /**
- * The only two things in this file that animated with `framer-motion`, both behind their own chunks.
+ * The only two things in this file that animate with `framer-motion`, both behind their own chunks.
  *
- * The wheel does not use the library at all — `RadialMenu` has zero `motion.` usages — yet 111 kB of
- * it was statically imported here for a settings transition, an error banner and a toast, and so sat
- * in the chunk the wheel waits on before it can paint. None of the three is ever on screen in a
- * session where the user opens the wheel and nothing fails.
+ * They are lazy for the same reason they always were — a settings transition, an error banner and a
+ * toast should not be parsed before anything can paint. The wheel is now a separate document
+ * entirely (`radial.html`), so it never sees this file, let alone the 111 kB behind it.
  */
 const PanelTransition = React.lazy(() =>
   import('./components/PanelTransition').then((module) => ({ default: module.PanelTransition })),
@@ -68,7 +62,7 @@ const LS_MAIN_DISCOVERY_DONE = 'zenith_main_discovery_done';
  * the empty state in Settings said "Add an application", which is advice to undo work that is
  * already on its way.
  */
-export type DiscoveryPhase = 'idle' | 'waiting' | 'scanning';
+export type { DiscoveryPhase } from './discovery';
 
 /** Every Lucide glyph name a config can put on screen: shortcuts, folders, workspaces, centre button. */
 function* iterateItemIconNames(items: AppItem[]): Generator<string | undefined> {
@@ -105,9 +99,6 @@ const START_MENU_DISCOVERY_DEFER_LOGIN_MS = 20_000;
 const START_MENU_DISCOVERY_DEFER_MANUAL_MS = 600;
 
 type StartMenuDiscoveryRow = { Name?: string; Path?: string; Command?: string };
-
-/** Box in screen coordinates (or client, once remapped) — used by the panel under the radial. */
-type ScreenRect = { x: number; y: number; width: number; height: number };
 
 /** Builds Main workspace apps from `get-startup-apps` and appends internal Zenith shortcuts from defaults. */
 async function buildMainAppsFromStartMenuDiscovery(
@@ -194,20 +185,6 @@ const findRootAncestorId = (items: AppItem[], id: string): string | undefined =>
   return undefined;
 };
 
-/**
- * Preferred over the cursor as the anchor in `setWindowSize('fullscreen'|'small')`: the main process
- * uses `getDisplayNearestPoint` — with several monitors the cursor can be on another screen while the
- * HWND (radial / island) already covers the right one.
- */
-function windowCenterScreenPoint(): { x: number; y: number } {
-  const w = window.outerWidth || window.innerWidth || 1;
-  const h = window.outerHeight || window.innerHeight || 1;
-  return {
-    x: window.screenX + Math.round(w / 2),
-    y: window.screenY + Math.round(h / 2),
-  };
-}
-
 /** JSON-clone + guarantees `config.workspaces` is not empty — the file has to pass `normalizeFullPersistenceBlob` on the next startup. */
 function sanitizeFullPersistenceForDisk(d: {
   user: UserProfile | null;
@@ -247,9 +224,7 @@ function sanitizeFullPersistenceForDisk(d: {
 }
 
 export default function App() {
-  /* zenith-verify:radial-handshake-renderer — radial overlays/handshake; see scripts/verify-radial-windowing.mjs */
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  /** Update downloaded and waiting for a restart — flagged with a badge on the radial hub. */
+  /** Update downloaded and waiting for a restart — the wheel asks main for the same state. */
   const [updateReady, setUpdateReady] = useState(false);
 
   useEffect(() => {
@@ -268,36 +243,6 @@ export default function App() {
     return () => { cancelled = true; off?.(); };
   }, []);
 
-  /** Hides dashboard/settings before `await applyWindowSize('fullscreen')` — without it, restoring from the tray shows a frame of the last UI. */
-  const [radialOpenAwaitingFullscreen, setRadialOpenAwaitingFullscreen] = useState(false);
-  /**
-   * The waiting cover can only be opaque if there was an opaque panel on screen to mask.
-   * Coming from the tray/island there is no old texture, and the black painted the window's
-   * old bounds — a black rectangle flashing where the radial should be.
-   */
-  const [radialAwaitCoverOpaque, setRadialAwaitCoverOpaque] = useState(false);
-  /**
-   * Panel (Settings/Welcome) that stays on screen under the radial.
-   * `…ScreenRect` is the truth (screen coordinates, immune to the window resize);
-   * `…ClientRect` is the same box in the coordinates of the already widened window, recomputed
-   * whenever the geometry changes — just like the radial's anchor.
-   */
-  const [panelOverlayScreenRect, setPanelOverlayScreenRect] = useState<ScreenRect | null>(null);
-  /** The panel stays on screen under the radial (with or without repositioning). */
-  const [panelKeptUnderRadial, setPanelKeptUnderRadial] = useState(false);
-  const [panelOverlayClientRect, setPanelOverlayClientRect] = useState<ScreenRect | null>(null);
-  const panelOverlayScreenRectRef = useRef<ScreenRect | null>(null);
-  panelOverlayScreenRectRef.current = panelOverlayScreenRect;
-  /** One solid frame before minimizing — stops Windows caching a dashboard bitmap and flashing when the radial reopens. */
-  const [minimizeNeutralCoverActive, setMinimizeNeutralCoverActive] = useState(false);
-  /** Main: `prepare-radial-show` — paint before `show()` so no old texture is exposed (minimized/dashboard). */
-  const [radialPreShowSolidCover, setRadialPreShowSolidCover] = useState(false);
-  /**
-   * The panel is off the surface so main can move the window without the DWM re-presenting it at
-   * the new origin (`prepare-radial-show { vacatePanel }`). It lasts one frame in the normal case:
-   * the `open-menu` that follows draws the panel again, positioned for the widened window.
-   */
-  const [panelVacatingForRadial, setPanelVacatingForRadial] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(true);
   /**
    * Where Settings was open. Up here because the panel does not survive using the app.
@@ -313,8 +258,6 @@ export default function App() {
     sectionId: 'general',
     isSidebarCollapsed: false,
   });
-  /** Two-paint transparent close phase so DWM never caches Settings as the idle HWND texture. */
-  const [panelNeutralizingClose, setPanelNeutralizingClose] = useState(false);
   const isDashboardOpenRef = useRef(false);
   const isSettingsOpenRef = useRef(false);
 
@@ -323,15 +266,9 @@ export default function App() {
 
   // Dashboard/Welcome Screen State
   const [isDashboardOpen, setIsDashboardOpen] = useState(false);
-  /**
-   * After minimizing with Welcome/settings, the OS restores the HWND when `small` is applied and the `restore` event
-   * would make the panel look “open” again in a loop. This flag keeps the panel chrome collapsed until the panel is
-   * reopened / closed.
-   */
-  const [panelChromeDismissedForIsland, setPanelChromeDismissedForIsland] = useState(false);
   const panelSurfaceOpen = useMemo(
-    () => (isDashboardOpen || isSettingsOpen || panelNeutralizingClose) && !panelChromeDismissedForIsland,
-    [isDashboardOpen, isSettingsOpen, panelNeutralizingClose, panelChromeDismissedForIsland],
+    () => isDashboardOpen || isSettingsOpen,
+    [isDashboardOpen, isSettingsOpen],
   );
 
   useEffect(() => {
@@ -341,7 +278,6 @@ export default function App() {
 
   useEffect(() => {
     if (!isDashboardOpen && !isSettingsOpen) {
-      setPanelChromeDismissedForIsland(false);
       import('./components/installedApps').then((m) => m.clearInstalledAppsMemory?.()).catch(() => {});
       if (typeof (window as any).gc === 'function') {
         try {
@@ -398,33 +334,6 @@ export default function App() {
     return () => { cancelled = true; };
   }, []);
 
-  const [menuPosition, setMenuPosition] = useState<Coordinates>({ x: 0, y: 0 });
-  /** Remounts the visual tree on every open; no geometry/transition from the previous session survives. */
-  const [radialMountKey, setRadialMountKey] = useState(0);
-  /** Token prepared while still hidden, and token whose native window has already been revealed. */
-  const [radialPendingPaintToken, setRadialPendingPaintToken] = useState<number | null>(null);
-  const [radialNativeRevealToken, setRadialNativeRevealToken] = useState<number | null>(null);
-  const [radialClientSize, setRadialClientSize] = useState(() => ({
-    width: window.innerWidth,
-    height: window.innerHeight,
-  }));
-  /**
-   * This window's top-left corner on screen, as main reported it in `open-menu`.
-   *
-   * The hold gesture's cursor samples arrive as absolute screen points and something has to turn
-   * them into client ones. `window.screenX/Y` is the wrong instrument, for the reason spelled out in
-   * `openMenu` below — and `radialMonitor: 'cursor'` sharpens it, because the window may have just
-   * crossed to another monitor, which makes a stale origin wrong by a whole screen instead of by the
-   * difference between two rects. `null` leaves `RadialMenu` on the fallback.
-   */
-  const [radialWindowOrigin, setRadialWindowOrigin] = useState<Coordinates | null>(null);
-  /** Absolute centre chosen by main; it is the monitor's centre, never the cursor position. */
-  const radialCenterScreenRef = useRef<Coordinates | null>(null);
-  /** Bounds sent by main are authoritative while window.screenX/Y still reflect Settings. */
-  const radialClientPositionHintRef = useRef<Coordinates | null>(null);
-  const radialWindowOriginHintRef = useRef<Coordinates | null>(null);
-  const [triggerSource, setTriggerSource] = useState<'mmb' | 'mmb-click' | 'shortcut'>('shortcut');
-  const radialTransitionWarmedRef = useRef(false);
   /** One failure, one card. `seq` rises with each so animation and timer restart. */
   const [launchFault, setLaunchFault] = useState<SurfacedFault | null>(null);
   /**
@@ -439,140 +348,8 @@ export default function App() {
     if (launchFault || configNotice) setErrorOverlaysNeeded(true);
   }, [launchFault, configNotice]);
   const [isDesktopMode, setIsDesktopMode] = useState(false);
-  /** Only mount the island after `setWindowSize('small')` with monitor bounds — otherwise the hit-shape uses coords with the window still at 1280×800 (dev). */
-  const [electronSmallOverlayReady, setElectronSmallOverlayReady] = useState(false);
   const isDesktopModeRef = useRef(false);
   isDesktopModeRef.current = isDesktopMode;
-
-  /** After minimizing the panel, the first `setWindowHitShape` can still use `screenX/screenY` from windowed mode — the HWND shrinks to the wrong place. Reapplies the `small` overlay on the next tick. (Must stay below `isDesktopMode` — otherwise a ReferenceError breaks the render.) */
-  const prevPanelChromeDismissedRef = useRef(false);
-  useEffect(() => {
-    const edge =
-      panelChromeDismissedForIsland && !prevPanelChromeDismissedRef.current;
-    prevPanelChromeDismissedRef.current = panelChromeDismissedForIsland;
-    if (!edge || !isDesktopMode) return;
-    const t = window.setTimeout(() => {
-      void window.electron?.reapplySmallOverlay?.();
-      void window.electron?.invalidatePaint?.();
-    }, 100);
-    return () => clearTimeout(t);
-  }, [isDesktopMode, panelChromeDismissedForIsland]);
-
-  /** Declared before handlers that resize the window — keeps IPC + React in sync. */
-  const lastWindowState = useRef<'fullscreen' | 'windowed' | 'small' | null>(null);
-  /**
-   * Opaque cover during small→windowed: masks DWM artefacts if main paints before `applyWindowSize`.
-   * Turns on in the same commit the panel becomes visible; turns off in the microtask after resize + invalidate.
-   */
-  const [panelResizeSolidCover, setPanelResizeSolidCover] = useState(false);
-
-  /** On the `panelSurfaceOpen` false→true edge, cover before `setWindowSize('windowed')` (wrong DWM frame). */
-  const prevPanelSurfaceOpenRef = useRef(panelSurfaceOpen);
-  useLayoutEffect(() => {
-    const prev = prevPanelSurfaceOpenRef.current;
-    prevPanelSurfaceOpenRef.current = panelSurfaceOpen;
-    if (!prev && panelSurfaceOpen && isDesktopMode) {
-      setPanelResizeSolidCover(true);
-    }
-  }, [panelSurfaceOpen, isDesktopMode]);
-
-  /** Guarantees the HWND is `windowed` while the panel/settings are visible (not minimized). */
-  useLayoutEffect(() => {
-    if (!isDesktopMode) return;
-    if (!window.electron?.setWindowSize && !window.electron?.applyWindowSize) return;
-    if (!panelSurfaceOpen) return;
-    if (radialOpenAwaitingFullscreen) return;
-    /** Radial open over the panel: the window is the overlay — restoring `windowed` now would collapse it. */
-    if (isMenuOpen) return;
-
-    let cancelled = false;
-
-    /** The microtask runs after the React commit and before the paint — `invoke` expands the HWND once the island is already in the DOM. */
-    queueMicrotask(async () => {
-      if (cancelled) return;
-      try {
-        if (window.electron?.applyWindowSize) {
-          await window.electron.applyWindowSize('windowed');
-        } else {
-          window.electron?.setWindowSize?.('windowed');
-        }
-        if (cancelled) return;
-        window.electron?.showWindow();
-        lastWindowState.current = 'windowed';
-        void window.electron?.invalidatePaint?.();
-      } catch {
-        /* ignore */
-      } finally {
-        if (cancelled) return;
-        /** Two rAF — the DWM usually finishes the resize before the island is shown again when the panel closes. */
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (!cancelled) {
-              setPanelResizeSolidCover(false);
-            }
-          });
-        });
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isDesktopMode, panelSurfaceOpen, radialOpenAwaitingFullscreen, isSettingsOpen, isMenuOpen]);
-
-  useEffect(() => {
-    if (!panelSurfaceOpen) {
-      setPanelResizeSolidCover(false);
-    }
-  }, [panelSurfaceOpen]);
-
-  useLayoutEffect(() => {
-    if (!isDesktopMode || !window.electron?.setWindowSize) {
-      setElectronSmallOverlayReady(false);
-      return;
-    }
-    /**
-     * With the radial open, `panelSurfaceOpen` is false (dashboard closed in the same commit).
-     * Without this guard we applied `small` here and cancelled `openMenu`'s `fullscreen` — the menu stayed in the windowed rect.
-     */
-    if (isMenuOpen || radialOpenAwaitingFullscreen) {
-      setElectronSmallOverlayReady(true);
-      return;
-    }
-    /** Panel / settings visible in `windowed` — do not force `small` here (avoids overwriting the first startup). */
-    if (panelSurfaceOpen) {
-      setElectronSmallOverlayReady(true);
-      return;
-    }
-
-    let cancelled = false;
-    setElectronSmallOverlayReady(false);
-    const { x: ax, y: ay } = windowCenterScreenPoint();
-
-    void (async () => {
-      try {
-        if (window.electron?.applyWindowSize) {
-          await window.electron.applyWindowSize('small', { x: ax, y: ay });
-        } else {
-          window.electron!.setWindowSize!('small', { x: ax, y: ay });
-          await new Promise<void>((r) => window.setTimeout(r, 48));
-        }
-        if (cancelled) return;
-        lastWindowState.current = 'small';
-        await window.electron?.reapplySmallOverlay?.();
-        if (cancelled) return;
-        await new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r())));
-        if (!cancelled) setElectronSmallOverlayReady(true);
-      } catch {
-        if (!cancelled) setElectronSmallOverlayReady(true);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      setElectronSmallOverlayReady(false);
-    };
-  }, [isDesktopMode, panelSurfaceOpen, isMenuOpen, radialOpenAwaitingFullscreen]);
 
   const [isAppReady, setIsAppReady] = useState(true); // Defaults to true so initial loading works normally
 
@@ -582,9 +359,6 @@ export default function App() {
   const [config, setConfig] = useState<UIConfig>(DEFAULT_UI_CONFIG);
   const configRef = useRef(config);
   configRef.current = config;
-  const targetWorkspaceIndexRef = useRef(config.activeWorkspaceIndex);
-  targetWorkspaceIndexRef.current = config.activeWorkspaceIndex;
-  const switchDebounceTimer = useRef<NodeJS.Timeout | null>(null);
 
   /**
    * One failed launch → one card, with the item that failed attached.
@@ -617,8 +391,6 @@ export default function App() {
     },
     [],
   );
-  const reportLaunchFailureRef = useRef(reportLaunchFailure);
-  reportLaunchFailureRef.current = reportLaunchFailure;
 
   /**
    * A config that only names curated glyphs never pays for the full Lucide chunk; one that does
@@ -628,116 +400,6 @@ export default function App() {
   useEffect(() => {
     preloadIconsByName(iterateConfigIconNames(config, apps));
   }, [config, apps]);
-
-  /**
-   * With no radial and no panel there is nothing to draw: the HWND is shrunk into the corner. Leaving it
-   * `small` at full screen kept a topmost layered window composed by the DWM taking all the mouse
-   * hit-testing — cursor and system went slow. `updateWindowSize` re-expands when the radial / panel opens.
-   */
-  const overlayIdle =
-    isDesktopMode &&
-    !panelSurfaceOpen &&
-    !isMenuOpen &&
-    !radialOpenAwaitingFullscreen;
-
-  /**
-   * Size of the radial window. Labels sit outside the icons; the gesture margin is what guarantees that
-   * dragging to pick the direction (and the click that confirms it) stays inside the window — mouse events
-   * come from the window, outside it the angle freezes and the selection never confirms. Raise it if short.
-   */
-  useEffect(() => {
-    if (!window.electron?.setRadialViewport) return;
-    const RADIAL_LABEL_ALLOWANCE = 90;
-    const RADIAL_GESTURE_MARGIN = 200;
-    const radius = Number(config.menuRadius) || 140;
-    const icon = Number(config.iconSize) || 64;
-    const size = Math.round(
-      2 * (radius + icon + RADIAL_LABEL_ALLOWANCE + RADIAL_GESTURE_MARGIN),
-    );
-    window.electron.setRadialViewport({
-      size,
-      fixed: true,
-      /**
-       * Past a certain dimming the scrim no longer fades out inside that box, and a box that shows
-       * its own edge has to stop being a box: main opens the radial over the whole monitor instead.
-       * It is the setting that decides, so the decision travels with the size, well before an open.
-       */
-      fullBleed: radialScrimNeedsFullBleed(config.backdropOpacity),
-      /**
-       * Which monitor the wheel is born on. It travels with the size for the same reason the
-       * full-bleed flag does: main needs it BEFORE an open, and the renderer is what holds the
-       * config. Main also seeds it from disk at boot, because the global shortcut can fire before
-       * this effect has ever run.
-       */
-      monitor: config.radialMonitor === 'cursor' ? 'cursor' : 'primary',
-    });
-  }, [config.menuRadius, config.iconSize, config.backdropOpacity, config.radialMonitor]);
-
-  /**
-   * Click-free execution: the renderer is the one that knows it is on, but the one that has to park
-   * the pointer at the centre of the wheel is main — the warp happens before `open-menu`, and so
-   * before the radial exists here. Only the yes/no crosses, and only when the setting changes.
-   */
-  useEffect(() => {
-    window.electron?.setRadialCursorCapture?.(config.radialInstantActivate === 'dwell');
-  }, [config.radialInstantActivate]);
-
-  /**
-   * Main cannot infer this: `hide-window` hides the window without changing mode, so `windowed`
-   * survives it and the next radial opened "over a panel" that was not on screen — dragging the
-   * settings back with it. The renderer is the one that knows, so it says.
-   */
-  useLayoutEffect(() => {
-    window.electron?.setPanelSurfaceVisible?.(
-      isDesktopMode && panelSurfaceOpen && !panelNeutralizingClose,
-    );
-  }, [isDesktopMode, panelSurfaceOpen, panelNeutralizingClose]);
-
-  useLayoutEffect(() => {
-    if (!overlayIdle || !window.electron?.collapseIdleOverlay) return;
-    /** A tick later: main may be applying `small`/`windowed` in the same cycle (avoids a bounds race). */
-    const t = window.setTimeout(() => {
-      void window.electron?.collapseIdleOverlay?.();
-    }, 60);
-    return () => window.clearTimeout(t);
-  }, [overlayIdle]);
-
-  /**
-   * Warms small↔fullscreen while the window is idle — the 1st radial open (with the HWND
-   * shrunk) stops paying the DWM's cold cost.
-   */
-  useEffect(() => {
-    if (!isDesktopMode || !electronSmallOverlayReady || !window.electron?.warmRadialTransition) {
-      return;
-    }
-    if (radialTransitionWarmedRef.current || isMenuOpen || radialOpenAwaitingFullscreen) return;
-    if (panelSurfaceOpen) return;
-
-    let cancelled = false;
-    const t = window.setTimeout(() => {
-      void (async () => {
-        try {
-          await window.electron!.warmRadialTransition!();
-          if (cancelled) return;
-          radialTransitionWarmedRef.current = true;
-          await window.electron?.reapplySmallOverlay?.();
-        } catch {
-          /* ignore */
-        }
-      })();
-    }, 100);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(t);
-    };
-  }, [
-    isDesktopMode,
-    electronSmallOverlayReady,
-    panelSurfaceOpen,
-    isMenuOpen,
-    radialOpenAwaitingFullscreen,
-  ]);
 
   /** Latest snapshot for flush on pagehide / sync disk write (survives reboot). */
   const persistenceRef = useRef({
@@ -775,12 +437,6 @@ export default function App() {
   useLayoutEffect(() => {
     persistenceRef.current = { user, apps, config };
   });
-
-  /** Used by post-launch setTimeout — must never read stale React state or opening the dashboard after launching an app wrongly calls setWindowSize('small') (ignoreMouseEvents → "frozen" UI). */
-  const electronShrinkGateRef = useRef({ panelSurfaceOpen: false });
-  useEffect(() => {
-    electronShrinkGateRef.current = { panelSurfaceOpen };
-  }, [panelSurfaceOpen]);
 
   // ICON NORMALIZATION CACHE-BUST:
   // When the extract-icon.ps1 normalization algorithm changes, bump this version
@@ -906,49 +562,11 @@ export default function App() {
 
       if (finalData) {
         if (finalData.config) {
-          /** Old configs carry `internal:*` shortcuts from the removed widgets — discard them on read. */
-          nextConfig = stripInternalWidgetsFromConfig({
-            /**
-             * The defaults as the base, BEFORE whatever came off disk.
-             *
-             * Without this base, every setting added in a version later than the saved file
-             * reached the renderer as `undefined` instead of its default value. The symptom
-             * misleads: it looks like the backup did not keep the settings, when in truth they
-             * were never in the file and nobody restored them on read.
-             */
-            ...DEFAULT_UI_CONFIG,
-            ...finalData.config,
-            /**
-             * The opening point is no longer configurable: the wheel is always born at the centre.
-             * Old configs can carry `false` — normalize on read, otherwise a state the interface
-             * can no longer show or undo would survive.
-             */
-            fixedPosition: true,
-            gameMode: {
-              ...DEFAULT_UI_CONFIG.gameMode,
-              ...(finalData.config.gameMode || {}),
-              /** Drops the old demo list: the selection is visual now, per application. */
-              blockedApps:
-                (finalData.config.gameMode?.blockedApps || '').trim().toLowerCase() ===
-                'csgo.exe, valorant.exe, dota2.exe, overwatch.exe'
-                  ? ''
-                  : (finalData.config.gameMode?.blockedApps || ''),
-            },
-          });
           /**
-           * Contiguous hotkeys by position, on read too.
-           *
-           * Renumbering only on mutations would leave out the files already saved with gaps
-           * — the "1, 2, 4" left over from a workspace deleted in the middle on an earlier version.
-           * The operation is idempotent: whatever is already right is not touched.
+           * Every read-path normalization now lives in one module, because the wheel reads the same
+           * file from its own renderer and has to arrive at the identical config.
            */
-          nextConfig = {
-            ...nextConfig,
-            workspaces: nextConfig.workspaces?.map((workspace, index) => {
-              const hotkey = index < 9 ? index + 1 : 0;
-              return workspace.hotkey === hotkey ? workspace : { ...workspace, hotkey };
-            }) ?? nextConfig.workspaces,
-          };
+          nextConfig = normalizeStoredConfig(finalData.config);
 
           const mainWs = nextConfig.workspaces?.find(
             (ws) => ws.id === 'workspace-1' || ws.name === 'Main',
@@ -988,34 +606,6 @@ export default function App() {
        * that as "already onboarded" meant closing the window once was enough to never be told what
        * the trigger key is.
        */
-      const loadedConfig = finalData?.config;
-      if (loadedConfig && !('hasSeenOnboarding' in loadedConfig)) {
-        nextConfig = { ...nextConfig, hasSeenOnboarding: true };
-      }
-
-      /**
-       * "Background dimming" used to top out at half a pool; it now reaches an opaque screen. The
-       * saved number therefore means something darker than it did, and the default was the top of
-       * the old scale — so left alone, every existing profile would have blacked the screen out on
-       * the first open after updating, having changed nothing.
-       *
-       * Converted once, to the value that paints exactly the pixels the person already had. The
-       * test is the missing marker, not the value: 1 was both the default and a deliberate choice,
-       * and the two are indistinguishable here — which does not matter, because they looked the
-       * same on screen and so they still do.
-       */
-      if (loadedConfig && Number(loadedConfig.backdropDimScale) !== BACKDROP_DIM_SCALE) {
-        nextConfig = {
-          ...nextConfig,
-          backdropDimScale: BACKDROP_DIM_SCALE,
-          backdropOpacity: legacyBackdropOpacityToDim(
-            'backdropOpacity' in loadedConfig
-              ? Number(loadedConfig.backdropOpacity)
-              : 1,
-          ),
-        };
-      }
-
       window.electron?.savePersistenceLog?.(
         `load | source=${finalData ? 'disk' : loadedFromLocalStorageMigration ? 'localStorage' : 'none'} ws=${nextConfig.workspaces?.length ?? 0} discoveryDone=${nextConfig.mainStartMenuDiscoveryDone}`,
       );
@@ -1146,11 +736,13 @@ export default function App() {
         );
         /** From here until the merge lands, an empty Main is a wait rather than a loss. */
         setDiscoveryPhase('waiting');
+        window.electron?.publishDiscoveryPhase?.('waiting');
 
         discoveryDeferTimer = window.setTimeout(() => {
           void (async () => {
             if (cancelled) {
               setDiscoveryPhase('idle');
+              window.electron?.publishDiscoveryPhase?.('idle');
               startMenuScanPersistenceHoldRef.current = false;
               return;
             }
@@ -1160,6 +752,7 @@ export default function App() {
             /** Tracks whether discovery actually added apps — it is only marked done when it did. */
             let discoveryAddedApps = false;
             setDiscoveryPhase('scanning');
+            window.electron?.publishDiscoveryPhase?.('scanning');
             try {
               const discovered = (await window.electron!.getStartupApps()) as StartMenuDiscoveryRow[];
               if (discovered?.length > 0 && mainIdx !== -1) {
@@ -1215,6 +808,7 @@ export default function App() {
                * would promise apps that are not coming — the empty state is then the honest one.
                */
               setDiscoveryPhase('idle');
+              window.electron?.publishDiscoveryPhase?.('idle');
               startMenuScanPersistenceHoldRef.current = false;
               queueMicrotask(() => {
                 flushPersistenceToDiskRef.current?.();
@@ -1227,7 +821,6 @@ export default function App() {
                 openDashboardAfterDiscoveryRef.current = false;
                 window.setTimeout(() => {
                   flushSync(() => {
-                    setPanelChromeDismissedForIsland(false);
                     setIsDashboardOpen(false);
                     setIsSettingsOpen(true);
                   });
@@ -1307,7 +900,6 @@ export default function App() {
        * inside it when the scan brings them.
        */
       flushSync(() => {
-        setPanelResizeSolidCover(true);
         setIsDashboardOpen(false);
         setIsSettingsOpen(true);
       });
@@ -1510,9 +1102,6 @@ export default function App() {
     };
   }, [isLoaded]);
 
-  const lastMiddleClickTime = useRef<number>(0);
-  const isHolding = useRef(false);
-
   // Listen for Google Auth Success
   useEffect(() => {
     if (window.electron?.onGoogleAuthSuccess) {
@@ -1529,7 +1118,6 @@ export default function App() {
         };
         flushSync(() => {
           setUser(newUser);
-          setPanelChromeDismissedForIsland(false);
           setIsDashboardOpen(false);
           setIsSettingsOpen(true);
         });
@@ -1546,7 +1134,7 @@ export default function App() {
   /** Used to ignore double-clicks right after the radial closes (otherwise dblclick sees isMenuOpen false and opens Settings). */
   const menuJustClosedAtRef = useRef(0);
   const prevIsMenuOpenForCloseRef = useRef(false);
-  /** OS hid the window (Alt+F4 / close) while React still had dashboard "open" — sync refs before state so we don't schedule hideWindow twice. */
+  /** OS hid the window (Alt+F4 / close) while React still had the panel "open" — sync refs before state so we don't schedule hideWindow twice. */
   const syncAfterMainWindowHidRef = useRef<() => void>(() => {});
   useEffect(() => {
     syncAfterMainWindowHidRef.current = () => {
@@ -1555,607 +1143,66 @@ export default function App() {
         hideTimeout.current = null;
       }
       lastVisibility.current = false;
-      lastWindowState.current = 'small';
-      setIsMenuOpen(false);
       setIsSettingsOpen(false);
       setIsDashboardOpen(false);
-      setPanelChromeDismissedForIsland(false);
-      setRadialOpenAwaitingFullscreen(false);
-      setMinimizeNeutralCoverActive(false);
-      setRadialPreShowSolidCover(false);
     };
   });
 
+  /**
+   * This window is now an ordinary one: it is either on screen or it is not.
+   *
+   * What used to be here decided between three native geometries — a monitor-sized overlay for the
+   * wheel, the panel's own rect, and a collapsed click-through box for idle — and had to sequence
+   * them against the radial's open so the two surfaces never fought over the same HWND. The wheel
+   * has its own window now, so all three modes and the ordering between them are gone.
+   */
   useEffect(() => {
-    if (prevIsMenuOpenForCloseRef.current && !isMenuOpen) {
-      menuJustClosedAtRef.current = Date.now();
-    }
-    prevIsMenuOpenForCloseRef.current = isMenuOpen;
-  }, [isMenuOpen]);
+    if (!window.electron || !isDesktopMode) return;
+    const visible = panelSurfaceOpen;
+    if (lastVisibility.current === visible) return;
+    lastVisibility.current = visible;
 
-  useEffect(() => {
-    if (window.electron && isDesktopMode) {
-      /** Includes “logical” dashboard/settings even when minimized — stops `hideWindow` thinking there is no active UI. */
-      const isAnyInteractive =
-        isMenuOpen ||
-        radialOpenAwaitingFullscreen ||
-        isDashboardOpen ||
-        isSettingsOpen ||
-        panelNeutralizingClose;
-
-      const visibilityChanged = lastVisibility.current !== isAnyInteractive;
-
-      /**
-       * With the radial open, do not apply `windowed`/`small` here (the ordering against the dashboard close left
-       * `lastWindowState` or the HWND misaligned — the menu appeared at the panel's size).
-       */
-      if (isMenuOpen || radialOpenAwaitingFullscreen) {
-        if (lastWindowState.current !== 'fullscreen') {
-          window.electron.setWindowSize('fullscreen', windowCenterScreenPoint());
-          lastWindowState.current = 'fullscreen';
-        }
-        if (visibilityChanged) {
-          if (isAnyInteractive) {
-            if (hideTimeout.current) {
-              clearTimeout(hideTimeout.current);
-              hideTimeout.current = null;
-            }
-            window.electron.showWindow();
-          } else {
-            hideTimeout.current = setTimeout(() => {
-              flushPersistenceToDiskRef.current?.();
-              window.electron.hideWindow();
-            }, 300);
-          }
-          lastVisibility.current = isAnyInteractive;
-        }
-        return;
-      }
-
-      /** Passive `small` overlay (shrunken HWND); panel/settings use `windowed`. */
-      const targetMode: 'fullscreen' | 'windowed' | 'small' = panelSurfaceOpen
-        ? 'windowed'
-        : 'small';
-
-      const modeChanged = lastWindowState.current !== targetMode;
-
-      let modeResizeHandled = false;
-
-      // 1. Mode changes while visible (not switching to passive "small" overlay).
-      //    Always resize directly — never use hideWindow() here. The old "dip" path hit transitions
-      //    like small → windowed (after closing the radial menu) and null → windowed, caused
-      //    intermittent fullscreen / no-click bugs on the next open-settings.
-      const modeAnchor =
-        targetMode === 'windowed' ? undefined : windowCenterScreenPoint();
-
-      if (modeChanged && lastVisibility.current && isAnyInteractive && targetMode !== 'small') {
-        window.electron.setWindowSize(targetMode, modeAnchor);
-        lastWindowState.current = targetMode;
-        modeResizeHandled = true;
-      }
-
-      // 2. Standard mode update (non-flicker-prone or hidden)
-      if (modeChanged && !modeResizeHandled) {
-        window.electron.setWindowSize(targetMode, modeAnchor);
-        lastWindowState.current = targetMode;
-      }
-
-      // 3. Standard visibility update
-      if (visibilityChanged) {
-        if (isAnyInteractive) {
-          if (hideTimeout.current) {
-            clearTimeout(hideTimeout.current);
-            hideTimeout.current = null;
-          }
-          window.electron.showWindow();
-        } else {
-          hideTimeout.current = setTimeout(() => {
-            flushPersistenceToDiskRef.current?.();
-            window.electron.hideWindow();
-          }, 300); // allow exit animations to complete
-        }
-        lastVisibility.current = isAnyInteractive;
-      }
-    }
-  }, [
-    isMenuOpen,
-    radialOpenAwaitingFullscreen,
-    isDashboardOpen,
-    isSettingsOpen,
-    panelNeutralizingClose,
-    isDesktopMode,
-    panelSurfaceOpen,
-  ]);
-
-  const openMenu = async (
-    x: number,
-    y: number,
-    source: 'mmb' | 'mmb-click' | 'shortcut' = 'shortcut',
-    /** IPC sends screen coords from the main process; MMB uses client coords relative to the current window. */
-    coordSpace: 'client' | 'screen' = 'client',
-    opts?: {
-      preSizedByMain?: boolean;
-      keepPanel?: boolean;
-      panelRect?: ScreenRect | null;
-      clientPosition?: Coordinates | null;
-      windowOrigin?: Coordinates | null;
-      clientSize?: { width: number; height: number } | null;
-      paintToken?: number;
-    },
-  ) => {
-    const triggerGeneration = ++radialTriggerGenerationRef.current;
-    /**
-     * Radial over the panel: there is only one window, so opening the radial shrank it to the
-     * wheel's box and the settings vanished in a flash. We keep the panel's SCREEN rect — main has
-     * already widened the window to cover it — and keep drawing it in exactly the same place.
-     * When it is the renderer that resizes, the rect has to be read BEFORE the resize.
-     */
-    const keepPanel =
-      opts?.keepPanel ?? (panelSurfaceOpen && isDesktopModeRef.current);
-    /**
-     * With a fixed position main does not touch the bounds: the panel is still the whole window and
-     * there is nothing to reposition — that is the flash-free path. Only when the window is widened
-     * (free position) does the panel need pinning to the screen rect it occupied.
-     */
-    const panelWindowStays = keepPanel && !opts?.panelRect;
-    const panelRect: ScreenRect | null =
-      opts?.panelRect ??
-      (keepPanel && !panelWindowStays
-        ? {
-            x: window.screenX,
-            y: window.screenY,
-            width: window.innerWidth,
-            height: window.innerHeight,
-          }
-        : null);
-
-    /** Free position was removed: the resize always uses a centre anchor. */
-    const anchorForFullscreen: { x: number; y: number } =
-      coordSpace === 'screen'
-        ? { x, y }
-        : {
-            x: window.screenX + window.innerWidth / 2,
-            y: window.screenY + window.innerHeight / 2,
-          };
-
-    const needsRendererFullscreenResize =
-      isDesktopModeRef.current &&
-      window.electron &&
-      !opts?.preSizedByMain;
-
-    if (needsRendererFullscreenResize) {
-      flushSync(() => {
-        /** Before the resize: from here on the panel is never hidden. */
-        setPanelKeptUnderRadial(keepPanel);
-        setPanelOverlayScreenRect(panelRect);
-        /** With the panel staying visible there is no old texture to mask — the opaque cover would only flash over it. */
-        setRadialAwaitCoverOpaque(
-          !panelRect && electronShrinkGateRef.current.panelSurfaceOpen,
-        );
-        setRadialOpenAwaitingFullscreen(true);
-        setMinimizeNeutralCoverActive(false);
-      });
-    } else {
-      flushSync(() => {
-        setMinimizeNeutralCoverActive(false);
-      });
-    }
-
-    try {
-    /**
-     * A shortcut/MMB via main already called `updateWindowSize('fullscreen')` — repeating `applyWindowSize` here
-     * doubled the IPC round-trip + setBounds and delayed the radial's first paint.
-     */
-    if (needsRendererFullscreenResize) {
-      try {
-        if (window.electron.applyWindowSize) {
-          await window.electron.applyWindowSize('fullscreen', anchorForFullscreen);
-        } else {
-          window.electron.setWindowSize('fullscreen', anchorForFullscreen);
-        }
-      } catch {
-        try {
-          window.electron.setWindowSize('fullscreen', anchorForFullscreen);
-        } catch {
-          /* ignore */
-        }
-      }
-      lastWindowState.current = 'fullscreen';
-    } else if (opts?.preSizedByMain && isDesktopModeRef.current) {
-      lastWindowState.current = 'fullscreen';
-    }
-
-    /**
-     * A second MMB/shortcut can close the radial while the async resize above is still finishing.
-     * In that case, do not let this stale open remount the menu after the close.
-     */
-    if (triggerGeneration !== radialTriggerGenerationRef.current) return;
-
-    radialCenterScreenRef.current =
-      coordSpace === 'screen'
-        ? { x, y }
-        : {
-            x: window.screenX + window.innerWidth / 2,
-            y: window.screenY + window.innerHeight / 2,
-          };
-    radialClientPositionHintRef.current = opts?.clientPosition ?? null;
-    radialWindowOriginHintRef.current = opts?.windowOrigin ?? null;
-
-    /**
-     * Never consult `window.screenX/Y` for the first frame. Right after closing Settings those
-     * metrics still describe the windowed rect (880×600), whose centre is exactly the wrong point
-     * seen in the video: (440,300) client → roughly (906,345) on screen. Everything needed already
-     * came in the same IPC from main and belongs to the current generation.
-     */
-    const authoritativeClientPosition =
-      opts?.clientPosition ??
-      (opts?.windowOrigin
-        ? { x: x - opts.windowOrigin.x, y: y - opts.windowOrigin.y }
-        : opts?.clientSize
-          ? { x: opts.clientSize.width / 2, y: opts.clientSize.height / 2 }
-          : { x: window.innerWidth / 2, y: window.innerHeight / 2 });
-
-    flushSync(() => {
-      setRadialOpenAwaitingFullscreen(false);
-      setRadialAwaitCoverOpaque(false);
-      setRadialPreShowSolidCover(false);
-      /** The move it was emptied for has happened; from here the panel is drawn where it belongs. */
-      setPanelVacatingForRadial(false);
-      setPanelKeptUnderRadial(keepPanel);
-      setPanelOverlayScreenRect(panelRect);
-      /** We only close the panel when it is not going to survive under the radial. */
-      if (!keepPanel) {
-        setIsSettingsOpen(false);
-        setIsDashboardOpen(false);
-      }
-      setIsMenuOpen(true);
-      setRadialMountKey((key) => key + 1);
-      setRadialPendingPaintToken(
-        typeof opts?.paintToken === 'number' ? opts.paintToken : null,
-      );
-      setTriggerSource(source);
-      setMenuPosition(authoritativeClientPosition);
-      setRadialClientSize(
-        opts?.clientSize ?? { width: window.innerWidth, height: window.innerHeight },
-      );
-      /**
-       * Main's value first; failing that, the origin implied by the pair we just settled on
-       * (absolute centre minus client centre), which is the same arithmetic from the other end.
-       */
-      setRadialWindowOrigin(
-        opts?.windowOrigin ??
-          (coordSpace === 'screen'
-            ? {
-                x: x - authoritativeClientPosition.x,
-                y: y - authoritativeClientPosition.y,
-              }
-            : null),
-      );
-    });
-
-    /**
-     * The native window is still hidden. One rAF followed by a task confirms the paint of the
-     * zero-alpha frame; two full rAFs made the open noticeably slow.
-     */
-    if (typeof opts?.paintToken === 'number') {
-      const paintToken = opts.paintToken;
-      requestAnimationFrame(() => {
-        window.setTimeout(() => {
-          window.electron?.notifyRadialOpenPaintDone?.(paintToken);
-        }, 0);
-      });
-    }
-
-    // Always call show-window when running under Electron — do not gate on isDesktopMode (it is still false for
-    // one frame after load; main already set native opacity 0 in showMenuAtCursor).
-    if (window.electron) {
+    if (visible) {
       if (hideTimeout.current) {
         clearTimeout(hideTimeout.current);
         hideTimeout.current = null;
       }
-      /**
-       * With the panel on screen and no resize the window is already visible and in place: an extra
-       * `show()` only recomposes the HWND. For the same reason there is no `invalidatePaint` on
-       * open — on Windows it usually causes a flash (old texture) right after the radial appears.
-       */
-      if (!panelWindowStays && typeof opts?.paintToken !== 'number') {
-        window.electron.showWindow();
-      }
-      lastVisibility.current = true;
+      window.electron.showWindow();
+      return;
     }
+    /** Allow the exit animation to finish before the window leaves. */
+    hideTimeout.current = setTimeout(() => {
+      flushPersistenceToDiskRef.current?.();
+      window.electron?.hideWindow();
+    }, 300);
+  }, [isDesktopMode, panelSurfaceOpen]);
 
-    isHolding.current = true;
-
-    if (document.activeElement instanceof HTMLElement) {
-      document.activeElement.blur();
-    }
-
-    // Do not dip window opacity to 0 here — show-window already sets opacity 1 in main. A 0 → rAF → 1
-    // sequence left the BrowserWindow stuck invisible on some systems (clicks still hit; radial UI gone).
-    } catch (e) {
-      radialClientPositionHintRef.current = null;
-      radialWindowOriginHintRef.current = null;
-      flushSync(() => {
-        setRadialOpenAwaitingFullscreen(false);
-        setMinimizeNeutralCoverActive(false);
-        setRadialPreShowSolidCover(false);
-      });
-      throw e;
-    }
-  };
-
-  /** Paints a neutral frame before `minimize()` so the Windows snapshot is not the dashboard (a flash when the radial opens later). */
+  /**
+   * Minimize.
+   *
+   * This used to paint a neutral frame and wait two rAFs before calling through, so that Windows
+   * would not cache a picture of Settings as the thumbnail the DWM re-presented when the WHEEL next
+   * opened in the same window. There is no same window any more: minimizing Settings now caches a
+   * picture of Settings, which is what a thumbnail is for.
+   */
   const flushNeutralFrameThenMinimize = useCallback(() => {
-    if (!window.electron?.minimizeWindow) return;
-    flushSync(() => setMinimizeNeutralCoverActive(true));
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        window.electron!.minimizeWindow();
-      });
-    });
+    window.electron?.minimizeWindow?.();
   }, []);
 
-  const openMenuRef = useRef(openMenu);
-  openMenuRef.current = openMenu;
-
-  /**
-   * Trigger toggle (MMB / global shortcut): main does not know whether the radial is open,
-   * so the decision lives here — a second trigger with the radial on screen closes instead of reopening.
-   */
-  const isMenuOpenRef = useRef(isMenuOpen);
-  isMenuOpenRef.current = isMenuOpen;
-  const radialOpenAwaitingFullscreenRef = useRef(radialOpenAwaitingFullscreen);
-  radialOpenAwaitingFullscreenRef.current = radialOpenAwaitingFullscreen;
-  /** Stops the `click` generated after the `mouseup` that closed the radial from reaching the panel. */
-  const radialClickShieldUntilRef = useRef(0);
-  /** Invalidates an async open when the same trigger is used to close. */
-  const radialTriggerGenerationRef = useRef(0);
-  const handleMenuCloseRef = useRef<
-    ((selectedId: string | null, selectedApp?: AppItem | null) => void) | null
-  >(null);
-  /** True when a new trigger should close the radial instead of opening it. */
-  const closeMenuFromTrigger = useCallback(() => {
-    if (!isMenuOpenRef.current && !radialOpenAwaitingFullscreenRef.current) return false;
-    radialTriggerGenerationRef.current += 1;
-    /** RadialMenu swallows any pending mouseup from this gesture without confirming the active slice. */
-    window.dispatchEvent(new CustomEvent('zenith-radial-toggle-close'));
-    handleMenuCloseRef.current?.(null);
-    return true;
-  }, []);
-
+  // IPC: the settings surface — plus everything the wheel, in its own window, reports back here.
   useEffect(() => {
-    const blockClickThrough = (event: MouseEvent) => {
-      const radialActive =
-        isMenuOpenRef.current || radialOpenAwaitingFullscreenRef.current;
-      const target = event.target instanceof Element ? event.target : null;
-      const belongsToRadial = !!target?.closest('[data-zenith-radial-modal="true"]');
-
-      /** Icons and hub still receive the click that runs the chosen action. */
-      if (radialActive && belongsToRadial) return;
-      if (!radialActive && Date.now() > radialClickShieldUntilRef.current) return;
-
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    };
-
-    document.addEventListener('click', blockClickThrough, true);
-    document.addEventListener('auxclick', blockClickThrough, true);
-    return () => {
-      document.removeEventListener('click', blockClickThrough, true);
-      document.removeEventListener('auxclick', blockClickThrough, true);
-    };
-  }, []);
-
-  // After setBounds(fullscreen), inner/outer window metrics update a frame late — re-map screen anchor → client so the radial is not clipped (multi-monitor / half-screen).
-  const syncMenuPositionFromAnchor = useCallback(() => {
-    const hintedOrigin = radialWindowOriginHintRef.current;
-    const clientOriginX = hintedOrigin?.x ?? window.screenX;
-    const clientOriginY = hintedOrigin?.y ?? window.screenY;
-    /** The same anchor remapping, applied to the panel left under the radial. */
-    const panelScreen = panelOverlayScreenRectRef.current;
-    if (panelScreen) {
-      const next = {
-        x: Math.round(panelScreen.x - clientOriginX),
-        y: Math.round(panelScreen.y - clientOriginY),
-        width: panelScreen.width,
-        height: panelScreen.height,
-      };
-      setPanelOverlayClientRect((prev) =>
-        prev && prev.x === next.x && prev.y === next.y && prev.width === next.width && prev.height === next.height
-          ? prev
-          : next,
-      );
-    } else {
-      setPanelOverlayClientRect(null);
-    }
-
-    /**
-     * The wheel's position is frozen at the `clientPosition` received in open-menu. Recomputing it
-     * here with late `window.screenX/Y` metrics made the already visible tree jump to another origin.
-     * This synchronizer stays responsible only for the panel preserved under the radial.
-     */
-  }, []);
-
-  useLayoutEffect(() => {
-    if ((!isMenuOpen && !radialOpenAwaitingFullscreen) || !isDesktopMode) return;
-    syncMenuPositionFromAnchor();
-    let raf2 = 0;
-    const raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => {
-        syncMenuPositionFromAnchor();
-      });
-    });
-    return () => {
-      cancelAnimationFrame(raf1);
-      cancelAnimationFrame(raf2);
-    };
-  }, [isMenuOpen, radialOpenAwaitingFullscreen, isDesktopMode, syncMenuPositionFromAnchor]);
-
-  useEffect(() => {
-    if ((!isMenuOpen && !radialOpenAwaitingFullscreen) || !isDesktopMode) return;
-
-    const sync = () => {
-      syncMenuPositionFromAnchor();
-    };
-
-    sync();
-    let rafB = 0;
-    const rafA = requestAnimationFrame(() => {
-      rafB = requestAnimationFrame(sync);
-    });
-    window.addEventListener('resize', sync);
-    return () => {
-      cancelAnimationFrame(rafA);
-      cancelAnimationFrame(rafB);
-      window.removeEventListener('resize', sync);
-    };
-  }, [isMenuOpen, radialOpenAwaitingFullscreen, isDesktopMode, syncMenuPositionFromAnchor]);
-
-  /**
-   * The radial closes through many paths (Escape, right button, double-MMB → settings, selection).
-   * Instead of clearing the panel rect in each one, we clear it here: while there is no radial
-   * and no pending resize, the panel is the window again.
-   *
-   * Do not clear the geometry hints here. This is a passive effect of the CLOSED session and can be
-   * drained by the next open's `flushSync` after `openMenu` has already written the new hints. That
-   * erased the authoritative origin and the first frame fell back to a `window.screenX/Y` still
-   * belonging to Settings; the next rAF corrected it and the wheel seemed to jump to the centre.
-   * Every open overwrites both refs before its own commit, so keeping them between sessions is safe
-   * and removes the late write across generations.
-   */
-  useEffect(() => {
-    if (isMenuOpen || radialOpenAwaitingFullscreen) return;
-    setPanelKeptUnderRadial((prev) => (prev ? false : prev));
-    setPanelOverlayScreenRect((prev) => (prev === null ? prev : null));
-    setPanelOverlayClientRect((prev) => (prev === null ? prev : null));
-  }, [isMenuOpen, radialOpenAwaitingFullscreen]);
-
-  /**
-   * Nothing may leave the panel emptied for good.
-   *
-   * The vacate is a promise from main that an `open-menu` is one IPC away, and that message is what
-   * normally clears it. If it never arrives — the open was refused after the handshake, main went
-   * away mid-gesture — the user is left looking at a window with nothing in it, and no gesture
-   * brings the panel back because the app believes it is still open. The window is generous: it
-   * only has to outlast a round trip that is measured in single frames.
-   */
-  useEffect(() => {
-    if (!panelVacatingForRadial) return;
-    const t = window.setTimeout(() => setPanelVacatingForRadial(false), 1000);
-    return () => clearTimeout(t);
-  }, [panelVacatingForRadial]);
-
-  /** Repaint only when the radial closes — invalidating on open flashed the frame (dashboard→fullscreen) on Windows. */
-  const prevIsMenuOpenForPaintRef = useRef(isMenuOpen);
-  useEffect(() => {
-    if (!window.electron?.invalidatePaint) return;
-    const was = prevIsMenuOpenForPaintRef.current;
-    prevIsMenuOpenForPaintRef.current = isMenuOpen;
-    const closing = was && !isMenuOpen;
-    if (!closing) return;
-    const t = window.setTimeout(() => {
-      void window.electron?.invalidatePaint?.();
-    }, 220);
-    return () => clearTimeout(t);
-  }, [isMenuOpen]);
-
-  // IPC: menu / dashboard / settings — must run after openMenu exists; use openMenuRef so handler always calls latest openMenu.
-  useEffect(() => {
-    const cleanupMenu = window.electron?.onOpenMenu((data: {
-      x: number;
-      y: number;
-      source?: 'mmb' | 'mmb-click' | 'shortcut';
-      /** Main already knows the radial is open: this event must never open nor confirm a selection. */
-      closeOnly?: boolean;
-      preSizedByMain?: boolean;
-      keepPanel?: boolean;
-      panelRect?: ScreenRect | null;
-      clientPosition?: Coordinates | null;
-      windowOrigin?: Coordinates | null;
-      clientSize?: { width: number; height: number } | null;
-      paintToken?: number;
-    }) => {
-      if (data.closeOnly) {
-        closeMenuFromTrigger();
-        return;
-      }
-      /** Second MMB / shortcut with the radial already open: toggle (close) instead of reopening. */
-      if (closeMenuFromTrigger()) return;
-      void openMenuRef.current(data.x, data.y, data.source ?? 'shortcut', 'screen', {
-        preSizedByMain: data.preSizedByMain === true,
-        keepPanel: data.keepPanel === true,
-        panelRect: data.panelRect ?? null,
-        clientPosition: data.clientPosition ?? null,
-        windowOrigin: data.windowOrigin ?? null,
-        clientSize: data.clientSize ?? null,
-        paintToken: data.paintToken,
-      });
-    });
-
-    const cleanupPrepareRadial = window.electron?.onPrepareRadialShow?.((payload) => {
-      /**
-       * `vacatePanel`: main is about to MOVE the window out from under the panel, and what it hides
-       * is not what the DWM keeps — the last composited frame is. Emptying the surface here, while
-       * the window is still on screen, is the only way that frame stops being "Settings at
-       * inset-0"; otherwise it is presented again at the radial's origin and the panel is seen in
-       * the monitor's corner for a beat. The neutral cover is the minimized path's answer and does
-       * the opposite of what is needed here — it paints something rather than nothing.
-       */
-      if (payload?.vacatePanel) {
-        flushSync(() => setPanelVacatingForRadial(true));
-      } else {
-        flushSync(() => setRadialPreShowSolidCover(true));
-      }
-      requestAnimationFrame(() => {
-        window.electron?.notifyRadialPrepPaintDone?.();
-      });
-    });
-
-    const cleanupRadialNativeRevealed = window.electron?.onRadialNativeRevealed?.((paintToken) => {
-      setRadialNativeRevealToken(paintToken);
-    });
-
-    const cleanupDashboard = window.electron?.onOpenDashboard(() => {
+    const openPanel = () => {
       flushSync(() => {
-        // Do not turn panelResizeSolidCover on here if the panel is already open (e.g. Settings→Dashboard):
-        // z-[96] got stuck because the layout that turns it off only runs on panelSurfaceOpen false→true.
-        setPanelChromeDismissedForIsland(false);
-        setMinimizeNeutralCoverActive(false);
-        setRadialPreShowSolidCover(false);
-        setPanelVacatingForRadial(false);
-        setIsDashboardOpen(false);
-        setIsSettingsOpen(true);
-      });
-      /** Do not call `showWindow()` here: it runs before the `useLayoutEffect` + microtask with `applyWindowSize('windowed')`
-       * and the DWM paints the big HWND with the island's texture (a “stretched” clock). The show stays in the microtask after the resize. */
-    });
-
-    const cleanupSettings = window.electron?.onOpenSettings(() => {
-      flushSync(() => {
-        setPanelChromeDismissedForIsland(false);
-        // Same cover clearing as onOpenDashboard above: the tray can ask for Settings while a
-        // pre-minimize neutral cover is still up, and only `main-window-minimized` clears it.
-        setMinimizeNeutralCoverActive(false);
-        setRadialPreShowSolidCover(false);
-        setPanelVacatingForRadial(false);
-        setIsMenuOpen(false);
         setIsSettingsOpen(true);
         setIsDashboardOpen(false);
       });
-      requestAnimationFrame(() => {
-        void window.electron?.invalidatePaint?.();
-        requestAnimationFrame(() => {
-          void window.electron?.invalidatePaint?.();
-        });
-      });
-    });
+    };
+
+    const cleanupDashboard = window.electron?.onOpenDashboard(openPanel);
+    const cleanupSettings = window.electron?.onOpenSettings(openPanel);
 
     const cleanupWindowState = window.electron?.onWindowState((state) => {
       setWindowState(state);
-    });
-
-    const cleanupMouseUp = window.electron?.onMouseUp(() => {
-      window.dispatchEvent(new MouseEvent('mouseup', { button: 1 }));
     });
 
     const cleanupWindowHidToTray = window.electron?.onWindowHidToTray(() => {
@@ -2164,30 +1211,42 @@ export default function App() {
       syncAfterMainWindowHidRef.current();
     });
 
-    const cleanupMainWindowMinimized = window.electron?.onMainWindowMinimized?.(({ minimized }) => {
-      if (minimized) {
-        setMinimizeNeutralCoverActive(false);
-        setRadialPreShowSolidCover(false);
-      }
-      if (
-        minimized &&
-        (isDashboardOpenRef.current || isSettingsOpenRef.current)
-      ) {
-        setPanelChromeDismissedForIsland(true);
-      }
+    /**
+     * The wheel switched workspace. It has already redrawn itself — this is the write.
+     *
+     * Two renderers, one file: `App.tsx` is the only thing that saves, so every change the overlay
+     * makes arrives here to be folded into the config that gets written. `config-changed` then goes
+     * back out to the overlay, which finds the index it already set.
+     */
+    const cleanupRadialWorkspace = window.electron?.onRadialWorkspaceChanged?.((index) => {
+      setConfig((prev) =>
+        index < 0 || index >= prev.workspaces.length || prev.activeWorkspaceIndex === index
+          ? prev
+          : { ...prev, activeWorkspaceIndex: index },
+      );
     });
 
-    const cleanupNativeDisplayRestored =
-      window.electron?.onWindowNativeDisplayRestored?.((payload: {
-        mode: 'small' | 'fullscreen' | 'windowed';
-      }) => {
-        const m = payload?.mode;
-        if (m !== 'fullscreen' && m !== 'windowed' && m !== 'small') return;
-        const anchor = m === 'windowed' ? undefined : windowCenterScreenPoint();
-        window.electron?.setWindowSize(m, anchor);
-        window.electron?.showWindow();
-        lastWindowState.current = m;
+    const cleanupRadialHint = window.electron?.onRadialDirectionHintSeen?.(() => {
+      setConfig((prev) =>
+        prev.hasSeenDirectionHint === true ? prev : { ...prev, hasSeenDirectionHint: true },
+      );
+    });
+
+    /**
+     * A launch started from the wheel failed. The card belongs here, where it can be read and
+     * dismissed — the overlay is click-through whenever the wheel is closed.
+     */
+    const cleanupRadialFault = window.electron?.onRadialLaunchFault?.((fault) => {
+      faultSeqRef.current += 1;
+      setLaunchFault({
+        kind: 'launch',
+        seq: faultSeqRef.current,
+        raw: fault.raw,
+        details: fault.details as ExecutionErrorDetails | undefined,
+        appLabel: fault.appLabel,
+        shortcut: fault.shortcut,
       });
+    });
 
     const cleanupCleanMemory = window.electron?.onCleanMemory?.(() => {
       import('./components/installedApps').then((m) => m.clearInstalledAppsMemory?.()).catch(() => {});
@@ -2201,124 +1260,33 @@ export default function App() {
     });
 
     return () => {
-      cleanupMenu?.();
-      cleanupPrepareRadial?.();
-      cleanupRadialNativeRevealed?.();
       cleanupDashboard?.();
       cleanupSettings?.();
       cleanupWindowState?.();
-      cleanupMouseUp?.();
       cleanupWindowHidToTray?.();
-      cleanupMainWindowMinimized?.();
-      cleanupNativeDisplayRestored?.();
+      cleanupRadialWorkspace?.();
+      cleanupRadialHint?.();
+      cleanupRadialFault?.();
       cleanupCleanMemory?.();
     };
   }, []);
 
-  // Workspace Switching Handler (Debounced)
-  // Uses a debounce so that rapid presses collapse into a single switch
-  // to the LAST pressed workspace after 80ms of inactivity — no flickering.
-  const handleWorkspaceSwitch = React.useCallback((workspaceIndex: number) => {
-    const configData = configRef.current;
-    
-    if (workspaceIndex < 0 || workspaceIndex >= configData.workspaces.length) {
-      console.warn(`[App.tsx] Invalid workspace index requested: ${workspaceIndex}. Total workspaces: ${configData.workspaces.length}`);
-      return;
-    }
-
-    const workspace = configData.workspaces[workspaceIndex];
-    if (!workspace || !workspace.enabled) {
-      console.warn(`[App.tsx] Cannot switch to disabled or non-existent workspace: ${workspaceIndex}`);
-      return;
-    }
-
-    // Update the target ref synchronously so repeated presses to same workspace are a no-op
-    if (workspaceIndex === targetWorkspaceIndexRef.current) return;
-    
-    console.warn(`[App.tsx] Proceeding with workspace switch to: ${workspace.name} (Index: ${workspaceIndex})`);
-    targetWorkspaceIndexRef.current = workspaceIndex;
-
-    // Cancel any pending switch and restart the debounce window
-    if (switchDebounceTimer.current) {
-      clearTimeout(switchDebounceTimer.current);
-    }
-
-    switchDebounceTimer.current = setTimeout(() => {
-      setConfig(prev => ({
-        ...prev,
-        activeWorkspaceIndex: targetWorkspaceIndexRef.current
-      }));
-      switchDebounceTimer.current = null;
-    }, 80); // 80ms: imperceptible for single presses, collapses rapid sequences into one switch
-  }, []);
-
-  // Workspace switch IPC listener — ISOLATED in its own stable effect
-  // CRITICAL: NOT inside [isSettingsOpen, isDashboardOpen] effect — that effect re-runs on settings/dashboard
-  // changes and would accumulate multiple IPC listeners, causing 2-3x fires per keypress (the flicker root cause).
-  useEffect(() => {
-    const cleanup = window.electron?.onSwitchWorkspace((index: number) => {
-      console.warn(`[App.tsx] switch-workspace IPC received for index: ${index}`);
-      handleWorkspaceSwitch(index);
-    });
-    return () => cleanup?.();
-  }, [handleWorkspaceSwitch]);
-
-  // STABLE KEYBOARD LISTENER - PARENT LEVEL (Robust Fallback for Production)
-  useEffect(() => {
-    const handleGlobalKeyDown = (e: KeyboardEvent) => {
-      // Only handle numeric keys if menu is open
-      if (!isMenuOpen) return;
-
-      if (configRef.current.workspaceSwitchMode === 'picker') return;
-
-      // Log the event as warn so it shows in diagnostic.log in production
-      console.warn(`[App.tsx] Local keyboard event: key=${e.key}, code=${e.code}`);
-
-      let num = parseInt(e.key);
-      
-      // Fallback to e.code for different keyboard layouts (Digit1, Digit2, etc.)
-      if (isNaN(num) && e.code && e.code.startsWith('Digit')) {
-        num = parseInt(e.code.replace('Digit', ''));
-      }
-
-      if (!isNaN(num) && num >= 1 && num <= 9) {
-        console.warn(`[App.tsx] Valid numeric key detected: ${num}. Switching...`);
-        e.preventDefault();
-        e.stopPropagation();
-        handleWorkspaceSwitch(num - 1);
-      }
-    };
-
-    window.addEventListener('keydown', handleGlobalKeyDown, { capture: true });
-    return () => window.removeEventListener('keydown', handleGlobalKeyDown, { capture: true });
-  }, [isMenuOpen, handleWorkspaceSwitch]);
-
-  // Centralized function to open settings and handle dashboard logic
-  const handleOpenSettings = () => {
+  /** Centralized function to open the settings surface. */
+  const handleOpenSettings = useCallback(() => {
     flushSync(() => {
-      if (isMenuOpen) setIsMenuOpen(false);
-      // z-[96] cover: only the useLayoutEffect (panelSurfaceOpen false→true) should turn it on when leaving the island.
-      // If we are already in the dashboard, turning it on here leaves the cover up forever — the resize effect does not re-run.
-      setPanelChromeDismissedForIsland(false);
       setIsSettingsOpen(true);
       setIsDashboardOpen(false);
     });
-    requestAnimationFrame(() => {
-      void window.electron?.invalidatePaint?.();
-      requestAnimationFrame(() => {
-        void window.electron?.invalidatePaint?.();
-      });
-    });
-  };
+  }, []);
   const handleOpenSettingsRef = useRef(handleOpenSettings);
   handleOpenSettingsRef.current = handleOpenSettings;
 
   /**
    * "Fix shortcut" on a launch failure: Settings, on the workspace, with that row already open.
    *
-   * The wheel closed the moment the launch was dispatched, so this both re-opens the panel and
-   * hands `PrecisionSettings` the destination — it is mounted lazily and remounted often, and
-   * anything told to it after it appears would race its own first render.
+   * The failure was reported from the other window, so this both re-opens the panel and hands
+   * `PrecisionSettings` the destination — it is mounted lazily and remounted often, and anything
+   * told to it after it appears would race its own first render.
    */
   const handleFixShortcut = useCallback((target: FaultShortcutRef) => {
     setLaunchFault(null);
@@ -2330,196 +1298,13 @@ export default function App() {
     handleOpenSettingsRef.current();
   }, []);
 
-  /** Closes only the Settings surface; the process, tray and shortcuts stay active. */
+  /** Closes only the Settings surface; the process, tray, wheel and shortcuts stay active. */
   const handleClosePanelToBackground = useCallback(() => {
-    /**
-     * Main needs to know in the same gesture that there is no panel any more. Waiting for the
-     * effect left a window between this click and the next shortcut in which the radial
-     * preserved/rendered the settings' old texture.
-     */
-    window.electron?.setPanelSurfaceVisible?.(false);
     flushSync(() => {
-      /** Keeps the HWND windowed for two paints, but without drawing the panel. */
-      setPanelNeutralizingClose(true);
       setIsSettingsOpen(false);
       setIsDashboardOpen(false);
     });
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        flushSync(() => setPanelNeutralizingClose(false));
-      });
-    });
   }, []);
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button === 1) { // Middle button
-      e.preventDefault();
-      /**
-       * On Electron the same MMB also arrives through the global monitor in the main process. If
-       * both paths toggle the state, React closes first and the global hook can read the same
-       * gesture as a new open a few ms later. Main is the sole owner of MMB in the app.
-       */
-      if (isDesktopModeRef.current && window.electron) return;
-      if (closeMenuFromTrigger()) return;
-      void openMenu(e.clientX, e.clientY, 'mmb', 'client');
-    }
-  };
-
-  // Double Click (Left) to Open Settings — does not fire with the radial open
-  const handleDoubleClick = (e: React.MouseEvent) => {
-    if (Date.now() - menuJustClosedAtRef.current < 650) {
-      return;
-    }
-    if (!isMenuOpen && !radialOpenAwaitingFullscreen && !isSettingsOpen) {
-      handleOpenSettings();
-    }
-  };
-
-  const handleKeyDown = (e: KeyboardEvent) => {
-    /* Removed hardcoded Alt+Z */
-    if (e.key === 'Escape' && isMenuOpen) {
-      setIsMenuOpen(false);
-    }
-  };
-
-  const handleKeyUp = (e: KeyboardEvent) => {
-    // Removed Space key logic as it's no longer used for opening/closing the menu
-  };
-
-  useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    }
-  }, []);
-
-  const executeAction = (
-    command: string,
-    commandType: "app" | "url" | "folder" | "file",
-    itemForFault?: AppItem,
-    options?: { openTerminal?: boolean; terminalCommands?: string[]; workingDirectory?: string; launchMode?: 'normal' | 'reuse' | 'prewarm' }
-  ) => {
-    // console.log("🚀 Zenith executing:", command, "Type:", commandType);
-    if (!command) {
-      console.warn("Attempted to execute an empty command");
-      return;
-    }
-
-    /** Internal widgets (Notes / Alarm / Stopwatch / Pomodoro) were removed — ignore leftovers from old configs. */
-    if (command.startsWith('internal:')) {
-      return;
-    }
-
-    if (isDesktopMode && window.electron) {
-      // console.log("Calling electron.executeCommand...");
-      /**
-       * The launch answers for itself now. While this was a fire-and-forget send, a shortcut whose
-       * target had been uninstalled did exactly what a working one did — the wheel closed and
-       * nothing happened — and the failure that main knew about arrived on a broadcast channel
-       * carrying only a command string, which this side matched back to an item by comparing
-       * commands inside a 15-second window.
-       */
-      void Promise.resolve(window.electron.executeCommand(command, commandType, options))
-        .then((result) => {
-          if (!result || result.ok !== false) return;
-          reportLaunchFailureRef.current(result, itemForFault);
-        })
-        .catch((error) => {
-          /** A rejection means the IPC itself broke; the ladder answers with `ok: false` instead. */
-          reportLaunchFailureRef.current(
-            { ok: false, error: `Unexpected error while running command: ${error?.message || error}` },
-            itemForFault,
-          );
-        });
-      setTimeout(() => {
-        const g = electronShrinkGateRef.current;
-        if (!g.panelSurfaceOpen) {
-          window.electron?.setWindowSize('small', windowCenterScreenPoint());
-          // Unified visibility effect will handle hiding automatically based on state
-        }
-      }, 1000);
-    }
-  };
-
-  const executeActionRef = useRef(executeAction);
-  executeActionRef.current = executeAction;
-
-  const handleMenuClose = useCallback((selectedId: string | null, selectedApp?: AppItem | null) => {
-    const cfg = configRef.current;
-    const currentWorkspaceApps = cfg.workspaces[cfg.activeWorkspaceIndex]?.apps || apps;
-
-    radialClickShieldUntilRef.current = Date.now() + 400;
-    setIsMenuOpen(false);
-    setRadialOpenAwaitingFullscreen(false);
-    setRadialPreShowSolidCover(false);
-    setRadialPendingPaintToken(null);
-    /** The panel becomes the window again: the mode effect restores `windowed` with the saved rect. */
-    setPanelKeptUnderRadial(false);
-    setPanelOverlayScreenRect(null);
-    setPanelOverlayClientRect(null);
-    isHolding.current = false;
-
-    if (!selectedId && isDesktopMode && !panelSurfaceOpen) {
-      window.electron?.setWindowSize('small', windowCenterScreenPoint());
-      return;
-    }
-
-    if (selectedId) {
-      setIsDashboardOpen(false);
-    }
-
-    if (selectedId === '__CENTER__') {
-      const centerConfig = cfg.centerButton;
-
-      if (centerConfig.type === 'cancel') {
-        if (isDesktopMode && !panelSurfaceOpen) {
-          window.electron?.setWindowSize('small', windowCenterScreenPoint());
-        }
-        return;
-      }
-
-      if (centerConfig.type === 'app' || centerConfig.type === 'widget') {
-        const targetApp = findAppRecursive(currentWorkspaceApps, centerConfig.target);
-        const command = targetApp ? targetApp.command : centerConfig.target;
-        console.log("Center action, target command:", command);
-        executeActionRef.current(command, targetApp?.commandType || 'app', targetApp, {
-          openTerminal: targetApp?.openTerminal,
-          terminalCommands: targetApp?.terminalCommands,
-          workingDirectory: targetApp?.workingDirectory,
-          launchMode: targetApp?.launchMode,
-        });
-        return;
-      } else if (centerConfig.type === 'command') {
-        executeActionRef.current(centerConfig.target, centerConfig.commandType || 'app');
-        return;
-      }
-      return;
-    }
-
-    if (selectedId) {
-      const app =
-        selectedApp ?? findAppRecursive(currentWorkspaceApps, selectedId);
-      console.log("Selected app found in active workspace:", app);
-      if (app) {
-        console.log("Attempting to execute app command:", app.command);
-        executeActionRef.current(app.command, app.commandType || 'app', app, {
-          openTerminal: app.openTerminal,
-          terminalCommands: app.terminalCommands,
-          workingDirectory: app.workingDirectory,
-          launchMode: app.launchMode,
-        });
-      } else {
-        console.warn("Could not find app with ID in active workspace:", selectedId);
-      }
-    }
-  }, [apps, isDesktopMode, panelSurfaceOpen]);
-
-  handleMenuCloseRef.current = handleMenuClose;
-
-
-
 
   {/* Auth Functions */ }
   const handleLogin = (provider: 'google' | 'email') => {
@@ -2548,7 +1333,6 @@ export default function App() {
   const handleLogout = () => {
     flushSync(() => {
       setUser(null);
-      setPanelChromeDismissedForIsland(false);
       setIsDashboardOpen(false);
       setIsSettingsOpen(true);
     });
@@ -2558,124 +1342,17 @@ export default function App() {
     setUser((u) => (u ? { ...u, ...patch } : null));
   }, []);
 
-  /**
-   * The direction-mode hint has had its showing and does not come back.
-   *
-   * One-way, and it returns the SAME object when the flag is already up: `config` is the wheel's
-   * only prop identity and the trigger for the debounced disk write, so minting a new one for a
-   * no-op change would re-render the whole wheel and save for nothing.
-   *
-   * Deliberately not back-filled for configs written before the flag existed, the way
-   * `hasSeenOnboarding` is. Direction mode is off by default, so an absent flag mostly means
-   * "never turned this on" — marking those seen would quietly take the hint away from the people
-   * who have yet to meet the mode. The few who already had it on get it once more, then never.
-   */
-  const handleDirectionHintSeen = useCallback(() => {
-    setConfig((current) =>
-      current.hasSeenDirectionHint === true
-        ? current
-        : { ...current, hasSeenDirectionHint: true },
-    );
-  }, []);
-
-  /** Menu-only slice of config: stable when unrelated settings (e.g. widget opacities) change — keeps RadialMenu from re-rendering the full wheel. */
-  /**
-   * The wheel gets the whole config; the memo exists only to stabilize the reference.
-   *
-   * The dependencies were a HAND-WRITTEN FIELD LIST. Since the callback returns `config`
-   * exactly as it is, any setting outside that list changed in state and the wheel kept
-   * receiving the PREVIOUS object — the change only got through when, by chance, one of the
-   * listed fields changed too. That is what happened to aiming by cursor: toggling the option
-   * had no effect at all. Every new field was a silent trap.
-   *
-   * Depending on the object solves the whole class of problems: `config` only changes identity
-   * when `setConfig` runs, that is, when something really changed.
-   */
-  const radialMenuConfig = React.useMemo(() => config, [config]);
-
-  const radialApps = React.useMemo(() => {
-    const w = config.workspaces[config.activeWorkspaceIndex];
-    return w?.apps?.length ? w.apps : apps;
-  }, [config.workspaces, config.activeWorkspaceIndex, apps]);
-
-  const radialCurrentWorkspace = React.useMemo(
-    () => config.workspaces[config.activeWorkspaceIndex],
-    [config.workspaces, config.activeWorkspaceIndex]
-  );
-
-  // Check if any modal is open
-  const isAnyModalOpen =
-    panelSurfaceOpen || isMenuOpen || radialOpenAwaitingFullscreen;
-
-  /**
-   * The panel survives the radial (see `panelOverlayScreenRect`). There are two phases:
-   * `…Staying` already covers the wait for the resize — it is what stops `hidden` flashing the panel;
-   * `…UnderRadial` is the phase in which it is positioned by the rect inside the widened window.
-   */
-  const panelStaysUnderRadial =
-    (isMenuOpen || radialOpenAwaitingFullscreen) &&
-    panelSurfaceOpen &&
-    panelKeptUnderRadial;
-  const panelUnderRadial = panelStaysUnderRadial && !!panelOverlayClientRect;
-  const radialBlocksPanelInteraction = isMenuOpen || radialOpenAwaitingFullscreen;
-  /**
-   * The panel content draws itself: outside the radial as always, or under it in this mode.
-   *
-   * With one exception. When main WIDENS the window for the radial, it sends the panel rect so it
-   * can be repositioned inside — and that rect only exists in client coordinates after a
-   * `useLayoutEffect` converts it. In that gap the panel was drawn with no position at all, that
-   * is, `inset-0` of a window now the size of the screen: Settings jumped to giant.
-   *
-   * With a screen rect, the panel only appears once it is positioned. Without one (the path where
-   * the window is not widened), `inset-0` is the correct position and there is nothing to wait for.
-   */
-  const panelAwaitingOverlayPlacement =
-    panelStaysUnderRadial && !!panelOverlayScreenRect && !panelOverlayClientRect;
-  const panelContentVisible =
-    (panelStaysUnderRadial && !panelAwaitingOverlayPlacement) ||
-    (!isMenuOpen && !radialOpenAwaitingFullscreen);
-
-  /** Theme for the opaque surfaces (titlebar + panels). The radial is never themed: it is a desktop overlay. */
+  /** Theme for the opaque surfaces (titlebar + panels). */
   const panelTheme = config.appearanceTheme === 'white' ? 'white' : 'black';
 
   return (
     <div
       className={`
-        fixed inset-0 w-full h-full overflow-hidden cursor-default select-none group
+        fixed inset-0 w-full h-full overflow-hidden cursor-default select-none
         ${isDesktopMode ? 'bg-transparent' : 'bg-[#0D0D0D]'}
-        ${isDesktopMode && !isAnyModalOpen ? 'pointer-events-none' : ''}
       `}
-      onMouseDown={handleMouseDown}
-      onDoubleClick={handleDoubleClick}
-      onContextMenu={(e) => {
-        e.preventDefault();
-        if (isMenuOpen) setIsMenuOpen(false);
-      }}
+      onContextMenu={(e) => e.preventDefault()}
     >
-      {/* Before minimizing: an opaque frame on purpose, so Windows caches a neutral bitmap. */}
-      {isDesktopMode && minimizeNeutralCoverActive && (
-        <div
-          className="fixed inset-0 z-[99999] bg-[#0A0A0A] pointer-events-none"
-          aria-hidden
-        />
-      )}
-
-      {/**
-       * `prepare-radial-show`: main has already done `showInactive()` on the old bounds, so a black
-       * frame here is visible as a flashing rectangle. All that is needed is forcing a fresh paint
-       * so no stale texture is exposed — clearing to (almost) transparent does it, and is invisible.
-       */}
-      {isDesktopMode && radialPreShowSolidCover && (
-        <div
-          className="fixed inset-0 z-[99999] pointer-events-none"
-          style={{ background: 'rgba(10,10,10,0.01)' }}
-          aria-hidden
-        />
-      )}
-
-      {/* Visibility Wrapper — ONLY for opaque content (Dashboard, Settings, Widgets) */}
-      {/* RadialMenu renders OUTSIDE this wrapper to stay truly transparent */}
-      {/* When radial opens: hide this layer instantly (no opacity transition) — otherwise the 300ms fade shows a flash of the last settings/dashboard frame */}
       {/*
         The window is ONE surface. There used to be `border` + `rounded-xl` + `shadow-[0_0_50px]`
         on this same `absolute inset-0` element: since the parent is `fixed inset-0 overflow-hidden`,
@@ -2685,56 +1362,21 @@ export default function App() {
         hairline + radius. `hasShadow:false` in main stays: the separation from the
         desktop comes from the radius and the surface contrast, not from an inner halo.
       */}
-      {/**
-       * Radial over the panel: the window was widened to cover both, so the panel can no longer
-       * be `inset-0` — it would stretch to the overlay's size. It is drawn instead in the exact
-       * box it occupied on screen, and only the radial takes the mouse: a stray click in the
-       * settings during the gesture would be an action the user did not ask for.
-       */}
       <div
         data-zn-theme={panelTheme}
-        data-radial-background-inert={radialBlocksPanelInteraction ? 'true' : undefined}
-        {...({ inert: radialBlocksPanelInteraction ? '' : undefined } as any)}
-        aria-hidden={radialBlocksPanelInteraction ? true : undefined}
-        style={panelStaysUnderRadial ? {
-          /**
-           * Explicit `z-index` for two reasons: it sits below the radial (z-70) and, above all,
-           * it creates a stacking context — without it the `z-index: 100` of `.zs-shell` competed
-           * in the root context and the settings drew ON TOP of the wheel.
-           */
-          zIndex: 5,
-          /** Positioning only exists on the resize path; without it the panel is still the window. */
-          ...(panelUnderRadial
-            ? {
-                position: 'absolute' as const,
-                left: panelOverlayClientRect!.x,
-                top: panelOverlayClientRect!.y,
-                width: panelOverlayClientRect!.width,
-                height: panelOverlayClientRect!.height,
-              }
-            : null),
-        } : undefined}
         className={`
-        overflow-hidden [--zenith-title-bar-h:38px]
-        ${panelUnderRadial ? '' : 'absolute inset-0'}
-        ${panelNeutralizingClose || panelVacatingForRadial
-          ? 'opacity-0 invisible !transition-none pointer-events-none'
-          : panelStaysUnderRadial
-          ? 'zenith-panel-surface pointer-events-none !transition-none'
-          : (isMenuOpen || radialOpenAwaitingFullscreen)
-            ? 'hidden !transition-none pointer-events-none'
-            : panelSurfaceOpen
-              ? 'zenith-panel-surface !transition-none opacity-100 visible'
-              : 'hidden !transition-none pointer-events-none'
+        overflow-hidden [--zenith-title-bar-h:38px] absolute inset-0
+        ${panelSurfaceOpen
+          ? 'zenith-panel-surface !transition-none opacity-100 visible'
+          : 'hidden !transition-none pointer-events-none'
         }
       `}>
         {/* CUSTOM TITLE BAR OVERLAY (for drag region + app name) */}
-        {panelSurfaceOpen && panelContentVisible && (
+        {panelSurfaceOpen && (
           <div
             /* `zenith-titlebar` — styled in index.css, alongside the radial panel. */
             className="zenith-titlebar absolute top-0 left-0 right-0 h-[var(--zenith-title-bar-h)] z-[999] flex items-center justify-between pl-3 rounded-t-[12px] overflow-hidden"
-            /* Under the radial the drag region would move the whole overlay window, not the panel. */
-            style={{ WebkitAppRegion: panelStaysUnderRadial ? 'no-drag' : 'drag' } as any}
+            style={{ WebkitAppRegion: 'drag' } as any}
           >
             {isSettingsOpen ? (
               <div
@@ -2807,24 +1449,15 @@ export default function App() {
         {/* BACKGROUND (Simulator Only OR First Run Dashboard) */}
         {/* DELETED: Removed redundant background to allow RadialMenu to handle it exclusively */}
 
-        {/* WELCOME SCREEN / DASHBOARD — AnimatePresence sync avoids a background-only gap between dashboard and settings (DWM). */}
         {/**
          * Hide, do not unmount.
          *
-         * `panelContentVisible` exists so the panel does not DRAW before it has a position (see
-         * `panelAwaitingOverlayPlacement`), and it did that by pulling the subtree out of React.
-         * Since main always sends `keepPanel` with a rect, and that rect only reaches client
-         * coordinates in the next `useLayoutEffect`, EVERY wheel gesture over Settings went through
-         * a commit with no tree — and on closing the wheel the panel mounted again, repeating the
-         * 0.28 s entrance and the `.zs-shell` fade. The panel seemed to reload every time the app
-         * was used, when it had never left.
-         *
-         * `display: none` suppresses exactly the same: Chromium generates no box at all, so the
-         * frame handed to the DWM is the same as it was without the subtree. The BACKGROUND is
-         * still painted by the container (`zenith-panel-surface`), which sits outside this `div` —
-         * the positioning gap paints what it always painted. Only what survives the gesture changes.
+         * The wheel no longer touches this window, so the subtree is never pulled out from under
+         * the panel mid-gesture — but the rule that taught us that still holds: unmounting
+         * `PrecisionSettings` replays its 0.28 s entrance and the `.zs-shell` fade, and the panel
+         * looks like it reloaded when it never left.
          */}
-        <div className={panelContentVisible ? undefined : 'hidden'}>
+        <div>
           <React.Suspense
             fallback={
               isSettingsOpen && panelSurfaceOpen ? (
@@ -2871,65 +1504,7 @@ export default function App() {
 
       </div>
 
-      {/* The panel's last frame: almost transparent, but not empty, so Chromium submits it to the DWM. */}
-      {isDesktopMode && panelNeutralizingClose && (
-        <div
-          className="fixed inset-0 z-[99999] pointer-events-none"
-          style={{ background: 'rgba(10,10,10,0.01)' }}
-          aria-hidden
-        />
-      )}
-
-      {/* During `applyWindowSize` the panel is already hidden in React — a solid background avoids a flash of the compositor's last texture.
-          With no opaque panel before it (tray/island) it stays transparent: there the black was itself the flash. */}
-      {isDesktopMode && radialOpenAwaitingFullscreen && (
-        <div
-          className={`fixed inset-0 z-[65] pointer-events-auto ${radialAwaitCoverOpaque ? 'bg-[#0A0A0A]' : ''}`}
-          aria-hidden
-        />
-      )}
-
-      {/* Island small→windowed: covers a wrong DWM frame before the invalidate after `applyWindowSize`. */}
-      {isDesktopMode && panelResizeSolidCover && (
-        <div
-          className="fixed inset-0 z-[96] bg-[#0A0A0A] pointer-events-none"
-          aria-hidden
-        />
-      )}
-
-      {/* ------------------------------------------------------------------ */}
-      {/* TRANSPARENT LAYER — no background, RadialMenu + toasts live here    */}
-      {/* ------------------------------------------------------------------ */}
-
-        {/* During `radialOpenAwaitingFullscreen` the menu cannot stay mounted with `isOpen={false}` — Framer animated “close” and then “open”, causing an exit/entry flash. */}
-        {(!radialOpenAwaitingFullscreen || isMenuOpen) && (
-          <RadialMenu
-            key={radialMountKey}
-            isOpen={isMenuOpen}
-            position={menuPosition}
-            viewportSize={radialClientSize}
-            onClose={handleMenuClose}
-            apps={radialApps}
-            config={radialMenuConfig}
-            triggerSource={triggerSource}
-            windowOrigin={radialWindowOrigin}
-            updateReady={updateReady}
-            discoveryPhase={discoveryPhase}
-            onWorkspaceSwitch={handleWorkspaceSwitch}
-            onDirectionHintSeen={handleDirectionHintSeen}
-            currentWorkspace={radialCurrentWorkspace}
-            animationReady={
-              radialPendingPaintToken === null ||
-              radialNativeRevealToken === radialPendingPaintToken
-            }
-          />
-        )}
-
-        {/*
-          The welcome card, over whatever the panel is showing. Gated on the panel being on screen
-          because in island mode the HWND ignores the mouse — a dialog drawn there could never be
-          dismissed, and it is the one thing on screen that must be.
-        */}
+        {/* The welcome card, over whatever the panel is showing. */}
         {isLoaded && config.hasSeenOnboarding !== true && panelSurfaceOpen && (
           <React.Suspense fallback={null}>
             <FirstRun
@@ -2948,10 +1523,9 @@ export default function App() {
           <React.Suspense fallback={null}>
             <ErrorOverlays
               /**
-                * The sticky notice waits for a surface it can actually be dismissed on. In island
-                * mode the HWND ignores the mouse and the card renders without its close button, so
-                * showing a card that never leaves would pin it over the desktop forever. It stays
-                * in state and appears the moment Settings or the dashboard opens.
+                * The sticky notice waits for a surface it can actually be dismissed on — including
+                * one raised by the wheel, in the other window, while nothing here was on screen. It
+                * stays in state until the panel appears, which is also when it becomes dismissable.
                 */
               faults={
                 [
@@ -2978,10 +1552,6 @@ export default function App() {
             style={{ opacity: 1, pointerEvents: 'none' }}
           />
         )}
-
-        <style>{`
-          .group:active { cursor: ${isAnyModalOpen ? 'default' : 'crosshair'}; }
-        `}</style>
 
     </div>
   );

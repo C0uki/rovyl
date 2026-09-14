@@ -40,6 +40,7 @@
     "test:keyboard-nav": "node scripts/keyboard-nav-smoke.mjs",
     "test:i18n": "node scripts/i18n-smoke.mjs",
     "test:select-menu": "node scripts/select-menu-smoke.mjs",
+    "test:window-split": "node scripts/window-split-smoke.mjs",
     "test:trigger-gesture": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/trigger-gesture-smoke.ps1",
     "icons:tray": "node scripts/generate-tray-icons.mjs",
     "verify:radial-windowing": "node scripts/verify-radial-windowing.mjs",

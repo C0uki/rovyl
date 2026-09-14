@@ -955,9 +955,6 @@ function resetLastWindowedBoundsIfIslandCorrupted() {
   }
   lastWindowedBounds = windowedBoundsForWorkArea();
 }
-/** Cleared when leaving radial overlay for settings so a pending hide does not break the window. */
-let skipTaskbarHideTimer = null;
-
 /**
  * Renderer "hide-window" leaves the window technically visible but opacity 0 + mouse passthrough.
  * If the user later focuses Zenith from the taskbar / Alt+Tab, no IPC runs — they see a blank / dead window.
@@ -965,59 +962,17 @@ let skipTaskbarHideTimer = null;
  */
 let windowBuriedPassive = false;
 
-/** Last mode passed to updateWindowSize — used to fix hit-testing after minimize/restore without renderer IPC. */
-let nativeWindowSizeMode = "windowed";
-
-/** Sync with `set-window-hit-shape`: "__empty__" or "" = mouse passed through; anything else = HUD regions. */
-let lastWindowHitShapeKey = "";
-
-/**
- * `updateWindowSize` cannot apply `setBounds` while the window is minimized; we keep the last
- * request and apply it on `restore` so the island/`small` sync back up with the HWND.
- */
-let pendingWindowSize = null;
-
-function flushPendingWindowSizeIfNeeded() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  try {
-    if (mainWindow.isMinimized()) return;
-  } catch (e) {
-    return;
-  }
-  if (!pendingWindowSize) return;
-  const p = pendingWindowSize;
-  pendingWindowSize = null;
-  updateWindowSize(p.mode, p.anchorScreenPoint);
-}
-
-/**
- * `show-window` and focus restores must not force `setIgnoreMouseEvents(false)` in `small` mode:
- * that made the monitor-sized overlay capture the mouse (invisibly).
- */
+/** Settings is always interactive when it is on screen; the wheel's window answers for itself. */
 function applyMousePolicyAfterReveal(win) {
   const w = win || mainWindow;
   if (!w || w.isDestroyed()) return;
   try {
-    if (nativeWindowSizeMode === "fullscreen" || nativeWindowSizeMode === "windowed") {
-      w.setIgnoreMouseEvents(false);
-      return;
-    }
-    if (nativeWindowSizeMode === "small") {
-      if (lastWindowHitShapeKey === "__empty__" || lastWindowHitShapeKey === "") {
-        if (typeof w.setShape === "function") {
-          w.setShape([]);
-        }
-        w.setIgnoreMouseEvents(true, { forward: true });
-      } else {
-        w.setIgnoreMouseEvents(false);
-      }
-    }
+    w.setIgnoreMouseEvents(false);
   } catch (e) {
     /* ignore */
   }
 }
 
-/** When true, allow BrowserWindow to close (real quit). Otherwise close → hide to tray. */
 let isAppQuitting = false;
 /**
  * Stop the trigger on shutdown — and this is an UPDATE requirement, not hygiene.
@@ -1120,7 +1075,7 @@ function startShortcutRecording() {
     const shortcutString = [...formattedModifiers, buttonName].join("+");
     diagLog(`[ShortcutRecord] Mouse shortcut recorded: ${shortcutString}`);
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send("shortcut-recorded", shortcutString);
+      sendToSettings("shortcut-recorded", shortcutString);
     }
   };
 
@@ -1185,7 +1140,7 @@ function startShortcutRecording() {
       const shortcutString = [...formattedModifiers, key].join("+");
 
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("shortcut-recorded", shortcutString);
+        sendToSettings("shortcut-recorded", shortcutString);
       }
     }
   });
@@ -1204,7 +1159,7 @@ function stopShortcutRecording() {
 async function createWindow() {
   /** Centred and clamped to the work area — never larger than the screen at high Windows scaling. */
   const initialBounds = windowedBoundsForWorkArea();
-  /** `updateWindowSize('windowed')` can run before the first `resize` event: line them up now. */
+  /** Settings only ever has this rect; line the tracker up with it before the first `resize`. */
   lastWindowedBounds = { ...initialBounds };
   const newWindow = new BrowserWindow({
     width: initialBounds.width,
@@ -1278,10 +1233,9 @@ async function createWindow() {
       }, 200);
     });
 
-    // Track bounds for persistence — only in `windowed` mode (fullscreen/small use special bounds; small+island must not overwrite the last real size).
+    /** Track bounds for persistence. Maximized is not a size the user chose to come back to. */
     newWindow.on("resize", () => {
       if (
-        nativeWindowSizeMode === "windowed" &&
         !newWindow.isFullScreen() &&
         !newWindow.isMaximized() &&
         !isUpdatingBounds
@@ -1295,7 +1249,6 @@ async function createWindow() {
 
     newWindow.on("move", () => {
       if (
-        nativeWindowSizeMode === "windowed" &&
         !newWindow.isFullScreen() &&
         !newWindow.isMaximized() &&
         !isUpdatingBounds
@@ -1346,28 +1299,10 @@ function attachWindowUserRestoreGuards(window) {
         diagLog("[Window] Recovered from passive hide (restore).");
         return;
       }
-      /**
-       * Minimize→radial shortcut: `updateWindowSize('fullscreen')` only parks in `pendingWindowSize`.
-       * The next handler flushes it in `setImmediate`; if we send `window-native-display-restored` first,
-       * the renderer applies `setWindowSize('windowed')` with the native mode still stale and the menu stays in the panel's rect.
-       */
-      flushPendingWindowSizeIfNeeded();
-      if (
-        nativeWindowSizeMode !== "small" &&
-        window.isVisible() &&
-        !window.isMinimized()
-      ) {
+      if (window.isVisible() && !window.isMinimized()) {
         window.setOpacity(1);
         window.setIgnoreMouseEvents(false);
-        /** Only the visible windowed panel stands for Settings in the taskbar. */
-        window.setSkipTaskbar(
-          nativeWindowSizeMode !== "windowed" || !rendererPanelVisible,
-        );
-        if (window.webContents && !window.webContents.isDestroyed()) {
-          window.webContents.send("window-native-display-restored", {
-            mode: nativeWindowSizeMode,
-          });
-        }
+        window.setSkipTaskbar(false);
       }
     } catch (e) {
       diagLog(`[Window] onRestore refresh: ${e.message}`);
@@ -1379,8 +1314,15 @@ function attachWindowUserRestoreGuards(window) {
 }
 
 function setupMainWindow(window) {
-  // Highest overlay level
-  window.setAlwaysOnTop(true, "screen-saver", 1);
+  /**
+   * Settings is an ordinary window and does not float.
+   *
+   * It used to be pinned at `screen-saver` level because the same HWND had to serve as the wheel's
+   * always-on-top desktop overlay, and `updateWindowSize('windowed')` dropped it again on every
+   * transition. The wheel has its own window now, so this one behaves like any other app window —
+   * it goes behind what you click on, which is what every user already expects it to do.
+   */
+  window.setAlwaysOnTop(false);
 
   // Send windowing events to React
   window.on("maximize", () =>
@@ -1469,16 +1411,8 @@ function setupMainWindow(window) {
   window.on("restore", () => {
     if (window.isDestroyed() || !window.webContents || window.webContents.isDestroyed()) return;
     const win = window;
-    /** Lets the renderer process `open-dashboard` / IPC before applying the pending one (tray → windowed). */
     setImmediate(() => {
-      try {
-        if (win.isDestroyed()) return;
-        if (!win.isMinimized()) {
-          flushPendingWindowSizeIfNeeded();
-        }
-      } catch (e) {
-        /* ignore */
-      }
+      if (win.isDestroyed()) return;
       sendMainWindowMinimizedState();
     });
   });
@@ -1486,246 +1420,270 @@ function setupMainWindow(window) {
 
 let radialOpenPaintSequence = 0;
 
-/**
- * True between `prepare-radial-show {vacatePanel}` and the reopen it schedules. A second trigger
- * inside that window must not start a second vacate — the renderer would be asked to empty a
- * surface it has already emptied, and the two passes would race to open the same wheel.
- */
-let radialPanelVacateInFlight = false;
+/* zenith-verify:radial-handshake-main — open-menu → radial-open-paint-done → show; see scripts/verify-radial-windowing.mjs */
 
 /**
- * Get the panel off the window's surface, then open the radial for real.
+ * The wheel's window.
  *
- * The wait is capped: a renderer that never acknowledges must not swallow the gesture, and opening
- * with the old glitch is still better than not opening. `PANEL_VACATE_TIMEOUT_MS` is two frames
- * plus the IPC — long enough for the ack on a busy frame, short enough not to read as lag.
+ * Everything below used to be entangled with Settings because both drew into one HWND. What that
+ * cost is worth writing down, because it is all gone: a `prepare-radial-show` /
+ * `radial-prep-paint-done` handshake to get the panel off the compositor before the window could
+ * move; a `nativeResizeRisk` test and a hide-before-resize; a `keepExistingPanelWindow` path that
+ * drew the wheel in Settings' client coordinates and so quietly ignored the monitor the user asked
+ * for; a panel rect shipped in `open-menu` and remapped in the renderer; and a three-mode
+ * (`small`/`windowed`/`fullscreen`) state machine on a single window. None of it was ever about the
+ * wheel. It was about sharing.
+ *
+ * This window has painted exactly one thing since it was created, so moving it, resizing it and
+ * showing it expose nothing — there is no other texture for the DWM to present.
  */
-const PANEL_VACATE_TIMEOUT_MS = 90;
-function vacatePanelSurfaceThenOpen(source) {
-  radialPanelVacateInFlight = true;
-  const proceed = () => {
-    if (!radialPanelVacateInFlight) return;
-    radialPanelVacateInFlight = false;
-    ipcMain.removeListener("radial-prep-paint-done", onVacated);
-    clearTimeout(timer);
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    showMenuAtCursor(source, true);
-  };
-  const onVacated = () => proceed();
-  const timer = setTimeout(proceed, PANEL_VACATE_TIMEOUT_MS);
-  timer.unref?.();
-  ipcMain.once("radial-prep-paint-done", onVacated);
-  try {
-    mainWindow.webContents.send("prepare-radial-show", { vacatePanel: true });
-  } catch (e) {
-    proceed();
-  }
-}
+let overlayWindow = null;
+let overlayWindowCreation = null;
+/** The wheel is on screen and taking the mouse. */
+let radialOpen = false;
 
-/* zenith-verify:radial-handshake-main — prepare → radial-prep-paint-done → open-menu → radial-open-paint-done → show; see scripts/verify-radial-windowing.mjs */
 /**
- * @param {string} source
- * @param {boolean} panelAlreadyVacated — second pass, after the panel left the window's surface.
- *   See the handshake below for why that has to happen before the window moves.
+ * Idle geometry: the box the next wheel will use, on the monitor it will use, already in place.
+ *
+ * Kept VISIBLE and click-through rather than hidden — the same trade the old `small` mode made, and
+ * for the same reason: a hidden transparent window has no warm surface, so the first frame after
+ * `show()` is whatever the DWM last held. Since the mouse is ignored, a transparent box over the
+ * desktop blocks nothing.
  */
-function showMenuAtCursor(source = "shortcut", panelAlreadyVacated = false) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  cancelIdleMemoryCleanup();
-  const radialOpenStartedAt = Date.now();
-
-  /**
-   * Which monitor comes from the setting; the point inside it is its centre either way. `primary`
-   * is truly fixed — same screen every time, whatever the hand is doing. `cursor` moves the screen
-   * and nothing else: this still does not follow the pointer to a position.
-   */
-  const targetDisplay = radialTargetDisplay();
-  let radialCenter = {
-    x: Math.round(targetDisplay.bounds.x + targetDisplay.bounds.width / 2),
-    y: Math.round(targetDisplay.bounds.y + targetDisplay.bounds.height / 2),
-  };
-  /**
-   * If the monitor's real centre falls inside the Settings HWND, we keep the HWND completely still
-   * (no DWM flash) and draw the wheel at that point in client coordinates. This path used to
-   * replace `radialCenter` with SETTINGS' centre — (906,345) in the video — and looked like it was
-   * following the cursor. If the panel is on another monitor / off centre, the safe hide+resize
-   * path below is used to honour the target monitor's centre.
-   */
-  let keepExistingPanelWindow = false;
-  if (
-    /**
-     * Not when the dimming fills the window. This shortcut's whole trick is drawing the radial
-     * inside SETTINGS' frame, and a scrim with no falloff left would paint that frame solid — a
-     * black rectangle the size of the panel, on a bright desktop. Tuning the dimming and then
-     * firing the wheel to look at it is the obvious way to meet that, so it takes the slower
-     * hide-and-resize path instead and gets the monitor, which is what it asked for.
-     */
-    !radialFullBleed &&
-    nativeWindowSizeMode === "windowed" &&
-    rendererPanelVisible &&
-    isMainWindowOnScreen()
-  ) {
-    try {
-      const bounds = mainWindow.getBounds();
-      const visualMargin = Math.min(150, Math.floor(Math.min(bounds.width, bounds.height) / 4));
-      keepExistingPanelWindow =
-        radialCenter.x >= bounds.x + visualMargin &&
-        radialCenter.x <= bounds.x + bounds.width - visualMargin &&
-        radialCenter.y >= bounds.y + visualMargin &&
-        radialCenter.y <= bounds.y + bounds.height - visualMargin;
-    } catch (e) {
-      keepExistingPanelWindow = false;
-    }
-  }
-
-  let wasMinimized = false;
+function applyOverlayIdleBounds(anchorScreenPoint) {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  const targetDisplay = radialTargetDisplay(anchorScreenPoint);
+  const next = smallModeBounds(targetDisplay.bounds);
   try {
-    wasMinimized = mainWindow.isMinimized();
-  } catch (e) {
-    wasMinimized = false;
-  }
-
-  /**
-   * Set this BEFORE any resize, `open-menu` or `show-window`. If we wait for the `reveal`, the
-   * renderer can ask for `show()` first and Windows briefly creates a taskbar button for the
-   * radial. When Settings stays underneath the radial we preserve the existing button, because it
-   * still stands for the visible panel, not the radial modal.
-   */
-  if (!rendererPanelVisible) {
-    clearSkipTaskbarHideTimer();
-    try {
-      mainWindow.setSkipTaskbar(true);
-    } catch (e) {
-      /* ignore */
-    }
-  }
-
-  /**
-   * The logical state can lag the geometry by one IPC (Settings→radial→Settings→close).
-   * Once the renderer has confirmed there is no panel, no union flag may survive.
-   */
-  if (!rendererPanelVisible) {
-    panelOverlayActive = false;
-    panelOverlayKeptWindow = false;
-  }
-
-  /**
-   * Any geometric transition → radial changes the native bounds. If the HWND stays visible, the DWM
-   * stretches Settings' last texture (or the texture that just closed) for one frame, which is the
-   * flash. We record first that the panel really was visible and pull the surface out of the
-   * compositor before the resize; the handshake shows it again once it is painted.
-   */
-  let nativeResizeRisk = false;
-  if (!wasMinimized && !keepExistingPanelWindow) {
-    try {
-      const currentBounds = mainWindow.getBounds();
-      const desiredBounds = radialOpenBounds(targetDisplay.bounds, radialCenter);
-      nativeResizeRisk =
-        mainWindow.isVisible() && !boundsApproxEqual(currentBounds, desiredBounds);
-    } catch (e) {
-      nativeResizeRisk = true;
-    }
-  }
-  /**
-   * The panel has to LEAVE the surface before the window moves, not just be covered.
-   *
-   * `hide()` below does not empty the compositor: the last frame Chromium composited is still the
-   * one the DWM owns, and it is the panel drawn at `inset-0` of the 880×600 windowed rect. Showing
-   * the window again at the radial's bounds presents that surface at the NEW origin — so Settings
-   * appears in the monitor's top-left corner, at its old size, until the renderer's first real
-   * frame lands a beat later and it snaps back to where it always was. That jump is the whole bug;
-   * it is not the resize, and the panel's rect (`lastWindowedBounds`) was never wrong.
-   *
-   * `radial-open-paint-done` cannot cover this: it is acknowledged from a `requestAnimationFrame`
-   * in a window that is already HIDDEN, and a hidden window paints nothing the DWM will ever
-   * present. The only frame that can clear the surface is one drawn while the window is still on
-   * screen — which is why this handshake runs BEFORE the hide, and why the reopen is a second pass
-   * through this function rather than a branch inside it.
-   *
-   * Costs one frame plus an IPC, and only on this path. Idle opens (`small`) never reach it: their
-   * surface is already transparent, which is exactly why they were never seen to glitch.
-   */
-  if (
-    !panelAlreadyVacated &&
-    nativeResizeRisk &&
-    rendererPanelVisible &&
-    !radialPanelVacateInFlight &&
-    isMainWindowOnScreen()
-  ) {
-    vacatePanelSurfaceThenOpen(source);
-    return;
-  }
-
-  if (nativeResizeRisk) {
-    diagLog(
-      `[RadialOpen] Native bounds differ from centered radial; hiding before resize (mode=${nativeWindowSizeMode}, panel=${rendererPanelVisible})`,
-    );
-    if (rendererPanelVisible && isMainWindowOnScreen()) {
-      panelOverlayActive = true;
-    }
-    try {
-      mainWindow.hide();
-      windowBuriedPassive = true;
-    } catch (e) {
-      /* ignore */
-    }
-  }
-
-  // Resize before IPC so the first renderer paint is already monitor-sized (send() is async; windowed→radial looked like "dashboard size").
-  updateWindowSize("fullscreen", radialCenter);
-
-  /**
-   * Park the pointer BEFORE `open-menu`: the first sample the renderer uses has to be the centre
-   * one already, or the gesture is born pointing wherever the hand happened to be.
-   *
-   * MMB in hold mode is left out — that gesture executes on release and its aim comes from the
-   * main-process polling, which starts at the point where the button was pressed. Moving the cursor
-   * under it would confirm a slice nobody chose.
-   */
-  if (source !== "mmb") captureRadialCursor(radialCenter);
-
-  // Do NOT setOpacity(0) here — on Windows + transparent BrowserWindow it often leaves the compositor
-  // without a fresh web frame (user sees through / "nothing", while hit-testing still works).
-
-  /**
-   * `hide-window` / `collapse-idle-overlay` / `reapply-small-overlay` leave the renderer throttled.
-   * If we open through the fast path without waking it, the `show()` arrives before the first new
-   * frame and the DWM presents the previous texture (island/dashboard) or black. Wake on ALL paths.
-   */
-  try {
-    if (typeof mainWindow.webContents?.setBackgroundThrottling === "function") {
-      mainWindow.webContents.setBackgroundThrottling(false);
-    }
+    if (!boundsApproxEqual(overlayWindow.getBounds(), next)) overlayWindow.setBounds(next);
   } catch (e) {
     /* ignore */
   }
+}
 
-  const sendOpenMenuAndReveal = (waitForRadialPaint = false) => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
+/** Back to an invisible, click-through box on the desktop. */
+function collapseOverlayToIdle(anchorScreenPoint) {
+  const wasOpen = radialOpen;
+  radialOpen = false;
+  clearRadialMouseBlocking();
+  releaseRadialCursor();
+  clearTaskbarOverlay();
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  try {
+    overlayWindow.setIgnoreMouseEvents(true);
+    applyOverlayIdleBounds(anchorScreenPoint);
+    overlayWindow.setAlwaysOnTop(true, "screen-saver", 1);
+    if (!overlayWindow.isVisible()) overlayWindow.showInactive();
+    overlayWindow.webContents.setBackgroundThrottling(true);
+  } catch (e) {
+    /* ignore */
+  }
+  if (wasOpen) diagLog("[RadialClose] wheel closed; overlay back to idle");
+  scheduleIdleMemoryCleanup(2000);
+}
 
-    let radialClientPosition = null;
-    let radialWindowOrigin = null;
-    let radialClientSize = null;
-    try {
+async function createOverlayWindow() {
+  const targetDisplay = radialTargetDisplay();
+  const initial = smallModeBounds(targetDisplay.bounds);
+  const win = new BrowserWindow({
+    ...initial,
+    frame: false,
+    transparent: true,
+    /** Never in the taskbar or Alt+Tab: this window is a gesture, not a place you go back to. */
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    resizable: true,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    focusable: true,
+    show: false,
+    hasShadow: false,
+    thickFrame: false,
+    backgroundColor: "#00000000",
+    backgroundMaterial: "none",
+    webPreferences: {
+      preload: path.join(__dirname, "electron-preload.js"),
+      nodeIntegration: false,
+      contextIsolation: true,
+      devTools: isDev,
+      spellcheck: false,
+      backgroundThrottling: true,
+    },
+  });
+
+  win.setAlwaysOnTop(true, "screen-saver", 1);
+  try {
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  } catch (e) {
+    /* ignore */
+  }
+  /** Idle is click-through; the open sets this false and the close puts it back. */
+  win.setIgnoreMouseEvents(true);
+
+  if (isDev) {
+    win.loadURL("http://localhost:5173/radial.html");
+  } else {
+    win.loadFile(path.join(__dirname, "../dist/radial.html"));
+  }
+
+  /**
+   * The wheel's window has to say when it is broken.
+   *
+   * `ready-to-show` fires for a document that loaded and painted nothing, so a renderer that failed
+   * to boot looks exactly like a healthy idle overlay: transparent, parked, silent. The only visible
+   * symptom would be a gesture that does nothing at all, with nothing in the log to say why.
+   */
+  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription) => {
+    diagLog(`[Overlay] Renderer failed to load: ${errorCode} — ${errorDescription}`);
+  });
+  win.webContents.on("render-process-gone", (_event, details) => {
+    diagLog(`[Overlay] Renderer process gone: ${details?.reason}`);
+  });
+  win.webContents.on("preload-error", (_event, preloadPath, error) => {
+    diagLog(`[Overlay] Preload error at ${preloadPath}: ${error?.message}`);
+  });
+
+  win.on("closed", () => {
+    if (overlayWindow === win) {
+      overlayWindow = null;
+      radialOpen = false;
+    }
+  });
+
+  await new Promise((resolve) => {
+    win.once("ready-to-show", () => {
       /**
-       * While minimized, `updateWindowSize` only queues fullscreen; `getBounds()` still returns
-       * Settings at the position it was minimized from. Using that rect produced (440,300) and
-       * pinned the first wheel to the panel's old centre. The radial rect is deterministic, so the
-       * payload can — and should — anticipate the geometry that will be applied on restore.
+       * Show it once, immediately and transparent, so the surface is warm and composed before the
+       * first gesture ever asks for it. This is the whole reason the idle window exists.
        */
-      const bounds = wasMinimized
-        ? radialOpenBounds(targetDisplay.bounds, radialCenter)
-        : mainWindow.getBounds();
-      radialWindowOrigin = { x: bounds.x, y: bounds.y };
-      radialClientPosition = {
-        x: radialCenter.x - bounds.x,
-        y: radialCenter.y - bounds.y,
-      };
-      radialClientSize = { width: bounds.width, height: bounds.height };
+      try {
+        win.showInactive();
+        win.webContents.setBackgroundThrottling(true);
+      } catch (e) {
+        /* ignore */
+      }
+      try {
+        diagLog(
+          `[Overlay] Stable idle: transparent wheel surface and mouse passthrough at ${JSON.stringify(
+            win.getBounds(),
+          )}`,
+        );
+      } catch (e) {
+        /* diagnostic only */
+      }
+      resolve();
+    });
+  });
+
+  return win;
+}
+
+async function ensureOverlayWindow() {
+  if (overlayWindow && !overlayWindow.isDestroyed()) return overlayWindow;
+  if (!overlayWindowCreation) {
+    overlayWindowCreation = createOverlayWindow().finally(() => {
+      overlayWindowCreation = null;
+    });
+  }
+  const win = await overlayWindowCreation;
+  overlayWindow = win;
+  return win;
+}
+
+/**
+ * Settings' renderer, when it is alive.
+ *
+ * The counterpart of `sendToOverlay`. Every renderer-bound message now names the window it is for:
+ * with one HWND that question did not exist, and with two, getting it wrong is a message delivered
+ * to a document that does not listen for it — silent, and invisible until somebody uses the feature.
+ */
+function sendToSettings(channel, payload) {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const wc = mainWindow.webContents;
+  if (!wc || wc.isDestroyed()) return false;
+  try {
+    wc.send(channel, payload);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/** Whatever is alive to receive the wheel's own channels. */
+function overlayWebContents() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return null;
+  const wc = overlayWindow.webContents;
+  return wc && !wc.isDestroyed() ? wc : null;
+}
+
+function sendToOverlay(channel, payload) {
+  const wc = overlayWebContents();
+  if (!wc) return false;
+  try {
+    wc.send(channel, payload);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Open the wheel.
+ *
+ * Position first (the window is transparent and click-through, so nobody can see or touch it
+ * moving), then hand the renderer the geometry it needs, wait for it to confirm one painted frame,
+ * and only then take the mouse and come to the front. The wheel is always at the centre of this
+ * window; this function decides where the window is, never where the wheel is inside it.
+ */
+function showMenuAtCursor(source = "shortcut") {
+  void ensureOverlayWindow().then((win) => {
+    if (!win || win.isDestroyed()) return;
+    cancelIdleMemoryCleanup();
+    const radialOpenStartedAt = Date.now();
+
+    const targetDisplay = radialTargetDisplay();
+    const radialCenter = {
+      x: Math.round(targetDisplay.bounds.x + targetDisplay.bounds.width / 2),
+      y: Math.round(targetDisplay.bounds.y + targetDisplay.bounds.height / 2),
+    };
+    const bounds = radialOpenBounds(targetDisplay.bounds, radialCenter);
+
+    try {
+      if (!boundsApproxEqual(win.getBounds(), bounds)) win.setBounds(bounds);
     } catch (e) {
-      /* renderer falls back to screen coordinates */
+      /* ignore */
     }
 
-    const paintToken = waitForRadialPaint ? ++radialOpenPaintSequence : undefined;
+    setRadialMouseBlocking(bounds, targetDisplay.bounds);
+    /**
+     * The wheel takes this screen, so the taskbar on THIS screen gets out of the way —
+     * `targetDisplay`, not the primary: with `radialMonitor: 'cursor'` the bar the gesture covers
+     * is the one it is dimming.
+     */
+    applyTaskbarOverlay(targetDisplay);
+
+    /**
+     * Park the pointer BEFORE `open-menu`: the first sample the renderer uses has to be the centre
+     * one already, or the gesture is born pointing wherever the hand happened to be.
+     *
+     * MMB in hold mode is left out — that gesture executes on release and its aim comes from the
+     * main-process polling, which starts at the point where the button was pressed.
+     */
+    if (source !== "mmb") captureRadialCursor(radialCenter);
+
+    const wc = overlayWebContents();
+    if (!wc) return;
+    try {
+      wc.setBackgroundThrottling(false);
+    } catch (e) {
+      /* ignore */
+    }
+
+    radialOpen = true;
+
+    const paintToken = ++radialOpenPaintSequence;
     let revealStarted = false;
     let paintTimeout = null;
     let onRadialPaint = null;
@@ -1736,198 +1694,78 @@ function showMenuAtCursor(source = "shortcut", panelAlreadyVacated = false) {
       if (paintTimeout) clearTimeout(paintTimeout);
       if (onRadialPaint) ipcMain.removeListener("radial-open-paint-done", onRadialPaint);
 
-      setImmediate(async () => {
-        if (!mainWindow || mainWindow.isDestroyed()) return;
-
-        /**
-         * Radial on top of the panel with no resize: the window is ALREADY visible, in the right
-         * place and in the taskbar. Repeating `show`/`setSkipTaskbar`/`setVisibleOnAllWorkspaces`
-         * here only forces the HWND to recompose — and every recomposition of a layered window is
-         * a flash risk. On this path it just needs to be brought to the front.
-         */
-        if (panelOverlayKeptWindow) {
-          windowBuriedPassive = false;
-          mainWindow.setIgnoreMouseEvents(false);
-          mainWindow.focus();
-          mainWindow.webContents.focus();
-          if (process.platform === "win32") {
-            mainWindow.setAlwaysOnTop(true, "screen-saver", 1);
-          }
-          return;
+      setImmediate(() => {
+        if (!overlayWindow || overlayWindow.isDestroyed()) return;
+        /** A close that landed inside the handshake must not be undone by its own reveal. */
+        if (!radialOpen) return;
+        try {
+          overlayWindow.setIgnoreMouseEvents(false);
+          overlayWindow.setOpacity(1);
+          if (!overlayWindow.isVisible()) overlayWindow.showInactive();
+          overlayWindow.setAlwaysOnTop(true, "screen-saver", 1);
+          overlayWindow.focus();
+          overlayWindow.webContents.focus();
+        } catch (e) {
+          /* ignore */
         }
 
+        /** `focus()` is a request Windows may refuse; this is what makes it stick. */
+        stealForegroundForOverlay();
+
         /**
-         * Closing Settings fires the async collapse to `small`. The global shortcut can arrive
-         * while that IPC is still queued: it then overwrote the radial's first resize and the HWND
-         * was revealed in the old rect / monitor corner. The reveal is the opening's final barrier;
-         * reapplying fullscreen here guarantees no stale resize from the close is the last
-         * geometric command before `show()`.
+         * The renderer prepared the wheel at zero alpha. Releasing the bloom only after the window
+         * is taking the mouse guarantees the first frame the DWM gets is transparent, never half an
+         * animation.
          */
-        updateWindowSize("fullscreen", radialCenter);
-
-        /** Final defence: only a Settings still visible under the radial keeps the button. */
-        mainWindow.setSkipTaskbar(!rendererPanelVisible);
-
-        windowBuriedPassive = false;
-        mainWindow.setIgnoreMouseEvents(false);
-        mainWindow.setOpacity(1);
-        if (!mainWindow.isVisible()) mainWindow.showInactive();
-        if (typeof paintToken === "number") {
-          /**
-           * The renderer prepared the radial at zero alpha. Releasing the bloom only after `show()`
-           * guarantees the first frame handed to the DWM is transparent, never half an animation.
-           */
-          const releaseAnimationTimer = setTimeout(() => {
-            if (!mainWindow || mainWindow.isDestroyed()) return;
-            mainWindow.webContents.send("radial-native-revealed", paintToken);
-          }, 16);
-          releaseAnimationTimer.unref?.();
-        }
+        const releaseAnimationTimer = setTimeout(() => {
+          sendToOverlay("radial-native-revealed", paintToken);
+        }, 16);
+        releaseAnimationTimer.unref?.();
 
         try {
-          const revealBounds = mainWindow.getBounds();
-          const revealClientCenter = {
-            x: radialCenter.x - revealBounds.x,
-            y: radialCenter.y - revealBounds.y,
-          };
           diagLog(
-            `[RadialOpen] reveal latency=${Date.now() - radialOpenStartedAt}ms bounds=${JSON.stringify(revealBounds)} centerScreen=${JSON.stringify(radialCenter)} centerClient=${JSON.stringify(revealClientCenter)}`,
+            `[RadialOpen] reveal latency=${Date.now() - radialOpenStartedAt}ms bounds=${JSON.stringify(
+              overlayWindow.getBounds(),
+            )} centerScreen=${JSON.stringify(radialCenter)}`,
           );
         } catch (e) {
           /* diagnostic only */
         }
-
-        mainWindow.focus();
-        mainWindow.webContents.focus();
-        if (process.platform === "win32") {
-          mainWindow.setAlwaysOnTop(true, "screen-saver", 1);
-        }
-
-        /**
-         * The handshake already waited for two full paints. Invalidating after `show()` made the
-         * DWM re-present the empty/old texture, seen as a flash on the first few opens.
-         */
       });
     };
 
-    if (waitForRadialPaint) {
-      onRadialPaint = (_event, acknowledgedToken) => {
-        if (acknowledgedToken !== paintToken) return;
-        reveal();
-      };
-      ipcMain.on("radial-open-paint-done", onRadialPaint);
-      // Fallback only: normal path acknowledges after the next painted animation frame.
-      paintTimeout = setTimeout(reveal, wasMinimized ? 240 : 120);
-      paintTimeout.unref?.();
-    }
-
-    mainWindow.webContents.send("open-menu", {
-      /** The monitor's real centre; never use these coordinates as a free cursor position. */
-      x: radialCenter.x,
-      y: radialCenter.y,
-      source: source,
-      /** Main already called `updateWindowSize('fullscreen')` (except minimized: bounds queued). */
-      preSizedByMain: !wasMinimized,
-      /** The panel is still on screen under the radial — the renderer must not close it. */
-      keepPanel: panelOverlayActive,
-      /**
-       * The panel's screen rect, WHENEVER it sits under the radial.
-       *
-       * It used to be sent only when the window had been widened, on the assumption that on the
-       * other path it stayed panel-sized. But the radial window is a square box (988×988 with the
-       * typical values) and the panel is 880×600: with no rect it is drawn at `inset-0` and grows
-       * with the window — Settings came out bigger than it is.
-       *
-       * Always sending it removes the ambiguity: on the no-resize path the rect coincides with the
-       * window bounds, so positioning gives exactly the same result as `inset-0`.
-       */
-      panelRect: panelOverlayActive ? { ...lastWindowedBounds } : null,
-      /** Do not rely on window.screenX/Y on the first tick after setBounds: they can still be Settings'. */
-      clientPosition: radialClientPosition,
-      windowOrigin: radialWindowOrigin,
-      clientSize: radialClientSize,
-      paintToken,
-    });
-
-    if (!waitForRadialPaint) reveal();
-  };
-
-  const wc = mainWindow.webContents;
-  if (!wc || wc.isDestroyed()) {
-    sendOpenMenuAndReveal();
-    return;
-  }
-
-  let visibleOk = false;
-  try {
-    visibleOk = mainWindow.isVisible();
-  } catch {
-    visibleOk = false;
-  }
-
-  /**
-   * Fast path: window already visible and not minimized — the prepare-radial handshake costs ~2 rAF
-   * + IPC and reads as “lag” on open. The prep stays only when minimized or the HWND is hidden
-   * (tray / DWM flash).
-   */
-  if (!wasMinimized && visibleOk) {
-    setImmediate(sendOpenMenuAndReveal);
-    return;
-  }
-
-  /**
-   * The idle window is hidden and throttled. We wake the renderer but keep the HWND hidden:
-   * `showInactive()` here exposed exactly the stale Settings texture the handshake exists to
-   * replace. With background throttling off, the preparation rAFs keep being painted.
-   */
-  try {
-    if (typeof wc.setBackgroundThrottling === "function") {
-      wc.setBackgroundThrottling(false);
-    }
-  } catch (e) {
-    /* ignore */
-  }
-
-  /**
-   * Normal idle: the HWND is hidden but not minimized. `open-menu` itself mounts every layer at
-   * zero alpha and acknowledges the paint, so the earlier neutral handshake was redundant and added
-   * up to 72 ms before the wheel was even mounted. Minimization keeps the special preparation.
-   */
-  if (!wasMinimized) {
-    sendOpenMenuAndReveal(true);
-    return;
-  }
-
-  /**
-   * Neutral frame before `open-menu` + `show` — mostly restore from minimize / hidden HWND.
-   */
-  const prepTimeoutMs = wasMinimized ? 200 : 72;
-  const prepPromise = new Promise((resolve) => {
-    /**
-     * The listener has to come off on every exit, not just the acknowledged one. `ipcMain` lives as
-     * long as the process, so a timed-out prep used to leave its closure attached forever — and
-     * `vacatePanelSurfaceThenOpen` listens on this same channel, so a late ack could satisfy the
-     * wrong waiter.
-     */
-    const onPaintDone = () => {
-      clearTimeout(t);
-      resolve();
+    onRadialPaint = (_event, acknowledgedToken) => {
+      if (acknowledgedToken !== paintToken) return;
+      reveal();
     };
-    const t = setTimeout(() => {
-      ipcMain.removeListener("radial-prep-paint-done", onPaintDone);
-      resolve();
-    }, prepTimeoutMs);
-    ipcMain.once("radial-prep-paint-done", onPaintDone);
+    ipcMain.on("radial-open-paint-done", onRadialPaint);
+    /** Fallback only: the normal path acknowledges after the next painted animation frame. */
+    paintTimeout = setTimeout(reveal, 120);
+    paintTimeout.unref?.();
+
     try {
-      wc.send("prepare-radial-show");
+      wc.send("open-menu", {
+        source,
+        /** Do not rely on window.screenX/Y on the first tick after setBounds. */
+        clientPosition: {
+          x: radialCenter.x - bounds.x,
+          y: radialCenter.y - bounds.y,
+        },
+        windowOrigin: { x: bounds.x, y: bounds.y },
+        clientSize: { width: bounds.width, height: bounds.height },
+        paintToken,
+      });
     } catch (e) {
-      clearTimeout(t);
-      ipcMain.removeListener("radial-prep-paint-done", onPaintDone);
-      resolve();
+      reveal();
     }
   });
+}
 
-  prepPromise.then(() => sendOpenMenuAndReveal(true));
+/** Main took the wheel down without the renderer asking — game mode, quit, a gesture that never landed. */
+function forceCloseRadial() {
+  if (!radialOpen) return;
+  sendToOverlay("radial-hidden");
+  collapseOverlayToIdle();
 }
 
 /**
@@ -1982,6 +1820,14 @@ function applyRadialMonitorSetting(value) {
 }
 ipcMain.on("set-radial-viewport", (_event, payload) => {
   if (!payload || typeof payload !== "object") return;
+  /**
+   * Also the only proof in the log that the wheel's RENDERER is alive.
+   *
+   * `[Overlay] Stable idle` says the window painted, which a blank document does too — a renderer
+   * that failed to boot looks exactly like a healthy idle overlay. This line is sent from an effect
+   * in `RadialApp`, so it cannot appear unless React mounted and the config arrived.
+   */
+  diagLog(`[Overlay] Renderer ready; wheel geometry ${JSON.stringify(payload)}`);
   const n = Number(payload.size);
   if (Number.isFinite(n) && n >= 320 && n <= 4096) {
     radialViewportSize = Math.round(n);
@@ -2088,7 +1934,7 @@ let pendingRadialCursorCommand = null;
 
 /**
  * Does NOT call `ensureRadialMouseBlocker`: the helper is already up whenever this matters, because
- * `updateWindowSize("fullscreen")` starts it before the wheel exists. If it died, or we are on the
+ * `showMenuAtCursor` starts it before the wheel exists. If it died, or we are on the
  * way out, resurrecting it here left an orphan PowerShell — which is exactly what stops the
  * installer replacing the folder. With no process, the command waits in the slot and leaves on the
  * next READY.
@@ -2514,91 +2360,6 @@ ipcMain.handle("get-taskbar-capability", async () => {
  * same screen position it had. `windowed` mode still keeps that rect in `lastWindowedBounds`, so
  * closing the radial puts the window back in the exact spot.
  */
-let panelOverlayActive = false;
-/** True when the radial opened over the panel WITHOUT touching the bounds (see `keepPanelWindow`). */
-let panelOverlayKeptWindow = false;
-/**
- * Panel in view, according to the renderer. `nativeWindowSizeMode === 'windowed'` is NOT good for
- * this: `hide-window` hides the window without changing mode, and the next radial concluded there
- * was a panel on screen — it opened without resizing and dragged the settings along behind it.
- */
-let rendererPanelVisible = false;
-ipcMain.on("set-panel-surface-visible", (event, visible) => {
-  rendererPanelVisible = !!visible;
-  /** The renderer uses sendSync: closing Settings and firing the radial at the same instant must not read stale state. */
-  event.returnValue = true;
-});
-
-function isMainWindowOnScreen() {
-  try {
-    return (
-      !!mainWindow &&
-      !mainWindow.isDestroyed() &&
-      mainWindow.isVisible() &&
-      !mainWindow.isMinimized()
-    );
-  } catch (e) {
-    return false;
-  }
-}
-
-/**
- * Is the window's own frame sitting on this display?
- *
- * Asked before the wheel reuses a visible Settings frame instead of composing its own. Those two
- * have to be on the SAME monitor, because the reuse path hands the hook Settings' rect as the only
- * clickable region while telling it to block the monitor the wheel was aimed at. On one monitor
- * those are the same place. On two they need not be, and then the allowed rect does not intersect the
- * blocked monitor at all — the hook swallows every click on it, the one that launches included,
- * while the wheel is drawn on the other screen entirely.
- *
- * `radialMonitor: 'cursor'` is what makes this reachable in one gesture, but it is not the only way
- * in: Settings dragged to the second monitor could already do it, and `flushPendingWindowSizeIfNeeded`
- * reaches the reuse branch on restore without ever taking `showMenuAtCursor`'s containment test.
- */
-function isMainWindowOnDisplay(displayBounds) {
-  if (!displayBounds) return false;
-  try {
-    if (!mainWindow || mainWindow.isDestroyed()) return false;
-    const frame = mainWindow.getBounds();
-    const centre = {
-      x: frame.x + frame.width / 2,
-      y: frame.y + frame.height / 2,
-    };
-    return (
-      centre.x >= displayBounds.x &&
-      centre.x < displayBounds.x + displayBounds.width &&
-      centre.y >= displayBounds.y &&
-      centre.y < displayBounds.y + displayBounds.height
-    );
-  } catch (e) {
-    return false;
-  }
-}
-
-function radialBoundsUnionWithPanel(radialRect, displayBounds) {
-  if (!panelOverlayActive) return radialRect;
-  const panel = lastWindowedBounds;
-  if (!panel || !Number.isFinite(panel.width) || panel.width <= 0) return radialRect;
-
-  const union = unionScreenRects([radialRect, panel]);
-  if (!union) return radialRect;
-
-  /** Capped to the monitor: a panel dragged outside must not stretch the window past it. */
-  const width = Math.min(union.width, displayBounds.width);
-  const height = Math.min(union.height, displayBounds.height);
-  return {
-    x: Math.round(
-      Math.max(displayBounds.x, Math.min(union.x, displayBounds.x + displayBounds.width - width)),
-    ),
-    y: Math.round(
-      Math.max(displayBounds.y, Math.min(union.y, displayBounds.y + displayBounds.height - height)),
-    ),
-    width: Math.round(width),
-    height: Math.round(height),
-  };
-}
-
 /**
  * The radial's box is always centred on the display it is HANDED. WHICH display that is belongs to
  * the caller — `radialTargetDisplay`, driven by the `radialMonitor` setting — never to this function.
@@ -2647,55 +2408,16 @@ function radialOpenBounds(displayBounds, point) {
 }
 
 /**
- * Stable idle: the transparent surface uses exactly the radial's bounds.
- * Opening then needs no hide/show and no resize; since the mouse is ignored, the area does not block the desktop.
+ * The overlay's idle rect: exactly the bounds the wheel will open at, centred on the display.
+ *
+ * Opening then usually needs no resize at all — and on a transparent layered window every resize is
+ * a flash risk. Since the idle window ignores the mouse, the box blocks nothing.
  */
 function smallModeBounds(displayBounds) {
   return radialModeBounds(displayBounds, {
     x: displayBounds.x + displayBounds.width / 2,
     y: displayBounds.y + displayBounds.height / 2,
   });
-}
-
-function applySmallModeCollapsedBounds(anchorScreenPoint) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  /**
-   * Idle parks on the monitor the next wheel will be born on, so opening there costs no resize —
-   * and on this transparent window every resize is a flash risk. With `cursor` that is a bet on
-   * where the hand will still be; when it loses, `showMenuAtCursor` sees the mismatch through
-   * `nativeResizeRisk` and hides the window before moving it, which is the same safe path a
-   * panel→radial transition already takes.
-   */
-  const targetDisplay = radialTargetDisplay(anchorScreenPoint);
-  const nextBounds = smallModeBounds(targetDisplay.bounds);
-  if (!boundsApproxEqual(mainWindow.getBounds(), nextBounds)) {
-    mainWindow.setBounds(nextBounds);
-  }
-}
-
-function unionScreenRects(rects) {
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  for (const r of rects) {
-    if (!r || typeof r.x !== "number") continue;
-    const x1 = r.x;
-    const y1 = r.y;
-    const x2 = r.x + r.width;
-    const y2 = r.y + r.height;
-    minX = Math.min(minX, x1);
-    minY = Math.min(minY, y1);
-    maxX = Math.max(maxX, x2);
-    maxY = Math.max(maxY, y2);
-  }
-  if (!Number.isFinite(minX)) return null;
-  return {
-    x: minX,
-    y: minY,
-    width: maxX - minX,
-    height: maxY - minY,
-  };
 }
 
 function clampBoundsToWorkArea(bounds, workArea) {
@@ -2721,238 +2443,39 @@ function boundsApproxEqual(a, b, eps = 2) {
 }
 
 /**
- * @param {string} mode
- * @param {{ x: number, y: number } | undefined} anchorScreenPoint — screen coordinates (e.g. cursor). Picks the monitor with getDisplayNearestPoint so multi-monitor matches the radial overlay.
+ * Put Settings back at the rect it was last at, inside the work area.
+ *
+ * What replaced `updateWindowSize`. That function chose between a monitor-sized transparent overlay
+ * for the wheel, this rect for the panel, and a collapsed click-through box for idle — on one
+ * window, which is why it also had to manage `setShape`, `setIgnoreMouseEvents`, always-on-top and
+ * the taskbar button as it went. Settings is an ordinary window now: it has one size, it is either
+ * on screen or hidden, and the wheel is somebody else's HWND.
  */
-function updateWindowSize(mode, anchorScreenPoint) {
+function applySettingsWindowBounds() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  /** While minimized we do not apply `setBounds`; queue it and apply on `restore` (flush). */
   try {
-    if (mainWindow.isMinimized()) {
-      pendingWindowSize = { mode, anchorScreenPoint };
-      /** Minimized there is no panel in view — do not let the previous flag decide the next radial. */
-      panelOverlayActive = false;
-      panelOverlayKeptWindow = false;
-      return;
-    }
-  } catch (e) {
-    return;
-  }
-
-  pendingWindowSize = null;
-
-  const previousMode = nativeWindowSizeMode;
-  nativeWindowSizeMode = mode;
-
-  let point =
-    anchorScreenPoint &&
-    typeof anchorScreenPoint.x === "number" &&
-    typeof anchorScreenPoint.y === "number" &&
-    !Number.isNaN(anchorScreenPoint.x) &&
-    !Number.isNaN(anchorScreenPoint.y)
-      ? anchorScreenPoint
-      : screen.getCursorScreenPoint();
-
-  const targetDisplay = screen.getDisplayNearestPoint(point);
-  const b = targetDisplay.bounds;
-
-  if (mode === "fullscreen") {
-    cancelIdleMemoryCleanup();
-    lastWindowHitShapeKey = "__empty__";
-    if (!rendererPanelVisible) {
-      panelOverlayActive = false;
-      panelOverlayKeptWindow = false;
-    }
-    /**
-     * Coming from `windowed` means there is a panel on screen: it stays visible under the radial,
-     * so the window has to keep covering it. The flag is the state, not `previousMode` — reopening
-     * the radial while already fullscreen must not lose the panel.
-     */
-    /**
-     * A panel on ANOTHER monitor is not a panel this radial can keep covered, and it must not be
-     * allowed to stretch the box towards it either: one HWND cannot span two screens, so moving it to
-     * the target monitor necessarily takes Settings off the screen it was on. That is the only thing
-     * it can do — what it must NOT do is keep the frame over there and block this monitor instead.
-     */
-    const panelIsOnTargetDisplay = isMainWindowOnDisplay(b);
-    if (!panelIsOnTargetDisplay) panelOverlayActive = false;
-
-    const keepPanelWindow =
-      /** Same reason as `keepExistingPanelWindow`: a flat scrim must not be cut to the panel's rect. */
-      !radialFullBleed &&
-      previousMode === "windowed" &&
-      rendererPanelVisible &&
-      isMainWindowOnScreen() &&
-      panelIsOnTargetDisplay;
-    if (keepPanelWindow) {
-      panelOverlayActive = true;
-    }
-    /**
-     * We keep the visual surface compact so the DWM does not freeze videos/apps underneath. The
-     * temporary hook blocks clicks on the rest of the monitor without creating a window to cover them.
-     */
-    /** A visible Settings uses the stable HWND; outside it the radial box stays centred on the monitor. */
-    panelOverlayKeptWindow = keepPanelWindow;
-    if (keepPanelWindow) {
-      /**
-       * Do not touch the bounds: Settings and radial share the already composed frame. On close,
-       * `windowed` finds the same bounds and does not recompose the window either.
-       */
-      const stableBounds = mainWindow.getBounds();
-      setRadialMouseBlocking(stableBounds, b);
-    } else {
-      const radialRect = radialBoundsUnionWithPanel(radialOpenBounds(b, point), b);
-      if (!boundsApproxEqual(mainWindow.getBounds(), radialRect)) {
-        mainWindow.setBounds(radialRect);
-      }
-      setRadialMouseBlocking(radialRect, b);
-      /**
-       * Same moment, same reason: this is where the wheel takes the screen, so this is where the
-       * taskbar on THAT screen gets out of the way. `targetDisplay` and not the primary -- with
-       * `radialMonitor: 'cursor'` the wheel may be on the other monitor, and the bar the gesture
-       * covers is the one it is dimming.
-       */
-      applyTaskbarOverlay(targetDisplay);
-    }
-    mainWindow.setResizable(true);
-    mainWindow.setBackgroundColor("#00000000"); // FORCE TRANSPARENCY
-    mainWindow.setAlwaysOnTop(true, "screen-saver", 1);
-    mainWindow.setIgnoreMouseEvents(false);
-    /**
-     * Do not use hundreds of rects in `setShape` to imitate the circle: the DWM recomputes those
-     * regions during movement and can lag the global cursor. The visual circle is already drawn in CSS.
-     */
-    try {
-      if (typeof mainWindow.setShape === "function") mainWindow.setShape([]);
-    } catch (e) {
-      /* ignore */
-    }
-  } else if (mode === "windowed") {
-    cancelIdleMemoryCleanup();
-    clearRadialMouseBlocking();
-    releaseRadialCursor();
-    clearTaskbarOverlay();
-    panelOverlayActive = false;
-    panelOverlayKeptWindow = false;
-    if (mainWindow.isFullScreen()) {
-      mainWindow.setFullScreen(false);
-    }
-    /** The island had the HWND shrunk — reset the hit-shape state so the next mode does not inherit a ghost rect. */
-    lastWindowHitShapeKey = "__empty__";
-    mainWindow.setResizable(true);
+    if (mainWindow.isMinimized()) return;
+    if (mainWindow.isFullScreen()) mainWindow.setFullScreen(false);
     resetLastWindowedBoundsIfIslandCorrupted();
     /**
-     * If the window is already at exactly these bounds (the case of the radial opened over the
-     * panel without a resize), applying them again is a pointless HWND recomposition — and every
-     * one of those is a flash risk on the transparent window. Closing the radial now leaves the
-     * geometry alone.
+     * Maximized counts as correct. `lastWindowedBounds` is frozen at the rect from BEFORE the
+     * maximize — the `resize`/`move` trackers ignore a maximized window — so the two rects always
+     * differ and `setBounds` would run for certain. And `setBounds` on a maximized window
+     * unmaximizes it without emitting `unmaximize`, leaving the title button showing "Restore" on a
+     * window that is no longer maximized. Reopening Settings is not a request to resize it.
      */
-    let boundsAlreadyCorrect = false;
-    try {
-      /**
-       * Maximized counts as correct. `lastWindowedBounds` is frozen at the rect from BEFORE the
-       * maximize — the `resize`/`move` trackers ignore a maximized window — so the two rects always
-       * differ and `setBounds` ran for certain. And `setBounds` on a maximized window unmaximizes
-       * it without emitting `unmaximize`, leaving the title button showing "Restore" on a window
-       * that is no longer maximized: the next hit maximizes instead of restoring. Reopening
-       * Settings (tray, `toggle-settings`, double-MMB) is not a request to change the window size.
-       */
-      boundsAlreadyCorrect =
-        mainWindow.isMaximized() ||
-        boundsApproxEqual(mainWindow.getBounds(), lastWindowedBounds);
-    } catch (e) {
-      boundsAlreadyCorrect = false;
-    }
-    if (!boundsAlreadyCorrect) {
+    if (mainWindow.isMaximized()) return;
+    if (!boundsApproxEqual(mainWindow.getBounds(), lastWindowedBounds)) {
       isUpdatingBounds = true;
       mainWindow.setBounds(lastWindowedBounds);
       isUpdatingBounds = false;
     }
-    mainWindow.setBackgroundColor("#00000000"); // Maintain transparency mask
-    mainWindow.setAlwaysOnTop(false);
-    mainWindow.setIgnoreMouseEvents(false);
-    try {
-      if (typeof mainWindow.setShape === "function") {
-        mainWindow.setShape([]);
-      }
-    } catch (e) {
-      /* ignore */
-    }
-    /** Island in `small` → windowed rect: the DWM reuses the texture and the clock looks like it “slides” into the panel. */
-    if (previousMode === "small") {
-      try {
-        setImmediate(() => {
-          try {
-            if (
-              mainWindow &&
-              !mainWindow.isDestroyed() &&
-              mainWindow.webContents &&
-              typeof mainWindow.webContents.invalidate === "function"
-            ) {
-              mainWindow.webContents.invalidate();
-            }
-          } catch (e) {
-            /* ignore */
-          }
-        });
-      } catch (e) {
-        /* ignore */
-      }
-    }
-  } else if (mode === "small") {
-    clearRadialMouseBlocking();
-    releaseRadialCursor();
-    clearTaskbarOverlay();
-    scheduleIdleMemoryCleanup(2500);
-    panelOverlayActive = false;
-    panelOverlayKeptWindow = false;
-    lastWindowHitShapeKey = "__empty__";
-    if (mainWindow.isFullScreen()) {
-      mainWindow.setFullScreen(false);
-    }
-    clearSkipTaskbarHideTimer();
-    try {
-      mainWindow.setSkipTaskbar(true);
-    } catch (e) {
-      /* ignore */
-    }
-    mainWindow.setBackgroundColor("#00000000"); // ESSENTIAL for zero-lag transparency
-    try {
-      mainWindow.setIgnoreMouseEvents(true);
-      mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    } catch (e) {
-      /* ignore */
-    }
-    applySmallModeCollapsedBounds(point);
-    mainWindow.setAlwaysOnTop(true, "screen-saver", 1);
-    mainWindow.setResizable(true);
-    try {
-      if (!mainWindow.isVisible()) mainWindow.showInactive();
-      mainWindow.webContents.setBackgroundThrottling(true);
-    } catch (e) {
-      /* ignore */
-    }
-    try {
-      if (typeof mainWindow.setShape === "function") {
-        mainWindow.setShape([]);
-      }
-    } catch (e) {
-      /* ignore */
-    }
+  } catch (e) {
+    isUpdatingBounds = false;
+    diagLog(`[Settings] applySettingsWindowBounds: ${e.message}`);
   }
-
 }
 
-/**
- * Recreate the BrowserWindow if it was closed/destroyed (e.g. after errors).
- *
- * `createWindow` only resolves on `ready-to-show` plus a 200 ms stabilization wait. Two gestures
- * inside that window — a tray double-click is the literal case — both cleared the guard above and
- * built TWO BrowserWindows: the second took `mainWindow`, the first was orphaned but still alive,
- * invisible, holding its own listeners and having already overwritten `lastWindowedBounds`.
- * Sharing the in-flight promise covers all four callers at once. The `.finally` reset is
- * load-bearing: without it a rejected create would wedge every later call.
- */
 let mainWindowCreation = null;
 async function ensureMainWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
@@ -2965,42 +2488,25 @@ async function ensureMainWindow() {
   return mainWindow;
 }
 
-function clearSkipTaskbarHideTimer() {
-  if (skipTaskbarHideTimer) {
-    clearTimeout(skipTaskbarHideTimer);
-    skipTaskbarHideTimer = null;
-  }
-}
-
 /**
- * Force windowed, interactive mode, then notify renderer to open settings.
- * Cancels the deferred skipTaskbar from showMenuAtCursor (fixes double-MMB → settings glitches).
- *
  * The single entry point for every way of asking for Settings: tray menu, tray click,
- * `toggle-settings` and double-MMB. Two things about arriving here from a minimized window, which
- * only the tray paths can do:
- *
- *   - `updateWindowSize` refuses to `setBounds` while minimized and queues into
- *     `pendingWindowSize` instead, so the queueing call has to come BEFORE `restore()` — Win32
- *     dispatches WM_SIZE synchronously, which means `onRestore` runs inside `restore()` and its
- *     `flushPendingWindowSizeIfNeeded()` is what actually applies the geometry. Queue after, and
- *     the flush applies the island's `small` and tells the renderer to re-shrink the window a beat
- *     after Settings opened.
- *   - that same `onRestore` then rewrites skipTaskbar from `nativeWindowSizeMode` and
- *     `rendererPanelVisible` — and `rendererPanelVisible` is still false here, since the renderer
- *     has not been sent `open-settings` yet. So `setSkipTaskbar(false)` is re-asserted afterwards,
- *     in a `setImmediate` that lands after the second `restore` listener's own deferred flush.
+ * `toggle-settings` and double-MMB.
  */
 function openSettingsFromMainProcess() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  clearSkipTaskbarHideTimer();
-  /** Steers `onRestore` away from its passive-hide branch and into the one that flushes. */
+  /**
+   * Take the wheel down first.
+   *
+   * Double-MMB is "open Settings", and it can land with the wheel on screen. When both surfaces
+   * shared a window the renderer did this for itself in the same commit that opened the panel;
+   * across two windows nobody but main is in a position to know, so main says so — otherwise the
+   * wheel stays up, always-on-top, over the Settings the gesture just asked for.
+   */
+  forceCloseRadial();
+  /** Steers `onRestore` away from its passive-hide branch. */
   windowBuriedPassive = false;
   try {
-    if (mainWindow.isMinimized()) {
-      updateWindowSize("windowed");
-      mainWindow.restore();
-    }
+    if (mainWindow.isMinimized()) mainWindow.restore();
   } catch (e) {
     diagLog(`[Settings] restore: ${e.message}`);
   }
@@ -3012,7 +2518,7 @@ function openSettingsFromMainProcess() {
   }
   mainWindow.setSkipTaskbar(false);
   mainWindow.setVisibleOnAllWorkspaces(false);
-  updateWindowSize("windowed");
+  applySettingsWindowBounds();
   mainWindow.setIgnoreMouseEvents(false);
   mainWindow.setOpacity(1);
   mainWindow.show();
@@ -3023,7 +2529,7 @@ function openSettingsFromMainProcess() {
   }
   mainWindow.focus();
   mainWindow.webContents.focus();
-  mainWindow.webContents.send("open-settings");
+  sendToSettings("open-settings");
   setImmediate(() => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     try {
@@ -3503,7 +3009,8 @@ function notifyRendererUpdateState(state, version, extra = {}) {
   if (previous.state !== state || previous.version !== lastKnownUpdate.version) refreshTrayMenuRef();
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try {
-    mainWindow.webContents.send("update-state", { ...lastKnownUpdate });
+    sendToSettings("update-state", { ...lastKnownUpdate });
+    sendToOverlay("update-state", { ...lastKnownUpdate });
   } catch (e) {
     /* ignore */
   }
@@ -4308,6 +3815,19 @@ app.whenReady().then(async () => {
     }
   });
 
+  /**
+   * Tell the wheel the file it reads has changed.
+   *
+   * The overlay hydrates from `get-full-config` at boot and then follows this. It never writes, so
+   * there is no merge to do and no race to lose: whatever the writer just saved is, by definition,
+   * the truth. Sending the whole blob rather than a diff is deliberate — the wheel then runs it
+   * through the same `normalizeStoredConfig` as a cold start, so the two windows cannot drift.
+   */
+  const broadcastConfigToOverlay = (payload) => {
+    if (!payload || typeof payload !== "object") return;
+    sendToOverlay("config-changed", payload);
+  };
+
   /** invoke: main processes and writes before the renderer moves on — more reliable than `send` while the app is closing. */
   ipcMain.handle("save-full-config", async (_event, payload) => {
     try {
@@ -4315,6 +3835,7 @@ app.whenReady().then(async () => {
         return { ok: false, error: "invalid payload" };
       }
       const ok = await persistFullConfigFromRendererAsync(payload);
+      if (ok) broadcastConfigToOverlay(payload);
       return ok ? { ok: true } : { ok: false, error: "write failed" };
     } catch (e) {
       diagLog(`[Persist] save-full-config handle: ${e.message}`);
@@ -4329,7 +3850,9 @@ app.whenReady().then(async () => {
         event.returnValue = false;
         return;
       }
-      event.returnValue = persistFullConfigFromRenderer(payload);
+      const ok = persistFullConfigFromRenderer(payload);
+      if (ok) broadcastConfigToOverlay(payload);
+      event.returnValue = ok;
     } catch (e) {
       diagLog(`[Persist] save-full-config-sync: ${e.message}`);
       event.returnValue = false;
@@ -4743,15 +4266,29 @@ app.whenReady().then(async () => {
   // 2. Create Window
   mainWindow = await createWindow();
 
+  /**
+   * And the wheel's window, warm from the start.
+   *
+   * Deliberately not awaited: Settings is what the first run puts on screen, and a global shortcut
+   * that arrives before this resolves goes through `ensureOverlayWindow` anyway. What this buys is
+   * that the ordinary case — an app sitting in the tray for hours — has a composed, painted,
+   * correctly-placed transparent surface long before anybody reaches for the middle button.
+   */
+  void ensureOverlayWindow().catch((e) => {
+    diagLog(`[Overlay] initial create failed: ${e.message}`);
+  });
+
   // Dashboard windowed: keep the taskbar button when the user switches to another app without using Minimize.
   // (Minimize uses skipTaskbar true — see minimize-window — so the icon only lives in the tray until restore.)
   mainWindow.on("blur", () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     try {
       if (mainWindow.isMinimized()) return;
-      if (nativeWindowSizeMode === "windowed" && rendererPanelVisible) {
-        mainWindow.setSkipTaskbar(false);
-      }
+      /**
+       * Settings is visible exactly when its panel is open — the window has no other state now —
+       * so this no longer needs the renderer to tell it (`set-panel-surface-visible`, gone).
+       */
+      if (mainWindow.isVisible()) mainWindow.setSkipTaskbar(false);
     } catch (e) {
       /* ignore */
     }
@@ -4857,7 +4394,12 @@ app.whenReady().then(async () => {
     try {
       await ensureMainWindow();
       if (!mainWindow || mainWindow.isDestroyed()) return;
-      mainWindow.webContents.send("switch-workspace", index);
+      /**
+       * To the WRITER, not the wheel. There is no wheel on screen when the tray is open, so this is
+       * purely a config change: Settings applies it, saves, and main broadcasts the new file to the
+       * overlay — which is how the wheel ends up on the right workspace next time it opens.
+       */
+      sendToSettings("radial-workspace-changed", index);
       /** The tick follows the renderer's save coming back round, not this send. */
       diagLog(`[Tray] switch-workspace -> ${index}`);
     } catch (e) {
@@ -5034,9 +4576,7 @@ app.whenReady().then(async () => {
 
         shortcutHoldActive = false;
         diagLog(`[ShortcutHold] Key released (${event.name}), sending shortcut-release`);
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send("shortcut-release");
-        }
+        sendToOverlay("shortcut-release");
       });
     } catch (e) {
       diagLog(`[ShortcutHold] Failed to initialize GlobalKeyboardListener: ${e.message}`);
@@ -5082,10 +4622,7 @@ app.whenReady().then(async () => {
           return;
         }
         lastShortcutTriggerAt = now;
-        mainWindow.webContents.send("open-menu", {
-          source: "shortcut",
-          closeOnly: true,
-        });
+        sendToOverlay("open-menu", { source: "shortcut", closeOnly: true });
         return;
       }
 
@@ -5106,9 +4643,7 @@ app.whenReady().then(async () => {
     };
     releaseRadialShortcut = () => {
       if (cachedRadialFlags.shortcutTriggerMode === "hold") {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send("shortcut-release");
-        }
+        sendToOverlay("shortcut-release");
       }
     };
 
@@ -5236,9 +4771,9 @@ app.whenReady().then(async () => {
 
         const success = globalShortcut.register(i.toString(), () => {
           diagLog(`[Shortcuts] Global numeric shortcut triggered: ${i}`);
-          if (workspaceShortcutsMenuOpen && mainWindow && !mainWindow.isDestroyed()) {
+          if (workspaceShortcutsMenuOpen) {
             diagLog(`[Shortcuts] Sending switch-workspace IPC: ${i - 1}`);
-            mainWindow.webContents.send("switch-workspace", i - 1);
+            sendToOverlay("switch-workspace", i - 1);
           }
         });
         if (!success) diagLog(`[Shortcuts] Failed to register workspace shortcut ${i}`);
@@ -6155,7 +5690,7 @@ app.whenReady().then(async () => {
       if (point.x === mmbLastCursor.x && point.y === mmbLastCursor.y) return;
       mmbLastCursor = point;
       try {
-        mainWindow.webContents.send("mmb-cursor", { x: point.x, y: point.y });
+        sendToOverlay("mmb-cursor", { x: point.x, y: point.y });
       } catch (e) {
         /* ignore */
       }
@@ -6211,7 +5746,7 @@ app.whenReady().then(async () => {
             mmbClickDownAt = 0;
             suppressNextMmbRelease = true;
             stopMmbCursorTracking();
-            mainWindow.webContents.send("open-menu", {
+            sendToOverlay("open-menu", {
               source: cachedRadialFlags.mouseTriggerMode === "click" ? "mmb-click" : "mmb",
               closeOnly: true,
             });
@@ -6326,9 +5861,7 @@ app.whenReady().then(async () => {
             mmbFirstDownAt = 0;
             continue;
           }
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send("mmb-release");
-          }
+          sendToOverlay("mmb-release");
         }
       }
     };
@@ -7680,26 +7213,15 @@ ipcMain.handle("execute-command", async (_event, command, commandType, options =
   }
 });
 
-// IPC: receives a command to hide the window
+/**
+ * Settings is done: take the window off screen.
+ *
+ * This used to have to ask which of three geometries it was in, because in `small` "hiding" meant
+ * collapsing into the idle overlay rather than actually hiding. The overlay is its own window now,
+ * so hiding Settings means hiding Settings.
+ */
 ipcMain.on("hide-window", () => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-
-  clearRadialMouseBlocking();
-  releaseRadialCursor();
-  clearTaskbarOverlay();
-  if (nativeWindowSizeMode === "small") {
-    windowBuriedPassive = false;
-    try {
-      mainWindow.setIgnoreMouseEvents(true);
-      applySmallModeCollapsedBounds(undefined);
-      if (!mainWindow.isVisible()) mainWindow.showInactive();
-      mainWindow.webContents.setBackgroundThrottling(true);
-    } catch (e) {
-      /* ignore */
-    }
-    scheduleIdleMemoryCleanup(2000);
-    return;
-  }
 
   windowBuriedPassive = true;
 
@@ -7819,13 +7341,13 @@ function performIdleMemoryCleanup() {
     diagLog("[Memory] Cleanup skipped: mainWindow not ready or destroyed");
     return;
   }
-  // Never perform cleanup while settings or radial menu is visibly active
-  if (rendererPanelVisible) {
-    diagLog("[Memory] Cleanup skipped: rendererPanelVisible=true");
+  // Never perform cleanup while settings or the wheel is visibly active
+  if (radialOpen) {
+    diagLog("[Memory] Cleanup skipped: the wheel is open");
     return;
   }
-  if (nativeWindowSizeMode !== "small" && !mainWindow.isMinimized() && mainWindow.isVisible()) {
-    diagLog(`[Memory] Cleanup skipped: window visible (mode=${nativeWindowSizeMode})`);
+  if (!mainWindow.isMinimized() && mainWindow.isVisible()) {
+    diagLog("[Memory] Cleanup skipped: Settings is on screen");
     return;
   }
 
@@ -7851,7 +7373,8 @@ function performIdleMemoryCleanup() {
   // 3. Notify renderer to run GC & clear unnecessary transient allocations
   try {
     if (mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-      mainWindow.webContents.send("zenith-clean-memory");
+      sendToSettings("zenith-clean-memory");
+      sendToOverlay("zenith-clean-memory");
     }
   } catch (_) {
     /* ignore */
@@ -8003,21 +7526,28 @@ function stopForegroundFocusHelper() {
 }
 
 /**
- * Windows applies the foreground lock to anyone who did not receive the last input: the radial is
+ * Windows applies the foreground lock to anyone who did not receive the last input: the wheel is
  * shown with `showInactive()` and neither `focus()` nor `app.focus({ steal: true })` gives it the
  * keyboard — the keys keep landing in the app underneath. Only by sharing the input queue with the
  * foreground thread (in the helper) does `SetForegroundWindow` go through.
+ *
+ * That comment was written for the wheel and now finally addresses it. While one HWND served both
+ * surfaces this was reachable only from a licence-gate text field, and the wheel made do with a
+ * plain `focus()` on a window Windows had every right to refuse — which is the sort of thing that
+ * works on the machine it was written on. The overlay is the window that needs it: Escape and the
+ * workspace number keys are read from the document, so if the keyboard never arrives they do
+ * nothing at all.
  */
-function stealForegroundForMainWindow() {
+function stealForegroundForOverlay() {
   if (process.platform !== "win32") return;
-  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
+  if (!overlayWindow || overlayWindow.isDestroyed() || !overlayWindow.isVisible()) return;
   const now = Date.now();
   if (now < foregroundStealBusyUntil) return;
   foregroundStealBusyUntil = now + 250;
 
   let hwnd;
   try {
-    hwnd = mainWindow.getNativeWindowHandle().readBigUInt64LE(0).toString();
+    hwnd = overlayWindow.getNativeWindowHandle().readBigUInt64LE(0).toString();
   } catch (e) {
     diagLog(`[Foreground] HWND unavailable: ${e.message}`);
     return;
@@ -8026,12 +7556,6 @@ function stealForegroundForMainWindow() {
   writeForegroundFocus(hwnd);
 }
 
-/**
- * Surfaces with a text field (the licence gate) ask for the keyboard explicitly. The renderer only
- * sends this when `document.hasFocus()` is false, so we do NOT trust `isFocused()` here: Electron
- * reports focus as soon as `focus()` is called, even when Windows refused it — that optimistic read
- * is exactly what blocked the native steal and forced the click.
- */
 /** The executable's real version — the settings footer shows it. */
 /**
  * Was the app opened by Windows startup?
@@ -8163,38 +7687,6 @@ const installUpdateNow = () => {
 };
 
 ipcMain.on("install-update-now", installUpdateNow);
-
-ipcMain.on("request-keyboard-focus", () => {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  /** Before the reveal the window is still hidden; the renderer asks again right after. */
-  if (!mainWindow.isVisible()) return;
-  try {
-    windowBuriedPassive = false;
-    mainWindow.setIgnoreMouseEvents(false);
-    if (process.platform === "win32") {
-      mainWindow.setAlwaysOnTop(true, "screen-saver", 1);
-    }
-    app.focus({ steal: true });
-    mainWindow.moveTop();
-    mainWindow.focus();
-    mainWindow.webContents.focus();
-  } catch (e) {
-    /* ignore */
-  }
-
-  stealForegroundForMainWindow();
-  /** Electron's `focus()` only takes effect once the HWND really is the foreground one. */
-  const settle = setTimeout(() => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    try {
-      mainWindow.focus();
-      mainWindow.webContents.focus();
-    } catch (e) {
-      /* ignore */
-    }
-  }, 180);
-  settle.unref?.();
-});
 
 ipcMain.on("show-window", () => {
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -8394,277 +7886,39 @@ ipcMain.handle("get-startup-apps", async () => {
   });
 });
 
-// IPC: Toggle Window Size
-ipcMain.on("set-window-size", (event, mode, anchorScreenPoint) => {
-  try {
-    updateWindowSize(mode, anchorScreenPoint);
-  } catch (e) {
-    diagLog(`[set-window-size] ${e.message}`);
-  }
-});
-
-/** Same as set-window-size but invoke() so the renderer can await before painting (avoids one frame at windowed bounds). */
-ipcMain.handle("apply-window-size", (event, mode, anchorScreenPoint) => {
-  try {
-    updateWindowSize(mode, anchorScreenPoint);
-    return true;
-  } catch (e) {
-    diagLog(`[apply-window-size] ${e.message}`);
-    return false;
-  }
-});
-
-/** Guarantees clicks reach the renderer after opening a widget/radial — clears the `small` island's passthrough. */
-ipcMain.handle("ensure-window-interactive", () => {
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
-  try {
-    if (typeof mainWindow.setShape === "function") {
-      mainWindow.setShape([]);
-    }
-  } catch (e) {
-    /* ignore */
-  }
-  lastWindowHitShapeKey = "__empty__";
-  try {
-    mainWindow.setIgnoreMouseEvents(false);
-  } catch (e) {
-    /* ignore */
-  }
-  return true;
-});
-
-/** Compatibility: the stable geometry already removes the small↔fullscreen transition. */
-let radialTransitionWarmed = false;
-ipcMain.handle("warm-radial-transition", () => {
-  if (radialTransitionWarmed) return true;
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
-  try {
-    if (mainWindow.isMinimized()) return false;
-  } catch (e) {
-    return false;
-  }
-  if (nativeWindowSizeMode !== "small") {
-    radialTransitionWarmed = true;
-    return true;
-  }
-
-  /** `small` and the radial already share the same bounds; there is no native transition to warm. */
-  radialTransitionWarmed = true;
-  return true;
+/**
+ * The wheel is finished: put the overlay back to an invisible, click-through box.
+ *
+ * Deliberately NOT `hide-window`, which is Settings'. Two windows, two lifecycles — conflating them
+ * is what made one HWND serve two jobs in the first place.
+ */
+ipcMain.on("close-radial", () => {
+  collapseOverlayToIdle();
 });
 
 /**
- * Idle with no HUD: keeps only the radial's compact square, fully transparent and with mouse
- * passthrough. It is not a monitor-sized layer and there is no hide/show/resize on open.
+ * Wheel → writer. The overlay reads the config and never writes it; the settings renderer is the
+ * only thing that touches disk, so anything the wheel changes is forwarded there to be saved.
  */
-ipcMain.handle("collapse-idle-overlay", () => {
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
-  try {
-    if (mainWindow.isMinimized()) return false;
-  } catch (e) {
-    return false;
-  }
-  /** Only in `small`: in fullscreen/windowed either the radial or a panel is using the window. */
-  if (nativeWindowSizeMode !== "small") return false;
-
-  const cur = mainWindow.getBounds();
-  /** Same monitor the next open will use — see `applySmallModeCollapsedBounds`. */
-  const disp = radialTargetDisplay();
-  const nb = smallModeBounds(disp.bounds);
-  /**
-   * A PASSTHROUGH answer, not a rect. This key means one thing only — ""/"__empty__" is "let the
-   * mouse through", anything else is "there are HUD regions to click" (see its declaration and
-   * `applyMousePolicyAfterReveal`) — and a bounds blob went in here, which reads as the second.
-   * Any reveal that does not come through renderer IPC then took the interactive branch:
-   * `second-instance` is the one a user can reach, by launching Rovyl again from the Start menu
-   * while it sits idle, and it left this fully transparent square swallowing every click on the
-   * monitor the wheel is parked on — the exact failure `applyMousePolicyAfterReveal` was written to
-   * prevent. The rect needs no home here; `getBounds()` already has it, and the sibling in
-   * `updateWindowSize`’s `small` branch has always written the constant.
-   */
-  lastWindowHitShapeKey = "__empty__";
-  try {
-    if (typeof mainWindow.setShape === "function") mainWindow.setShape([]);
-  } catch (e) {
-    /* ignore */
-  }
-  try {
-    mainWindow.setIgnoreMouseEvents(true);
-    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    if (!mainWindow.isVisible()) mainWindow.showInactive();
-    mainWindow.webContents.setBackgroundThrottling(true);
-  } catch (e) {
-    /* ignore */
-  }
-  if (!boundsApproxEqual(cur, nb)) {
-    try {
-      mainWindow.setBounds(nb);
-    } catch (e) {
-      /* ignore */
-    }
-  }
-  windowBuriedPassive = false;
-  diagLog("[Overlay] Stable idle: transparent radial surface and mouse passthrough.");
-  scheduleIdleMemoryCleanup(2500);
-  return true;
+ipcMain.on("radial-workspace-changed", (_event, index) => {
+  const n = Number(index);
+  if (!Number.isInteger(n) || n < 0) return;
+  sendToSettings("radial-workspace-changed", n);
 });
 
-/** Re-run `small` overlay (forward mouse) — refreshes Windows hit-testing after fullscreen → HUD-only. */
-ipcMain.handle("reapply-small-overlay", () => {
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
-  try {
-    if (mainWindow.isMinimized()) return false;
-  } catch (e) {
-    return false;
-  }
-  /** Widget / radial / panel — never regress fullscreen|windowed → small (it leaves clicks “stuck” until the useEffect realigns). */
-  if (nativeWindowSizeMode === "fullscreen" || nativeWindowSizeMode === "windowed") {
-    try {
-      mainWindow.setIgnoreMouseEvents(false);
-    } catch (e) {
-      /* ignore */
-    }
-    return true;
-  }
-  /** `small` mode: keep the radial's bounds and a stable transparent surface. */
-  try {
-    mainWindow.setIgnoreMouseEvents(true);
-    applySmallModeCollapsedBounds(undefined);
-    mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    if (!mainWindow.isVisible()) mainWindow.showInactive();
-    mainWindow.webContents.setBackgroundThrottling(true);
-  } catch (e) {
-    /* ignore */
-  }
-  return true;
+ipcMain.on("radial-direction-hint-seen", () => {
+  sendToSettings("radial-direction-hint-seen");
 });
 
-/**
- * Island: with `coordinateSpace: "screen"` we shrink the HWND to the island's rect — outside it the
- * mouse does not go through a fullscreen transparent topmost window (clicks in other apps stop
- * “jamming” the DWM).
- * Legacy: client coords + `setShape` on a fullscreen window.
- */
-ipcMain.handle("set-window-hit-shape", (event, rects, opts = {}) => {
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
-  try {
-    if (mainWindow.isMinimized()) return false;
-  } catch (e) {
-    return false;
-  }
-  const coordinateSpace =
-    opts && opts.coordinateSpace === "screen" ? "screen" : "client";
+ipcMain.on("radial-launch-fault", (_event, fault) => {
+  if (!fault || typeof fault !== "object") return;
+  sendToSettings("radial-launch-fault", fault);
+});
 
-  try {
-    if (!rects || !Array.isArray(rects) || rects.length === 0) {
-      if (lastWindowHitShapeKey === "__empty__") return true;
-      lastWindowHitShapeKey = "__empty__";
-      if (typeof mainWindow.setShape === "function") {
-        try {
-          mainWindow.setShape([]);
-        } catch (e) {
-          /* ignore */
-        }
-      }
-      /*
-       * Only in `small` mode should the mouse pass through by default. In fullscreen (radial),
-       * clearing the compact island unmounts the HUD and sends [] — we cannot apply forward here or
-       * the radial menu becomes “invisible” to clicks and looks like a tiny rectangle behind the island.
-       *
-       * `setImmediate`: the renderer can send `set-window-size` `windowed` in the same tick (opening the dashboard).
-       * If we expand to the whole monitor before that, the DWM shows a flashing rectangle. Defer the expand.
-       */
-      try {
-        if (nativeWindowSizeMode === "fullscreen" || nativeWindowSizeMode === "windowed") {
-          mainWindow.setIgnoreMouseEvents(false);
-        } else {
-          setImmediate(() => {
-            try {
-              if (!mainWindow || mainWindow.isDestroyed()) return;
-              if (mainWindow.isMinimized()) return;
-              if (nativeWindowSizeMode !== "small") return;
-              mainWindow.setIgnoreMouseEvents(true);
-              applySmallModeCollapsedBounds(undefined);
-              if (!mainWindow.isVisible()) mainWindow.showInactive();
-            } catch (e) {
-              /* ignore */
-            }
-          });
-        }
-      } catch (e) {
-        /* ignore */
-      }
-      try {
-        if (
-          mainWindow.webContents &&
-          typeof mainWindow.webContents.invalidate === "function"
-        ) {
-          mainWindow.webContents.invalidate();
-        }
-      } catch (e) {
-        /* ignore */
-      }
-      return true;
-    }
-
-    if (nativeWindowSizeMode === "small" && coordinateSpace === "screen") {
-      const u = unionScreenRects(rects);
-      if (!u || u.width < 3 || u.height < 3) return false;
-      const center = { x: u.x + u.width / 2, y: u.y + u.height / 2 };
-      const disp = screen.getDisplayNearestPoint(center);
-      const nb = clampBoundsToWorkArea(u, disp.workArea);
-      const key = JSON.stringify(nb);
-      if (key === lastWindowHitShapeKey) return true;
-      const cur = mainWindow.getBounds();
-      lastWindowHitShapeKey = key;
-      if (!boundsApproxEqual(cur, nb)) {
-        mainWindow.setBounds(nb);
-      }
-      try {
-        if (typeof mainWindow.setShape === "function") {
-          mainWindow.setShape([]);
-        }
-      } catch (e) {
-        /* ignore */
-      }
-      try {
-        mainWindow.setIgnoreMouseEvents(false);
-      } catch (e) {
-        /* ignore */
-      }
-      try {
-        if (
-          mainWindow.webContents &&
-          typeof mainWindow.webContents.invalidate === "function"
-        ) {
-          mainWindow.webContents.invalidate();
-        }
-      } catch (e) {
-        /* ignore */
-      }
-      return true;
-    }
-
-    if (typeof mainWindow.setShape !== "function") return false;
-    const normalized = rects.map((r) => ({
-      x: Math.round(r.x),
-      y: Math.round(r.y),
-      width: Math.max(1, Math.round(r.width)),
-      height: Math.max(1, Math.round(r.height)),
-    }));
-    const key = JSON.stringify(normalized);
-    if (key === lastWindowHitShapeKey) return true;
-    lastWindowHitShapeKey = key;
-    try {
-      mainWindow.setIgnoreMouseEvents(false);
-    } catch (e) {
-      /* ignore */
-    }
-    mainWindow.setShape(normalized);
-    return true;
-  } catch (e) {
-    return false;
-  }
+/** Writer → wheel: how far the Start Menu scan has got, so an empty wheel can say why. */
+ipcMain.on("publish-discovery-phase", (_event, phase) => {
+  if (phase !== "idle" && phase !== "waiting" && phase !== "scanning") return;
+  sendToOverlay("discovery-phase", phase);
 });
 
 // IPC: Minimize — hide from taskbar (tray-only), same idea as old “close” that stayed in the tray.
@@ -9749,6 +9003,7 @@ app.on("window-all-closed", (e) => {
 
 app.on("will-quit", () => {
   /** The pointer may be parked at the wheel's centre: give it back while the helper is alive. */
+  forceCloseRadial();
   releaseRadialCursor();
   /** Helpers first: while they live, the installer cannot touch the folder. */
   stopMouseHookForShutdown();

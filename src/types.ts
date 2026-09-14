@@ -287,7 +287,6 @@ export interface ElectronAPI {
   ) => Promise<LaunchResult>;
   hideWindow: () => void;
   showWindow: () => void;
-  requestKeyboardFocus?: () => void;
   getAppVersion?: () => Promise<string>;
   /**
    * Distribution channel, from the updater's point of view: 'store' (MSIX) and 'unsupported'
@@ -310,18 +309,12 @@ export interface ElectronAPI {
   appSupportsRecents?: (appName: string, appCommand: string) => Promise<boolean>;
   onOpenMenu: (
     callback: (data: {
-      x: number;
-      y: number;
       source?: "mmb" | "mmb-click" | "shortcut";
-      /** True when the main already applied fullscreen — avoids a second `applyWindowSize` in the renderer. */
-      preSizedByMain?: boolean;
-      /** The panel stays on screen under the radial — the renderer cannot close it. */
-      keepPanel?: boolean;
-      /** Screen rect of the panel; only when the window was widened and it needs repositioning. */
-      panelRect?: { x: number; y: number; width: number; height: number } | null;
-      /** Center already converted to the new HWND's coordinates; avoids stale metrics after Settings. */
+      /** Main already knows the wheel is open: this event must never open nor confirm a selection. */
+      closeOnly?: boolean;
+      /** Centre of the overlay window, in its own coordinates — never read `window.screenX/Y` instead. */
       clientPosition?: { x: number; y: number } | null;
-      /** Native origin matching the clientPosition/panelRect during the handshake. */
+      /** The overlay's origin on screen, as main set it a moment ago. */
       windowOrigin?: { x: number; y: number } | null;
       /** Authoritative viewport after the resize; the renderer may still report the Settings size. */
       clientSize?: { width: number; height: number } | null;
@@ -329,19 +322,53 @@ export interface ElectronAPI {
       paintToken?: number;
     }) => void,
   ) => () => void;
-  /**
-   * Before opening the radial from the main — cover the old frame (e.g. the dashboard on restore).
-   *
-   * `vacatePanel`: the panel must instead LEAVE the window's surface, because main is about to move
-   * the window out from under it. See `panelVacatingForRadial` in App.tsx.
-   */
-  onPrepareRadialShow?: (
-    callback: (payload: { vacatePanel?: boolean }) => void,
-  ) => () => void;
-  notifyRadialPrepPaintDone?: () => void;
   notifyRadialOpenPaintDone?: (paintToken: number) => void;
   /** The native window is already visible; releases the animation of the radial prepped at zero alpha. */
   onRadialNativeRevealed?: (callback: (paintToken: number) => void) => () => void;
+
+  /* ---- The overlay window's own channels. Only `radial.html` ever calls these. ---- */
+
+  /**
+   * The wheel has finished: main puts the overlay back to an invisible, click-through idle box.
+   *
+   * Separate from `hideWindow`, which belongs to the settings window — two windows, two lifecycles,
+   * and conflating them is exactly what made one HWND serve two jobs in the first place.
+   */
+  closeRadial?: () => void;
+  /** Main took the overlay down without being asked (game mode, quit, a gesture that never landed). */
+  onRadialHidden?: (callback: () => void) => () => void;
+  /** The config file changed on disk; the payload is the whole blob, as `getFullConfig` returns it. */
+  onConfigChanged?: (callback: (blob: any) => void) => () => void;
+  /** The settings window owns the Start Menu scan and says how far along it is. */
+  onDiscoveryPhase?: (
+    callback: (phase: 'idle' | 'waiting' | 'scanning') => void,
+  ) => () => void;
+  /** Wheel → writer: the user switched workspace mid-gesture; persist it. */
+  radialWorkspaceChanged?: (index: number) => void;
+  /** Wheel → writer: the direction-mode hint has been read and does not come back. */
+  radialDirectionHintSeen?: () => void;
+  /** Wheel → writer: a launch failed, and the card that reports it lives in the settings window. */
+  reportRadialLaunchFault?: (fault: {
+    raw: string;
+    details?: unknown;
+    appLabel?: string;
+    shortcut?: { workspaceIndex: number; appId: string; rootId: string };
+  }) => void;
+
+  /* ---- The same three, arriving in the settings window. Only `index.html` listens. ---- */
+
+  /** Settings → wheel: how far the Start Menu scan has got, so an empty wheel can say why. */
+  publishDiscoveryPhase?: (phase: 'idle' | 'waiting' | 'scanning') => void;
+  onRadialWorkspaceChanged?: (callback: (index: number) => void) => () => void;
+  onRadialDirectionHintSeen?: (callback: () => void) => () => void;
+  onRadialLaunchFault?: (
+    callback: (fault: {
+      raw: string;
+      details?: unknown;
+      appLabel?: string;
+      shortcut?: { workspaceIndex: number; appId: string; rootId: string };
+    }) => void,
+  ) => () => void;
   onOpenDashboard: (callback: () => void) => () => void;
   onMouseUp: (callback: () => void) => () => void;
   onMmbRelease: (callback: () => void) => () => void;
@@ -352,33 +379,8 @@ export interface ElectronAPI {
   onOpenSettings: (callback: () => void) => () => void;
   /** Fired when the OS hid the window to tray (not a real quit). */
   onWindowHidToTray: (callback: () => void) => () => void;
-  /** Main window minimize/restore — the panel can stay in React state but the island must come back on minimize. */
-  onMainWindowMinimized?: (
-    callback: (payload: { minimized: boolean }) => void,
-  ) => () => void;
-  onWindowNativeDisplayRestored: (
-    callback: (payload: {
-      mode: "small" | "fullscreen" | "windowed";
-    }) => void,
-  ) => () => void;
   onCleanMemory?: (callback: () => void) => () => void;
   onShortcutRelease?: (callback: () => void) => () => void;
-  setWindowSize: (
-    mode: "small" | "fullscreen" | "windowed",
-    /** Screen coordinates (e.g. cursor) — which monitor should receive the fullscreen/small overlay */
-    anchorScreenPoint?: { x: number; y: number },
-  ) => void;
-  /** Awaitable resize — use before showing the radial so the first paint is not still windowed bounds. */
-  applyWindowSize?: (
-    mode: "small" | "fullscreen" | "windowed",
-    anchorScreenPoint?: { x: number; y: number },
-  ) => Promise<boolean>;
-  /** Pre-warms small↔fullscreen once after startup (island HWND shrunk). */
-  warmRadialTransition?: () => Promise<boolean>;
-  /** Re-applies desktop passthrough overlay after closing a fullscreen widget (fixes flaky clicks on Windows). */
-  reapplySmallOverlay?: () => Promise<boolean>;
-  /** Idle: shrinks the HWND into the corner (no fullscreen transparent layer). */
-  collapseIdleOverlay?: () => Promise<boolean>;
   /**
    * Side of the radial's box (px) + whether the position is fixed — the main sizes the menu window
    * with this. `fullBleed` overrides the box entirely: the dimming reaches the edge, so the window
@@ -399,26 +401,6 @@ export interface ElectronAPI {
   setRadialCursorCapture?: (enabled: boolean) => void;
   /** Pulls the cursor back to the center without ending the gesture — used when it drifts off the window. */
   parkRadialCursor?: () => void;
-  /** Panel (Settings/Welcome) actually in view — decides whether the radial opens on top of it. */
-  setPanelSurfaceVisible?: (visible: boolean) => void;
-  /** Clears island passthrough / hit-shape so widgets and panels receive clicks immediately. */
-  ensureWindowInteractive?: () => Promise<boolean>;
-  /** Windows/Linux: island — `coordinateSpace: "screen"` shrinks the HWND; without it, client coords + setShape. */
-  setWindowHitShape?: (
-    rects: Array<{ x: number; y: number; width: number; height: number }>,
-    opts?: { coordinateSpace?: "screen" | "client" },
-  ) => Promise<boolean>;
-  /** 0–1; used to hide the window during fullscreen resize to avoid DWM stretching the old settings frame (flash). */
-  setWindowOpacity: (opacity: number) => void;
-  /** Schedules a full Chromium repaint — helps transparent frameless windows on Windows after show/resize. */
-  invalidatePaint?: () => Promise<boolean>;
-  /** Webview area on screen — prefer it over `screenX`/`screenY` when computing hit-shape after a resize. */
-  getMainWindowContentBounds?: () => Promise<{
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  } | null>;
   setGameMode: (config: GameModeConfig) => void;
   /**
    * Main enacts this one, so it has to hold the flags BEFORE a wheel opens -- the global shortcut

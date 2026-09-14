@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0"
+    />
+    <title>Rovyl</title>
+    <style>
+      /*
+        The overlay's document, and nothing else.
+
+        `index.html` carries a whole design system — range sliders, scrollbars, a type scale, a
+        shadow scale — because Settings is a real interface. The wheel is a transparent square on
+        the desktop that draws one component, so what it needs is the absence of everything: no
+        background of its own at any level, no scrollbars, no selection, no overscroll.
+
+        Nothing here may paint an opaque pixel. A background on `html`, `body` or `#root` is a
+        rectangle the size of the window on top of whatever the user was looking at, which is
+        precisely the flash this split was meant to end.
+      */
+      html {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
+      }
+
+      html,
+      body {
+        background-color: transparent;
+        color: #ffffff;
+        overflow: hidden;
+        user-select: none;
+        margin: 0;
+        padding: 0;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        cursor: default;
+      }
+
+      #root {
+        width: 100%;
+        height: 100%;
+        background-color: transparent;
+        /* Radial HUD shadows can paint outside the box — don't use 100vw (creates phantom scroll). */
+        overflow: visible;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/radial-main.tsx"></script>
+  </body>
+</html>

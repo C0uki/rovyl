@@ -1,8 +1,12 @@
 import fs from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const LUCIDE_ICON_SET_ID = "virtual:lucide-icon-set";
 const RESOLVED_LUCIDE_ICON_SET_ID = "\0" + LUCIDE_ICON_SET_ID;
@@ -87,6 +91,19 @@ export default defineConfig({
      * that would otherwise have kept most of it off the critical path.
      */
     rollupOptions: {
+      /**
+       * Two documents, because there are two windows.
+       *
+       * `index.html` is Settings and `radial.html` is the wheel's overlay. They share components
+       * and a stylesheet but not an entry, which is the point: the settings shell, the icon picker
+       * and the locale tables are unreachable from the wheel's graph, so nothing puts them in front
+       * of its first paint by accident. `scripts/verify-renderer-budget.mjs` measures
+       * `radial.html` for exactly that reason.
+       */
+      input: {
+        index: resolve(__dirname, "index.html"),
+        radial: resolve(__dirname, "radial.html"),
+      },
       output: {
         manualChunks(id) {
           if (id.includes("node_modules/react/") || id.includes("node_modules/react-dom/")) {

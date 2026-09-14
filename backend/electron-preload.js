@@ -12,8 +12,6 @@ contextBridge.exposeInMainWorld("electron", {
     ipcRenderer.invoke("execute-command", command, commandType, options),
   hideWindow: () => ipcRenderer.send("hide-window"),
   showWindow: () => ipcRenderer.send("show-window"),
-  /** Surfaces with a text field (the license gate) need the HWND in the foreground to receive keys. */
-  requestKeyboardFocus: () => ipcRenderer.send("request-keyboard-focus"),
   getAppVersion: () => ipcRenderer.invoke("get-app-version"),
   /** Who updates: "store" (MSIX) and "unsupported" (not yet packaged) have no updater of their own. */
   getBuildChannel: () => ipcRenderer.invoke("get-build-channel"),
@@ -35,20 +33,14 @@ contextBridge.exposeInMainWorld("electron", {
     return () => ipcRenderer.removeListener("open-menu", listener);
   },
   /**
-   * zenith-verify:radial-handshake-preload — Main is about to show the radial — paint a neutral
-   * cover and confirm before `open-menu` (avoids a flash after minimize).
+   * zenith-verify:radial-handshake-preload — confirms the wheel's DOM has been through a paint
+   * before main reveals the overlay window.
    *
-   * The payload carries `vacatePanel` when the panel has to leave the surface rather than just be
-   * covered: main is about to MOVE the window out from under it (see `panelVacatingForRadial`).
+   * There used to be a `prepare-radial-show` / `radial-prep-paint-done` pass in front of this one,
+   * whose whole job was to get Settings off the shared surface before main could move the window.
+   * The wheel has its own window now and nothing else has ever been drawn on it, so there is
+   * nothing to clear and the first handshake is gone.
    */
-  onPrepareRadialShow: (callback) => {
-    const listener = (_event, payload) => callback(payload || {});
-    ipcRenderer.on("prepare-radial-show", listener);
-    return () => ipcRenderer.removeListener("prepare-radial-show", listener);
-  },
-  notifyRadialPrepPaintDone: () =>
-    ipcRenderer.send("radial-prep-paint-done"),
-  /** Confirms the radial's DOM has already been through a paint before main reveals the HWND. */
   notifyRadialOpenPaintDone: (paintToken) =>
     ipcRenderer.send("radial-open-paint-done", paintToken),
   /** Main revealed the HWND already painted; only now may the visual animation leave the transparent frame. */
@@ -89,19 +81,6 @@ contextBridge.exposeInMainWorld("electron", {
     ipcRenderer.on("window-hid-to-tray", listener);
     return () => ipcRenderer.removeListener("window-hid-to-tray", listener);
   },
-  onMainWindowMinimized: (callback) => {
-    const listener = (_event, payload) => callback(payload);
-    ipcRenderer.on("main-window-minimized", listener);
-    return () =>
-      ipcRenderer.removeListener("main-window-minimized", listener);
-  },
-  /** After minimize→restore (Windows transparent window): main process reapplies bounds + hit-testing. */
-  onWindowNativeDisplayRestored: (callback) => {
-    const listener = (event, payload) => callback(payload);
-    ipcRenderer.on("window-native-display-restored", listener);
-    return () =>
-      ipcRenderer.removeListener("window-native-display-restored", listener);
-  },
   onCleanMemory: (callback) => {
     const listener = () => callback();
     ipcRenderer.on("zenith-clean-memory", listener);
@@ -112,14 +91,58 @@ contextBridge.exposeInMainWorld("electron", {
     ipcRenderer.on("shortcut-release", listener);
     return () => ipcRenderer.removeListener("shortcut-release", listener);
   },
-  setWindowSize: (mode, anchorScreenPoint) =>
-    ipcRenderer.send("set-window-size", mode, anchorScreenPoint),
-  applyWindowSize: (mode, anchorScreenPoint) =>
-    ipcRenderer.invoke("apply-window-size", mode, anchorScreenPoint),
-  ensureWindowInteractive: () => ipcRenderer.invoke("ensure-window-interactive"),
-  warmRadialTransition: () => ipcRenderer.invoke("warm-radial-transition"),
-  reapplySmallOverlay: () => ipcRenderer.invoke("reapply-small-overlay"),
-  collapseIdleOverlay: () => ipcRenderer.invoke("collapse-idle-overlay"),
+  /* ---- The overlay window's own channels ---- */
+
+  /** The wheel is finished: main returns the overlay to an invisible, click-through idle box. */
+  closeRadial: () => ipcRenderer.send("close-radial"),
+  /** Main took the wheel down without being asked (Settings opened over it, quit). */
+  onRadialHidden: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("radial-hidden", listener);
+    return () => ipcRenderer.removeListener("radial-hidden", listener);
+  },
+  /**
+   * The config file changed. Only the settings window writes it, so the wheel follows this rather
+   * than tracking its own copy — the payload is the whole blob, as `getFullConfig` returns it.
+   */
+  onConfigChanged: (callback) => {
+    const listener = (_event, blob) => callback(blob);
+    ipcRenderer.on("config-changed", listener);
+    return () => ipcRenderer.removeListener("config-changed", listener);
+  },
+  onDiscoveryPhase: (callback) => {
+    const listener = (_event, phase) => callback(phase);
+    ipcRenderer.on("discovery-phase", listener);
+    return () => ipcRenderer.removeListener("discovery-phase", listener);
+  },
+  /** Wheel → writer. Applied locally for the frame, saved by the settings window. */
+  radialWorkspaceChanged: (index) =>
+    ipcRenderer.send("radial-workspace-changed", index),
+  radialDirectionHintSeen: () => ipcRenderer.send("radial-direction-hint-seen"),
+  reportRadialLaunchFault: (fault) =>
+    ipcRenderer.send("radial-launch-fault", fault),
+
+  /* ---- The same three, arriving in the settings window ---- */
+
+  onRadialWorkspaceChanged: (callback) => {
+    const listener = (_event, index) => callback(index);
+    ipcRenderer.on("radial-workspace-changed", listener);
+    return () => ipcRenderer.removeListener("radial-workspace-changed", listener);
+  },
+  onRadialDirectionHintSeen: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("radial-direction-hint-seen", listener);
+    return () => ipcRenderer.removeListener("radial-direction-hint-seen", listener);
+  },
+  onRadialLaunchFault: (callback) => {
+    const listener = (_event, fault) => callback(fault);
+    ipcRenderer.on("radial-launch-fault", listener);
+    return () => ipcRenderer.removeListener("radial-launch-fault", listener);
+  },
+  /** Writer → wheel: how far the Start Menu scan has got. */
+  publishDiscoveryPhase: (phase) =>
+    ipcRenderer.send("publish-discovery-phase", phase),
+
   setRadialViewport: (payload) =>
     ipcRenderer.send("set-radial-viewport", payload),
   /** Clickless execution: main parks the pointer at the wheel's centre and gives it back on close. */
@@ -127,20 +150,6 @@ contextBridge.exposeInMainWorld("electron", {
     ipcRenderer.send("set-radial-cursor-capture", !!enabled),
   /** Pulls the pointer back to the centre mid-gesture — does not end it, does not touch the return point. */
   parkRadialCursor: () => ipcRenderer.send("park-radial-cursor"),
-  /** Critical geometry state: the next shortcut can land on the same tick as the Settings close. */
-  setPanelSurfaceVisible: (visible) => {
-    try {
-      return !!ipcRenderer.sendSync("set-panel-surface-visible", !!visible);
-    } catch (_) {
-      return false;
-    }
-  },
-  setWindowHitShape: (rects, opts) =>
-    ipcRenderer.invoke("set-window-hit-shape", rects, opts || {}),
-  setWindowOpacity: (opacity) => ipcRenderer.send("set-window-opacity", opacity),
-  invalidatePaint: () => ipcRenderer.invoke("invalidate-paint"),
-  getMainWindowContentBounds: () =>
-    ipcRenderer.invoke("get-main-window-content-bounds"),
   setGameMode: (config) => ipcRenderer.send("set-game-mode", config),
   /** Main owns the taskbar helper; the renderer only ever states what the switches say. */
   setTaskbarOverlay: (config) => ipcRenderer.send("set-taskbar-overlay", config),
