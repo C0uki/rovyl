@@ -4,6 +4,8 @@ import {
   annularSectorPath,
   polarPoint,
   sectorBoundsDeg,
+  sectorBeamEndStop,
+  sectorCentreDeg,
   sectorGradientStops,
   SECTOR_EDGE_ALPHA,
   SECTOR_FILL_ALPHA,
@@ -185,13 +187,40 @@ export const WheelPreview: React.FC<{ config: UIConfig; apps: AppItem[] }> = ({ 
       (sectorOuterRadiusFull * SECTOR_SEAM_FALLOFF_SCALE) / (sectorOuterRadius * SECTOR_SEAM_REACH),
     ),
   );
-  const sectorGradient = (id: string, color: string, stops: { offset: number; opacity: number }[]) => (
-    <radialGradient id={id} cx="50%" cy="50%" r="50%">
-      {stops.map((stop, index) => (
-        <stop key={index} offset={stop.offset.toFixed(4)} stopColor={color} stopOpacity={stop.opacity.toFixed(4)} />
-      ))}
-    </radialGradient>
-  );
+  /** The wheel's own beam: straight out along each wedge's bisector. See `RadialSectors`. */
+  const sectorBeamEnd = sectorBeamEndStop(items.length, sectorInnerStop);
+  const sectorLinearBeam = sectorBeamEnd !== null;
+  const sectorBeamFadeEnd = sectorBeamEnd ?? 1;
+  const sectorSeamEnd = sectorOuterRadius * SECTOR_SEAM_REACH;
+  const sectorBeamId = (index: number) => `zs-wheel-beam${sectorLinearBeam ? `-${index}` : ''}`;
+  const sectorEdgeId = (index: number) => `zs-wheel-beam-edge${sectorLinearBeam ? `-${index}` : ''}`;
+  const sectorGradient = (
+    id: string,
+    color: string,
+    stops: { offset: number; opacity: number }[],
+    deg: number | null,
+    length: number,
+  ) => {
+    const children = stops.map((stop, index) => (
+      <stop key={index} offset={stop.offset.toFixed(4)} stopColor={color} stopOpacity={stop.opacity.toFixed(4)} />
+    ));
+    if (deg === null) {
+      return <radialGradient id={id} cx="50%" cy="50%" r="50%">{children}</radialGradient>;
+    }
+    const far = polarPoint(sectorOuterRadius, length, deg);
+    return (
+      <linearGradient
+        id={id}
+        gradientUnits="userSpaceOnUse"
+        x1={sectorOuterRadius}
+        y1={sectorOuterRadius}
+        x2={far.x.toFixed(2)}
+        y2={far.y.toFixed(2)}
+      >
+        {children}
+      </linearGradient>
+    );
+  };
 
   /**
    * The dimming is drawn on the stage rather than inside the scaled layer, with the radius scaled
@@ -242,12 +271,42 @@ export const WheelPreview: React.FC<{ config: UIConfig; apps: AppItem[] }> = ({ 
             >
               {/* The wheel's own three gradients — fill, lit edges, seams. See `RadialSectors`. */}
               <defs>
-                {sectorGradient('zs-wheel-beam', hoverColor,
-                  sectorGradientStops(sectorInnerStop, sectorFalloffStop, SECTOR_FILL_ALPHA[0], SECTOR_FILL_ALPHA[1]))}
-                {sectorGradient('zs-wheel-beam-edge', hoverColor,
-                  sectorGradientStops(sectorInnerStop, sectorFalloffStop, SECTOR_EDGE_ALPHA[0], SECTOR_EDGE_ALPHA[1]))}
-                {sectorGradient('zs-wheel-beam-seam', '#FFFFFF',
-                  sectorGradientStops(sectorSeamInnerStop, sectorSeamFalloffStop, SECTOR_SEAM_ALPHA[0], SECTOR_SEAM_ALPHA[1]))}
+                {/* One pair per wedge, because each one is aimed somewhere else. */}
+                {(sectorLinearBeam ? items : [null]).map((_, index) => (
+                  <React.Fragment key={`grad-${index}`}>
+                    {sectorGradient(
+                      sectorBeamId(index), hoverColor,
+                      sectorGradientStops(
+                        sectorInnerStop, sectorFalloffStop,
+                        SECTOR_FILL_ALPHA[0], SECTOR_FILL_ALPHA[1], sectorBeamFadeEnd,
+                      ),
+                      sectorLinearBeam ? sectorCentreDeg(index, items.length) : null,
+                      sectorOuterRadius,
+                    )}
+                    {sectorGradient(
+                      sectorEdgeId(index), hoverColor,
+                      sectorGradientStops(
+                        sectorInnerStop, sectorFalloffStop,
+                        SECTOR_EDGE_ALPHA[0], SECTOR_EDGE_ALPHA[1], sectorBeamFadeEnd,
+                      ),
+                      sectorLinearBeam ? sectorCentreDeg(index, items.length) : null,
+                      sectorOuterRadius,
+                    )}
+                  </React.Fragment>
+                ))}
+                {items.map((_, index) => (
+                  <React.Fragment key={`seam-grad-${index}`}>
+                    {sectorGradient(
+                      `zs-wheel-beam-seam-${index}`, '#FFFFFF',
+                      sectorGradientStops(
+                        sectorSeamInnerStop, sectorSeamFalloffStop,
+                        SECTOR_SEAM_ALPHA[0], SECTOR_SEAM_ALPHA[1],
+                      ),
+                      sectorBoundsDeg(index, items.length).startDeg,
+                      sectorSeamEnd,
+                    )}
+                  </React.Fragment>
+                ))}
               </defs>
               {items.map((item, index) => {
                 const { startDeg, endDeg } = sectorBoundsDeg(index, items.length);
@@ -258,8 +317,8 @@ export const WheelPreview: React.FC<{ config: UIConfig; apps: AppItem[] }> = ({ 
                   <React.Fragment key={item.id}>
                     <path
                       d={annularSectorPath(sectorInnerRadius, sectorOuterRadius, startDeg, endDeg)}
-                      fill="url(#zs-wheel-beam)"
-                      stroke="url(#zs-wheel-beam-edge)"
+                      fill={`url(#${sectorBeamId(index)})`}
+                      stroke={`url(#${sectorEdgeId(index)})`}
                       strokeWidth={1.25}
                       vectorEffect="non-scaling-stroke"
                       /** The same lit slice as the tiles': the preview shows one aim, not a live one. */
@@ -270,7 +329,7 @@ export const WheelPreview: React.FC<{ config: UIConfig; apps: AppItem[] }> = ({ 
                       y1={near.y}
                       x2={far.x}
                       y2={far.y}
-                      stroke="url(#zs-wheel-beam-seam)"
+                      stroke={`url(#zs-wheel-beam-seam-${index})`}
                       strokeWidth={1}
                       vectorEffect="non-scaling-stroke"
                     />

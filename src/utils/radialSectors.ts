@@ -20,6 +20,11 @@ export function sectorBoundsDeg(index: number, count: number): { startDeg: numbe
   return { startDeg: centreDeg - sliceAngle / 2, endDeg: centreDeg + sliceAngle / 2 };
 }
 
+/** The direction item `index` is aimed at — the bisector its highlight runs along. */
+export function sectorCentreDeg(index: number, count: number): number {
+  return index * (360 / count) - 90;
+}
+
 /**
  * Which item a displacement from the centre points at. `count` must be > 0.
  *
@@ -102,7 +107,8 @@ const FALLOFF_SAMPLES = [
  *
  * Two regions. From the dead zone out to `falloffStop` the wedge holds near full strength, ramping
  * gently from `nearAlpha` to `farAlpha` — that is the part with the icon in it, and it has to read
- * as a lit SECTION. Past it the alpha falls as `(1 - t)²` all the way to the rim.
+ * as a lit SECTION. Past it the alpha falls as `(1 - t)²` all the way to `endStop`, which is the
+ * rim unless the caller knows the shape runs out sooner along the gradient's own axis.
  *
  * The square matters twice. Its slope is zero at the end, so the wedge arrives at nothing instead
  * of stopping at something — there is no radius at which a boundary appears. And it is steep at
@@ -115,15 +121,61 @@ export function sectorGradientStops(
   falloffStop: number,
   nearAlpha: number,
   farAlpha: number,
+  endStop: number = 1,
 ): { offset: number; opacity: number }[] {
-  const plateau = Math.min(0.98, Math.max(innerStop + 0.01, falloffStop));
+  const end = Math.min(1, Math.max(0.05, endStop));
+  /**
+   * Where the hold has to have STARTED, which is not the dead zone when the run is a straight line.
+   *
+   * A wedge point at radius `r`, `θ` off the axis, falls at `r·cosθ` along that line — so the
+   * nearest thing the wedge owns is the corner of its dead zone, foreshortened by the same `end`
+   * the rim's corners are. Starting the hold at `innerStop` would leave those corners in front of
+   * the first stop, holding `nearAlpha` flat over a strip that is meant to be inside the hub.
+   */
+  const start = Math.min(end - 0.03, innerStop * end);
+  /**
+   * The hold keeps its true reach where the run is long enough to afford it, and gives way when it
+   * is not: past this the dissolve would have fewer pixels than it needs and the wedge would end on
+   * a step. Both are worse than a highlight that hugs the wheel a little more closely.
+   */
+  const plateau = Math.min(
+    end - 0.02,
+    Math.max(start + 0.01, Math.min(falloffStop, start + 0.6 * (end - start))),
+  );
   return [
-    { offset: innerStop, opacity: nearAlpha },
+    { offset: start, opacity: nearAlpha },
     ...FALLOFF_SAMPLES.map((t) => ({
-      offset: plateau + t * (1 - plateau),
+      offset: plateau + t * (end - plateau),
       opacity: farAlpha * (1 - t) * (1 - t),
     })),
+    /** Past the point where the fade landed on zero there is only zero — see `sectorBeamEndStop`. */
+    ...(end < 1 ? [{ offset: 1, opacity: 0 }] : []),
   ];
+}
+
+/**
+ * Where a wedge's LINEAR beam must have reached zero — or `null` when it must not be linear at all.
+ *
+ * The beam runs straight out along the wedge's bisector, so it fades in bands across that
+ * direction instead of in rings around the hub. The last thing the wedge has on screen is a
+ * CORNER, out where a straight side meets the rim, and a corner sits half a slice off-axis — it
+ * therefore falls on the band `cos(half slice)` along. Land the zero there and the corners, the
+ * arc between them and everything past it are already nothing: the wedge still reaches the frame
+ * having disappeared, which is the property the radial version was built around and the one a
+ * curved cut across the desktop would cost.
+ *
+ * `null` is the two cases where that cannot be bought:
+ *  - Two items or one. A half-plane's straight side is a full 90° off its bisector, so the whole
+ *    diameter lies on ONE band: no gradient along that axis fades it, and it ends at the frame at
+ *    whatever alpha it was holding.
+ *  - A dead zone so large against the rim that the wedge's corners are behind it. There is no
+ *    room left between the two for a dissolve, and what is drawn would be a step.
+ * Both go back to the ring, where every ray fades alike and neither can happen.
+ */
+export function sectorBeamEndStop(count: number, innerStop: number): number | null {
+  if (count < 3) return null;
+  const end = Math.cos(Math.PI / count);
+  return innerStop <= end * 0.7 ? end : null;
 }
 
 /**

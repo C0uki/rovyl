@@ -16,6 +16,9 @@
  *    it still has there is drawn as a straight cut across the desktop. Its gradient therefore has
  *    to land on exactly zero at the rim, with its stops in order and sampled densely enough that a
  *    fade hundreds of pixels long does not band.
+ * 5. And it still arrives at nothing once the beam is drawn STRAIGHT out along the wedge rather
+ *    than in a ring around the hub. A linear fade crosses the wedge's far corners before its tip,
+ *    so the zero has to be moved in to meet them — otherwise the rim keeps alpha the window cuts.
  */
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -50,6 +53,8 @@ try {
     sectorIndexForDelta,
     annularSectorPath,
     polarPoint,
+    sectorBeamEndStop,
+    sectorCentreDeg,
     sectorGradientStops,
     SECTOR_FILL_ALPHA,
     SECTOR_EDGE_ALPHA,
@@ -257,13 +262,122 @@ try {
           for (let k = 1; k < 8; k += 1) {
             const offset = a.offset + ((b.offset - a.offset) * k) / 8;
             const chord = a.opacity + ((b.opacity - a.opacity) * k) / 8;
-            const t = (offset - plateau) / (1 - plateau);
+            const t = (offset - plateau) / (stops[stops.length - 1].offset - plateau);
             worst = Math.max(worst, Math.abs(chord - far * (1 - t) * (1 - t)));
           }
         }
         assert.ok(
           worst <= 0.004,
           `inner ${inner} / falloff ${falloff}: the stops miss the curve by ${worst.toFixed(4)} — the fade will show facets`,
+        );
+      }
+    }
+  });
+
+  // ── 5. The beam runs straight, and still arrives at nothing ──────────────
+  /**
+   * The wedge is lit by a LINEAR gradient along its own bisector, so its fade is a set of bands
+   * perpendicular to that direction rather than arcs around the hub. That buys the direction back
+   * at one cost worth proving away: a band reaches the wedge's far CORNERS before it reaches the
+   * point of the bisector, so a fade that finished at the rim would still have alpha in those
+   * corners — and the outer arc between them would be drawn as a curved cut across the desktop.
+   * `sectorBeamEndStop` lands the zero at the corners instead, which is where `cos(half slice)`
+   * comes from: everything from there to the rim is already nothing.
+   */
+  /** What the gradient paints at `offset`, the way SVG does it — straight lines between stops. */
+  const alphaAt = (stops, offset) => {
+    if (offset <= stops[0].offset) return stops[0].opacity;
+    for (let i = 1; i < stops.length; i += 1) {
+      if (offset <= stops[i].offset) {
+        const span = stops[i].offset - stops[i - 1].offset;
+        if (span < 1e-12) return stops[i].opacity;
+        const t = (offset - stops[i - 1].offset) / span;
+        return stops[i - 1].opacity + (stops[i].opacity - stops[i - 1].opacity) * t;
+      }
+    }
+    return stops[stops.length - 1].opacity;
+  };
+
+  check(() => {
+    let linearCases = 0;
+    for (const count of COUNTS) {
+      for (const [inner, falloff] of GEOMETRIES) {
+        const endStop = sectorBeamEndStop(count, inner);
+        if (endStop === null) {
+          /** The ring is the fallback, and the ring is only allowed where the beam cannot go. */
+          assert.ok(
+            count < 3 || inner > Math.cos(Math.PI / count) * 0.7,
+            `${count} items, inner ${inner}: a linear beam was refused where it would have drawn`,
+          );
+          continue;
+        }
+        linearCases += 1;
+        assert.ok(
+          Math.abs(endStop - Math.cos(Math.PI / count)) < 1e-12 && endStop > 0 && endStop < 1,
+          `${count} items: the fade has to end at the corners' projection, not at ${endStop}`,
+        );
+        for (const [near, far] of ALPHAS) {
+          const stops = sectorGradientStops(inner, falloff, near, far, endStop);
+          const last = stops[stops.length - 1];
+          assert.equal(last.offset, 1, `${count} items: the gradient still has to span its whole run`);
+          assert.ok(last.opacity < 1e-9, `${count} items: alpha ${last.opacity} left at the rim`);
+          /**
+           * The corner itself, and every point of the outer arc past it: a wedge point at radius
+           * `r` and `theta` off the bisector falls at `r·cos(theta)` along the gradient, so the
+           * whole rim lies at `endStop` or beyond.
+           */
+          for (const offset of [endStop, (endStop + 1) / 2, 1]) {
+            assert.ok(
+              alphaAt(stops, offset) < 1e-9,
+              `${count} items, inner ${inner}: ${alphaAt(stops, offset)} alpha at ${offset} is a cut on the rim`,
+            );
+          }
+          /**
+           * And the near end holds: the dead zone's own corners are foreshortened onto the axis
+           * too, so the hold has to have started before them or the wedge begins on a flat strip.
+           */
+          assert.ok(
+            stops[0].offset <= inner * endStop + 1e-9,
+            `${count} items, inner ${inner}: the hold starts at ${stops[0].offset}, past the dead zone's corner`,
+          );
+          /** It is still a dissolve on the way there, not a step. */
+          for (let i = 1; i < stops.length; i += 1) {
+            assert.ok(stops[i].offset >= stops[i - 1].offset, `${count} items: stop ${i} goes backwards`);
+            assert.ok(
+              stops[i].opacity <= stops[i - 1].opacity + 1e-9,
+              `${count} items: alpha rises again at stop ${i}`,
+            );
+            assert.ok(stops[i].offset >= 0 && stops[i].offset <= 1, "offset off the gradient");
+          }
+          /** The dissolve needs room, or the fade is a boundary with extra steps in it. */
+          assert.ok(
+            endStop - stops[1].offset > 0.05,
+            `${count} items, inner ${inner}: only ${(endStop - stops[1].offset).toFixed(3)} of the run left to fade in`,
+          );
+        }
+      }
+    }
+    assert.ok(linearCases > 0, "no wheel at all got a linear beam — the fallback has swallowed the mode");
+  });
+
+  /**
+   * The gradient points where the aim does. Its vector is the wedge's bisector, and if those two
+   * ever parted the wheel would light a beam down one slice while opening the item in another.
+   */
+  check(() => {
+    for (const count of COUNTS) {
+      for (let i = 0; i < count; i += 1) {
+        const deg = sectorCentreDeg(i, count);
+        const { startDeg, endDeg } = sectorBoundsDeg(i, count);
+        assert.ok(
+          Math.abs(deg - (startDeg + endDeg) / 2) < 1e-9,
+          `${count}/${i}: the beam runs down ${deg}°, the wedge is centred on ${(startDeg + endDeg) / 2}°`,
+        );
+        const rad = (deg * Math.PI) / 180;
+        assert.equal(
+          sectorIndexForDelta(Math.cos(rad) * 200, Math.sin(rad) * 200, count),
+          i,
+          `${count}/${i}: aiming straight down the beam must select the item it belongs to`,
         );
       }
     }

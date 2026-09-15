@@ -19,6 +19,8 @@ import {
   annularSectorPath,
   polarPoint,
   sectorBoundsDeg,
+  sectorBeamEndStop,
+  sectorCentreDeg,
   sectorGradientStops,
   sectorIndexForDelta,
   SECTOR_EDGE_ALPHA,
@@ -574,21 +576,83 @@ const RadialSectors = React.memo(({
     Math.max(innerStop + 0.02, (falloffRadius * SECTOR_SEAM_FALLOFF_SCALE) / (radiusOuter * SECTOR_SEAM_REACH)),
   );
   const seamInnerStop = innerStop / SECTOR_SEAM_REACH;
+  const seamEnd = radiusOuter * SECTOR_SEAM_REACH;
+
+  /**
+   * The beam runs STRAIGHT out along the wedge it belongs to, not out in every direction at once.
+   *
+   * A radial gradient fades along arcs, so the lit part of a wedge is bounded by a curve and reads
+   * as a piece cut out of a glow centred on the hub — the light belongs to the wheel, and the
+   * wedge is only where it happens to show. Bands perpendicular to the wedge's own bisector read
+   * the other way round: the light is going somewhere, and the direction it goes is the answer the
+   * mode exists to give. One gradient per wedge, because each one points somewhere else.
+   *
+   * `sectorBeamEndStop` is what keeps the straight fade from costing the arrival at zero — see it.
+   */
+  const beamEnd = sectorBeamEndStop(count, innerStop);
+  const linearBeam = beamEnd !== null;
+  const beamEndStop = beamEnd ?? 1;
 
   if (!drawable) return null;
 
-  const gradient = (id: string, color: string, stops: { offset: number; opacity: number }[]) => (
-    <radialGradient id={id} cx="50%" cy="50%" r="50%">
-      {stops.map((stop, index) => (
-        <stop
-          key={index}
-          offset={stop.offset.toFixed(4)}
-          stopColor={color}
-          stopOpacity={stop.opacity.toFixed(4)}
-        />
-      ))}
-    </radialGradient>
+  /**
+   * One gradient, along `deg` for `length` pixels from the wheel's centre — or, when `deg` is
+   * `null`, the old ring, which is still what a two-item wheel gets.
+   */
+  const gradient = (
+    id: string,
+    color: string,
+    stops: { offset: number; opacity: number }[],
+    deg: number | null,
+    length: number,
+  ) => {
+    const children = stops.map((stop, index) => (
+      <stop
+        key={index}
+        offset={stop.offset.toFixed(4)}
+        stopColor={color}
+        stopOpacity={stop.opacity.toFixed(4)}
+      />
+    ));
+    if (deg === null) {
+      return (
+        <radialGradient id={id} cx="50%" cy="50%" r="50%">
+          {children}
+        </radialGradient>
+      );
+    }
+    /**
+     * User space, not the bounding box: every offset here is already a fraction of a RADIUS, and a
+     * box-relative vector would re-scale them against the wedge's own bounds — a different run for
+     * every slice, which is exactly the one thing the shared arithmetic exists to prevent.
+     */
+    const far = polarPoint(radiusOuter, length, deg);
+    return (
+      <linearGradient
+        id={id}
+        gradientUnits="userSpaceOnUse"
+        x1={radiusOuter}
+        y1={radiusOuter}
+        x2={far.x.toFixed(2)}
+        y2={far.y.toFixed(2)}
+      >
+        {children}
+      </linearGradient>
+    );
+  };
+
+  const beamStops = sectorGradientStops(
+    innerStop, falloffStop, SECTOR_FILL_ALPHA[0], SECTOR_FILL_ALPHA[1], beamEndStop,
   );
+  const edgeStops = sectorGradientStops(
+    innerStop, falloffStop, SECTOR_EDGE_ALPHA[0], SECTOR_EDGE_ALPHA[1], beamEndStop,
+  );
+  const seamStops = sectorGradientStops(
+    seamInnerStop, seamFalloffStop, SECTOR_SEAM_ALPHA[0], SECTOR_SEAM_ALPHA[1],
+  );
+  /** Every wedge points somewhere else, so every wedge needs its own pair. */
+  const beamId = (index: number) => `${gradientId}-beam${linearBeam ? `-${index}` : ''}`;
+  const edgeId = (index: number) => `${gradientId}-edge${linearBeam ? `-${index}` : ''}`;
 
   return (
     <svg
@@ -605,34 +669,49 @@ const RadialSectors = React.memo(({
     >
       <defs>
         {/*
-          Three gradients, one shape: hold through the section, then dissolve to nothing at the rim.
-          `sectorGradientStops` owns the curve and the sampling; the pairs below are only how bright
-          each of the three starts out. See `src/utils/radialSectors.ts`.
+          Three gradients, one shape: hold through the section, then dissolve to nothing by the time
+          the shape runs out. `sectorGradientStops` owns the curve and the sampling; the pairs below
+          are only how bright each of the three starts out. See `src/utils/radialSectors.ts`.
+
+          The fill, and then the wedge's two sides lit along with it — the fill alone made a soft
+          blob, and a lit AREA needs the angle it occupies to be visible, which is an angle carried
+          entirely by its edges.
         */}
-        {gradient(
-          `${gradientId}-beam`,
-          hoverColor,
-          sectorGradientStops(innerStop, falloffStop, SECTOR_FILL_ALPHA[0], SECTOR_FILL_ALPHA[1]),
-        )}
-        {/*
-          The wedge's two sides, lit. The fill alone made a soft blob — a lit AREA needs the angle
-          it occupies to be visible, and that angle is carried entirely by its edges.
-        */}
-        {gradient(
-          `${gradientId}-edge`,
-          hoverColor,
-          sectorGradientStops(innerStop, falloffStop, SECTOR_EDGE_ALPHA[0], SECTOR_EDGE_ALPHA[1]),
-        )}
+        {(linearBeam ? wedges : [null]).map((_, index) => (
+          <React.Fragment key={index}>
+            {gradient(
+              beamId(index),
+              hoverColor,
+              beamStops,
+              linearBeam ? sectorCentreDeg(index, count) : null,
+              radiusOuter,
+            )}
+            {gradient(
+              edgeId(index),
+              hoverColor,
+              edgeStops,
+              linearBeam ? sectorCentreDeg(index, count) : null,
+              radiusOuter,
+            )}
+          </React.Fragment>
+        ))}
         {/*
           The seams, white rather than the hover colour: they belong to the wheel and not to the
-          selection, and they are on before anything is aimed at. Their gradient is normalised
-          against their own shorter reach, so it still lands on zero exactly at their ends.
+          selection, and they are on before anything is aimed at. Each runs along its OWN line for
+          its own shorter reach, so it lands on zero exactly where the line ends — a seam that
+          stopped while it still had alpha would be a tick mark, not a boundary trailing off.
         */}
-        {gradient(
-          `${gradientId}-seam`,
-          '#FFFFFF',
-          sectorGradientStops(seamInnerStop, seamFalloffStop, SECTOR_SEAM_ALPHA[0], SECTOR_SEAM_ALPHA[1]),
-        )}
+        {dividers.map((_, index) => (
+          <React.Fragment key={`seam-${index}`}>
+            {gradient(
+              `${gradientId}-seam-${index}`,
+              '#FFFFFF',
+              seamStops,
+              sectorBoundsDeg(index, count).startDeg,
+              seamEnd,
+            )}
+          </React.Fragment>
+        ))}
       </defs>
 
       {wedges.map((path, index) => (
@@ -640,8 +719,8 @@ const RadialSectors = React.memo(({
           key={index}
           className="zn-radial-sector"
           d={path}
-          fill={`url(#${gradientId}-beam)`}
-          stroke={`url(#${gradientId}-edge)`}
+          fill={`url(#${beamId(index)})`}
+          stroke={`url(#${edgeId(index)})`}
           strokeWidth={1.25}
           vectorEffect="non-scaling-stroke"
           style={{ opacity: index === activeIndex ? 1 : 0 }}
@@ -662,7 +741,7 @@ const RadialSectors = React.memo(({
           y1={line.y1}
           x2={line.x2}
           y2={line.y2}
-          stroke={`url(#${gradientId}-seam)`}
+          stroke={`url(#${gradientId}-seam-${index})`}
           strokeWidth={1}
           vectorEffect="non-scaling-stroke"
         />
