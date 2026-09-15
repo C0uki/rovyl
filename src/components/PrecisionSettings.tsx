@@ -856,6 +856,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
 
     return {
       general: [
+        ...(canUpdate ? [{ key: 'update', group: 'Updates', ...updateRow }] : []),
         {
           /**
            * A select, not the segmented control this was while it held two languages: seven
@@ -1269,7 +1270,6 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
         },
       ],
       advanced: [
-        ...(canUpdate ? [{ key: 'update', group: 'Updates', ...updateRow }] : []),
         {
           key: 'performance', group: 'Performance', title: 'Precision mode',
           description: 'Prioritize immediate response and reduce visual effects.',
