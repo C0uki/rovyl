@@ -2616,11 +2616,38 @@ function isPathLikeCommand(command: string): boolean {
   );
 }
 
+/**
+ * The Lucide glyph a shortcut draws when it has no bitmap of its own.
+ *
+ * A saved `iconName` comes FIRST, for every kind. Folders and URLs used to skip it and return
+ * 'Folder'/'Globe' unconditionally, which made this panel disagree with the wheel: `RadialMenu`
+ * has always drawn `getIcon(app.iconName)`, so a folder whose glyph had been changed showed the
+ * new icon on the wheel and a generic folder in the list that changed it. The per-type names stay
+ * as the fallback for items that carry no name at all (discovery writes `iconName: ''`).
+ */
 function itemFallbackIcon(item: AppItem) {
+  const picked = item.iconName?.trim();
+  if (picked) return picked;
   if (item.type === 'folder' || item.commandType === 'folder') return 'Folder';
   if (item.commandType === 'url') return 'Globe';
-  if (item.commandType === 'file') return item.iconName || 'File';
-  return item.iconName || 'AppWindow';
+  if (item.commandType === 'file') return 'File';
+  return 'AppWindow';
+}
+
+/** The glyph a folder shortcut wears until somebody picks another one. */
+const DEFAULT_FOLDER_ICON = 'Folder';
+
+/**
+ * Whether a shortcut's glyph is the user's to choose.
+ *
+ * Folders only, and for a concrete reason: an application, a document and a web link each arrive
+ * with a bitmap of their own — the shell's extracted icon, or the site's favicon — and
+ * `ItemBitmapOrGlyph` draws that in preference to any Lucide name. A picker on those would offer a
+ * choice that never showed up anywhere. A folder has no bitmap: its glyph IS what the wheel draws,
+ * which is also why every folder looked identical before this.
+ */
+function itemGlyphIsChoosable(item: AppItem): boolean {
+  return item.type === 'folder' || item.commandType === 'folder';
 }
 
 /**
@@ -2675,6 +2702,114 @@ function WorkspaceItemIcon({ item }: { item: AppItem }) {
     </span>
   );
 }
+
+/**
+ * The icon grid, as a modal — the workspace's glyph and a shortcut's glyph now both go through it.
+ *
+ * It was inline in `WorkspaceManager`, written once for the workspace icon. A folder shortcut needs
+ * exactly the same thing (its wheel glyph is a Lucide name too), and a second copy of forty lines
+ * of framer-motion would have been two escape handlers, two footers and two chances to drift apart.
+ *
+ * Mounting IS opening: the caller holds the "which icon" state, `AnimatePresence` handles the exit,
+ * and `onClose` is the only way out — the escape key, the backdrop, the X and Done all take it.
+ */
+function IconPickerModal({
+  titleId,
+  title,
+  hint,
+  selectedIcon,
+  defaultIcon,
+  onSelect,
+  onReset,
+  onClose,
+}: {
+  titleId: string;
+  title: string;
+  hint: string;
+  /** The name in force — never empty, so the grid always has a cell highlighted. */
+  selectedIcon: string;
+  /** What the item wears when nothing has been picked; enables the reset button when it differs. */
+  defaultIcon?: string;
+  onSelect: (iconName: string) => void;
+  onReset?: () => void;
+  onClose: () => void;
+}) {
+  /** A modal that only closes with the mouse is a modal that traps whoever uses the keyboard. */
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      onCloseRef.current();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
+
+  const PickedIcon = getIcon(selectedIcon);
+  const canReset = Boolean(onReset && defaultIcon && selectedIcon !== defaultIcon);
+
+  return (
+    <motion.div
+      className="zs-icon-modal-layer"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.14 }}
+      onClick={onClose}
+      role="presentation"
+    >
+      <motion.div
+        className="zs-icon-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        initial={{ opacity: 0, scale: 0.97, y: 8 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.98, y: 4 }}
+        transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+        /** A click inside must not close what a click outside closes. */
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header>
+          <div>
+            <b id={titleId}>{title}</b>
+            <small>{hint}</small>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close icon picker">
+            <X size={14} />
+          </button>
+        </header>
+        <div className="zs-icon-modal-body">
+          <IconPicker selectedIcon={selectedIcon} onSelect={onSelect} />
+        </div>
+        {/**
+          * Picking writes straight through, so once a glyph was clicked the modal had
+          * nothing left to do — and no way out but the X in its corner, which reads as
+          * discarding rather than confirming. The footer names what is set and ends the
+          * choice on a button, the way every other editor here does.
+          */}
+        <footer>
+          <span className="zs-icon-modal-pick">
+            <PickedIcon size={16} strokeWidth={1.7} />
+            <b>{selectedIcon}</b>
+          </span>
+          <span className="zs-icon-modal-acts">
+            {canReset && (
+              <button type="button" className="zs-btn" onClick={onReset}>
+                <RotateCcw size={13} /> Default
+              </button>
+            )}
+            <button type="button" className="zs-btn is-primary" onClick={onClose}>Done</button>
+          </span>
+        </footer>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 
 
 /**
@@ -2885,7 +3020,11 @@ function WorkspaceManager({
   const [fileLabel, setFileLabel] = useState('');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [isIconPickerOpen, setIsIconPickerOpen] = useState(false);
-  const [editingIconForIndex, setEditingIconForIndex] = useState<number | null>(null);
+  /**
+   * Which shortcut's icon the picker is open for, held by id rather than by position: the list
+   * reorders and deletes underneath it, and an index would quietly start editing the neighbour.
+   */
+  const [iconEditItemId, setIconEditItemId] = useState<string | null>(null);
   const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -2902,18 +3041,6 @@ function WorkspaceManager({
     return () => window.clearTimeout(timer);
   }, [focusAppId, onFocusApplied, workspace.apps]);
 
-  /** A modal that only closes with the mouse is a modal that traps whoever uses the keyboard. */
-  useEffect(() => {
-    if (!isIconPickerOpen) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopPropagation();
-      setIsIconPickerOpen(false);
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [isIconPickerOpen]);
   const WorkspaceIcon = getIcon(workspace.pickerIconName?.trim() || 'Layers');
 
   const addItem = (item: AppItem, openEditor = false) => {
@@ -3210,6 +3337,12 @@ function WorkspaceManager({
     });
   };
 
+  /** The shortcut the icon picker is open for, looked up fresh so a stale id closes the modal. */
+  const iconEditIndex = iconEditItemId
+    ? workspace.apps.findIndex((item) => item.id === iconEditItemId)
+    : -1;
+  const iconEditItem = iconEditIndex === -1 ? null : workspace.apps[iconEditIndex];
+
   /**
    * Self-correction: items saved as IDEs before this check existed (the Antigravity agent, for
    * example) would go on forever asking for recents that are not there. As soon as main confirms
@@ -3354,57 +3487,38 @@ function WorkspaceManager({
        */}
       <AnimatePresence>
         {isIconPickerOpen && (
-          <motion.div
-            className="zs-icon-modal-layer"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.14 }}
-            onClick={() => setIsIconPickerOpen(false)}
-            role="presentation"
-          >
-            <motion.div
-              className="zs-icon-modal"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="ws-icon-modal-title"
-              initial={{ opacity: 0, scale: 0.97, y: 8 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.98, y: 4 }}
-              transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
-              /** A click inside must not close what a click outside closes. */
-              onClick={(event) => event.stopPropagation()}
-            >
-              <header>
-                <div>
-                  <b id="ws-icon-modal-title">Workspace icon</b>
-                  <small>Shown in the wheel picker, and on the workspace card.</small>
-                </div>
-                <button type="button" onClick={() => setIsIconPickerOpen(false)} aria-label="Close icon picker">
-                  <X size={14} />
-                </button>
-              </header>
-              <div className="zs-icon-modal-body">
-                <IconPicker
-                  selectedIcon={workspace.pickerIconName?.trim() || 'Layers'}
-                  onSelect={(iconName) => updateWorkspace(workspaceIndex, { pickerIconName: iconName })}
-                />
-              </div>
-              {/**
-                * Picking writes straight through, so once a glyph was clicked the modal had
-                * nothing left to do — and no way out but the X in its corner, which reads as
-                * discarding rather than confirming. The footer names what is set and ends the
-                * choice on a button, the way every other editor here does.
-                */}
-              <footer>
-                <span className="zs-icon-modal-pick">
-                  <WorkspaceIcon size={16} strokeWidth={1.7} />
-                  <b>{workspace.pickerIconName?.trim() || 'Layers'}</b>
-                </span>
-                <button type="button" className="zs-btn is-primary" onClick={() => setIsIconPickerOpen(false)}>Done</button>
-              </footer>
-            </motion.div>
-          </motion.div>
+          <IconPickerModal
+            key="workspace-icon"
+            titleId="ws-icon-modal-title"
+            title="Workspace icon"
+            hint="Shown in the wheel picker, and on the workspace card."
+            selectedIcon={workspace.pickerIconName?.trim() || 'Layers'}
+            defaultIcon="Layers"
+            onSelect={(iconName) => updateWorkspace(workspaceIndex, { pickerIconName: iconName })}
+            onReset={() => updateWorkspace(workspaceIndex, { pickerIconName: undefined })}
+            onClose={() => setIsIconPickerOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/**
+       * And the same modal for one shortcut's glyph. It is the folder rows that needed it: every
+       * folder added arrived wearing the one `Folder` icon, so a wheel of project directories was
+       * eight identical glyphs with only the labels to tell them apart.
+       */}
+      <AnimatePresence>
+        {iconEditItem && (
+          <IconPickerModal
+            key="item-icon"
+            titleId="item-icon-modal-title"
+            title="Folder icon"
+            hint={`Shown on the wheel for “${iconEditItem.label || 'this folder'}”.`}
+            selectedIcon={itemFallbackIcon(iconEditItem)}
+            defaultIcon={DEFAULT_FOLDER_ICON}
+            onSelect={(iconName) => updateItem(iconEditIndex, { iconName })}
+            onReset={() => updateItem(iconEditIndex, { iconName: DEFAULT_FOLDER_ICON })}
+            onClose={() => setIconEditItemId(null)}
+          />
         )}
       </AnimatePresence>
 
@@ -3663,6 +3777,33 @@ function WorkspaceManager({
                 <Collapse key="editor">
                   <div className="zs-workspace-item-editor">
                     <label className="zs-field"><span>Name</span><input value={item.label} onChange={(event) => updateItem(index, { label: event.target.value })} /></label>
+                    {/*
+                      Folders get to choose their glyph. `div`, not `label`: the control is a
+                      button, and a label wrapping one steals the click on half its surface.
+                    */}
+                    {itemGlyphIsChoosable(item) && (() => {
+                      const ItemGlyph = getIcon(itemFallbackIcon(item));
+                      return (
+                        <div className="zs-field">
+                          <span>Icon</span>
+                          <button
+                            type="button"
+                            className="zs-icon-field-button"
+                            onClick={() => setIconEditItemId(item.id)}
+                            aria-label={`Change the icon for ${item.label}`}
+                          >
+                            <span className="zs-workspace-app-icon" aria-hidden>
+                              <ItemGlyph size={17} strokeWidth={1.8} />
+                            </span>
+                            <div>
+                              <b>{itemFallbackIcon(item)}</b>
+                              <small>Shown on the wheel</small>
+                            </div>
+                            <Pencil size={13} aria-hidden />
+                          </button>
+                        </div>
+                      );
+                    })()}
                     {/*
                       Applications do not show the command: whoever added the shortcut already chose
                       the app, and the value is an AUMID (`Microsoft.WindowsTerminal_…!App`) that
