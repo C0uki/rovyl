@@ -38,6 +38,7 @@
     "test:foreground-snapshot": "node scripts/foreground-snapshot-smoke.mjs",
     "test:fullscreen-bounds": "node scripts/fullscreen-bounds-smoke.mjs",
     "test:page-title": "node scripts/page-title-smoke.mjs",
+    "test:pending-update": "node scripts/pending-update-smoke.mjs",
     "test:keyboard-nav": "node scripts/keyboard-nav-smoke.mjs",
     "test:number-launch": "node scripts/number-launch-smoke.mjs",
     "test:back-key": "node scripts/back-key-smoke.mjs",

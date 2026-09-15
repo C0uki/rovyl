@@ -386,13 +386,44 @@ The same source produces two builds, and they differ in one respect that matters
 
 `process.windowsStore` is set by Electron when the process runs from an MSIX package.
 `isStoreBuild()` reads it, and the Store build consequently disables the self-updater —
-the Store forbids one, and a submission with `autoInstallOnAppQuit` active fails
+the Store forbids one, and a submission that runs an installer of its own fails
 certification — and skips the license gate, because the Store collected payment before it
 handed over the package.
 
 The direct build keeps both: `electron-updater` against this repository's releases, and a
 license key. There is no native update dialog — the main process emits `update-state`, the
 wheel shows a badge on the hub, and Settings → Advanced offers the restart.
+
+A downloaded update installs on the next LAUNCH, and `autoInstallOnAppQuit` is off. The
+default does the opposite: it spawns the silent NSIS installer behind the closing app, so a
+user who quit Rovyl in order to update it and reopened it moments later landed inside that
+install — the installer's own taskkill killed the instance they had just started, and the
+quit-time install relaunches nothing, so the launch simply appeared to fail. Instead,
+`update-downloaded` writes `pending-update.json` into userData, and
+`installPendingUpdateAndExit()` reads it at startup — after the single-instance lock, before
+a window exists — spawns the installer with `--updated /S --force-run` and exits. The
+installer has the folder to itself and reopens the new version when it is done.
+`backend/pending-update.cjs` holds the branching (already installed, installer gone, one
+already running, two failed attempts) and `npm run test:pending-update` covers it.
+
+The user watches that install happen. The `update-splash` verb of the native helper
+(`backend/native-helper/rovyl-helper.cs`) puts up a WinForms window in the product's
+palette — logo, version, indeterminate bar. It is not a `BrowserWindow` because a running
+`Rovyl.exe` holds handles on the files NSIS is replacing; an Electron splash would either be
+killed mid-install or break the install. Helper and logo are copied to the temp folder
+first, so nothing reads out of the directory being rewritten, and the copy is spawned
+detached — which it can be, and a PowerShell one could not: a console program given no
+console exits before it runs a line, and one spawned attached dies with Rovyl a second into
+the install.
+
+The bar's smoothness is a requirement, not a detail — it is the only moving thing on screen.
+Position comes from a `Stopwatch` rather than a tick count, so a late frame lands where it
+belongs; frames are requested from a threading timer (`WM_TIMER` is coalesced to ~15.6 ms,
+low priority, and cannot hold 60 fps); and process watching runs off the UI thread, because
+enumerating processes costs tens of milliseconds and would show up as a stumble. The splash
+follows the installer by pid, switches to "Starting Rovyl" when that process ends, and closes
+once a Rovyl newer than itself is on screen — or after a timeout, so it can never outlive
+what it is describing.
 
 For direct clients to see an update, `version` in `package.json` must be higher than the
 installed one, and the release must carry `latest.yml` alongside the installer. For the

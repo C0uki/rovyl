@@ -67,6 +67,7 @@ const { detectGameExecutable } = require("./game-detection.cjs");
 const { parseForegroundSnapshot, createLineSplitter } = require("./foreground-snapshot.cjs");
 const { isPhysicalRectFullscreen } = require("./fullscreen-bounds.cjs");
 const { titleFromHtmlBuffer } = require("./page-title.cjs");
+const { decidePendingUpdate } = require("./pending-update.cjs");
 const crypto = require("crypto");
 const { GlobalKeyboardListener } = require("node-global-key-listener");
 const http = require("http");
@@ -846,11 +847,280 @@ app.setName("Rovyl");
 app.setAppUserModelId("com.henry.rovyl"); // AUMID explicitly set
 // app.setPath("userData", path.join(os.tmpdir(), "zenith-radial-menu-cache")); // REMOVED: tmpdir is not persistent
 
+/**
+ * A downloaded update installs on the next LAUNCH, not on the exit that precedes it.
+ *
+ * `autoInstallOnAppQuit` did it the other way round: quitting spawned the silent NSIS installer
+ * behind the app, and the user — who had just closed Rovyl in order to update it — reopened it a
+ * couple of seconds later, straight into the middle of that install. The installer's own taskkill
+ * killed the instance they had just started (flashing a console window on the way out), the
+ * quit-time install relaunches nothing, and the launch looked like it had simply failed. Opening it
+ * again once the install had finished worked, which is the whole shape of the bug.
+ *
+ * Moving the install here removes the race instead of narrowing it: the app is not running yet, the
+ * installer has the folder to itself, and `--force-run` opens the new version when it is done. All
+ * the running app leaves behind is a note saying which installer is waiting.
+ */
+const PENDING_UPDATE_FILE = "pending-update.json";
+
+const pendingUpdatePath = () => path.join(app.getPath("userData"), PENDING_UPDATE_FILE);
+
+const readPendingUpdate = () => {
+  try {
+    const data = JSON.parse(fs.readFileSync(pendingUpdatePath(), "utf8"));
+    if (!data || typeof data.version !== "string" || typeof data.installerPath !== "string") {
+      return null;
+    }
+    return data;
+  } catch (e) {
+    return null;
+  }
+};
+
+const writePendingUpdate = (data) => {
+  try {
+    fs.writeFileSync(pendingUpdatePath(), JSON.stringify(data), "utf8");
+  } catch (e) {
+    diagLog(`[Update] Could not record the pending install: ${e.message}`);
+  }
+};
+
+const clearPendingUpdate = () => {
+  try {
+    fs.rmSync(pendingUpdatePath(), { force: true });
+  } catch (e) {
+    /* ignore */
+  }
+};
+
+/**
+ * Is the installer we spawned earlier still working? Two NSIS installs running over the same folder
+ * is how an install gets half-applied, and a double-click on the icon is all it takes.
+ *
+ * Only ever reached when a pending update exists, so the `tasklist` call never lands on a normal
+ * startup. No answer counts as "not running": declining to install because `tasklist` did not
+ * respond is the worse of the two mistakes.
+ */
+const isInstallerRunning = (installerPath) => {
+  try {
+    const name = path.basename(installerPath);
+    const out = execFileSync("tasklist", ["/FI", `IMAGENAME eq ${name}`, "/NH"], {
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 4000,
+    });
+    return out.toLowerCase().includes(name.toLowerCase());
+  } catch (e) {
+    return false;
+  }
+};
+
+/**
+ * The window the user looks at while the update installs — and the reason there is one at all.
+ *
+ * Installing before startup fixed the launch that did nothing, but it did not fix what the launch
+ * LOOKED like: click the icon, and for ten seconds absolutely nothing happens. So the app hands the
+ * screen over on its way out, to the `update-splash` verb of the native helper —
+ * `backend/native-helper/rovyl-helper.cs`, where the class comment has the rest of the reasoning:
+ * why the window cannot be a `BrowserWindow`, and how the bar is animated.
+ *
+ * Helper and logo are COPIED into the temp folder before anything runs. Left where they are, the
+ * splash would be holding open two files in the directory being rewritten underneath it — the exact
+ * class of lock that makes an update fail silently.
+ */
+const showUpdateSplash = ({ version, installerPath, installerPid }) => {
+  try {
+    const helperSource = getNativeHelperExePath();
+    if (!helperSource) {
+      diagLog("[Update] Native helper not found — installing without a splash");
+      return;
+    }
+
+    const dir = path.join(os.tmpdir(), "rovyl-update-splash");
+    fs.mkdirSync(dir, { recursive: true });
+
+    /**
+     * Read-then-write rather than `copyFileSync`: in a packaged build the helper may be read out
+     * of `app.asar`, and reads through the archive are the supported way out of it. A splash from
+     * a previous update still on screen holds the destination open — in which case the copy already
+     * sitting there is the same build, and is exactly what we would have written.
+     */
+    const helperDest = path.join(dir, "rovyl-splash.exe");
+    try {
+      fs.writeFileSync(helperDest, fs.readFileSync(helperSource));
+    } catch (error) {
+      if (!fs.existsSync(helperDest)) throw error;
+      diagLog(`[Update] Reusing the splash helper already in temp: ${error.code || error.message}`);
+    }
+
+    let logoArg = "";
+    try {
+      const logo = fs.readFileSync(
+        path.join(__dirname, isDev ? "../public/icon.png" : "../dist/icon.png"),
+      );
+      logoArg = path.join(dir, "icon.png");
+      fs.writeFileSync(logoArg, logo);
+    } catch (e) {
+      /** The wordmark carries the splash on its own. */
+      logoArg = "";
+    }
+
+    const args = [
+      "update-splash",
+      "--pid",
+      String(installerPid || 0),
+      "--name",
+      path.basename(installerPath),
+    ];
+    if (version) args.push("--version", String(version));
+    if (logoArg) args.push("--logo", logoArg);
+
+    /**
+     * Detached, and this is the one place it works: the helper is a GUI-subsystem binary, so it
+     * needs no console, and detaching is what lets it outlive the process that started it.
+     */
+    const child = spawn(helperDest, args, { detached: true, stdio: "ignore", windowsHide: true });
+    child.unref();
+    child.on("error", (error) => diagLog(`[Update] Splash failed: ${error.message}`));
+  } catch (error) {
+    /** A missing splash is a worse launch, not a failed one. The install does not depend on it. */
+    diagLog(`[Update] Splash failed: ${error.message}`);
+  }
+};
+
+/**
+ * Set the moment this process commits to installing rather than starting. `app.whenReady` reads it
+ * and builds nothing: no window, no tray, no helper holding open a file the installer is replacing.
+ */
+let pendingUpdateInstallStarted = false;
+
+/** `true` when an installer now owns the machine and this process is on its way out. */
+const installPendingUpdateAndExit = () => {
+  if (!isPackagedBuild || process.platform !== "win32" || isStoreBuild()) return false;
+
+  const pending = readPendingUpdate();
+  if (!pending) return false;
+
+  const decision = decidePendingUpdate({
+    pending,
+    currentVersion: app.getVersion(),
+    installerExists: () => fs.existsSync(pending.installerPath),
+    installerRunning: () => isInstallerRunning(pending.installerPath),
+  });
+
+  if (decision.action === "clear") {
+    clearPendingUpdate();
+    return false;
+  }
+  if (decision.action === "give-up") {
+    diagLog(
+      `[Update] ${pending.version} did not install (${decision.reason}) — starting on ${app.getVersion()}`,
+    );
+    writePendingUpdate({ ...pending, gaveUp: true });
+    return false;
+  }
+  if (decision.action !== "install") {
+    diagLog(`[Update] Not installing before startup: ${decision.reason}`);
+    return false;
+  }
+
+  writePendingUpdate({
+    ...pending,
+    attempts: (Number(pending.attempts) || 0) + 1,
+    lastAttemptAt: Date.now(),
+  });
+
+  /**
+   * `--updated` tells the NSIS script this is an update and not a first install, `/S` keeps it
+   * silent, and `--force-run` is the part the quit-time install was missing: it opens Rovyl again
+   * once the files are replaced.
+   */
+  const installerArgs = ["--updated", "/S", "--force-run"];
+  /** Nothing was started: give the launch back to the app. */
+  const abortInstall = () => {
+    pendingUpdateInstallStarted = false;
+    if (app.isReady()) {
+      app.relaunch();
+      app.exit(0);
+    }
+  };
+  const exitForInstaller = () => {
+    try {
+      app.exit(0);
+    } catch (e) {
+      process.exit(0);
+    }
+  };
+
+  let child;
+  try {
+    child = spawn(pending.installerPath, installerArgs, { detached: true, stdio: "ignore" });
+  } catch (error) {
+    diagLog(`[Update] Could not start the installer: ${error.message}`);
+    return false;
+  }
+
+  /**
+   * The exit waits for the spawn to be confirmed. `spawn` reports failure on the next tick, and
+   * exiting synchronously would throw away the one chance to retry through `elevate.exe`.
+   */
+  child.once("spawn", () => {
+    showUpdateSplash({
+      version: pending.version,
+      installerPath: pending.installerPath,
+      installerPid: child.pid,
+    });
+    exitForInstaller();
+  });
+  child.once("error", (error) => {
+    diagLog(`[Update] Installer spawn failed (${error.code || "?"}): ${error.message}`);
+    /**
+     * A per-machine install needs elevation, and CreateProcess refuses outright instead of
+     * prompting. `elevate.exe` ships beside the app for exactly this — it is what electron-updater
+     * reaches for on the same two error codes.
+     */
+    if (error.code === "UNKNOWN" || error.code === "EACCES") {
+      try {
+        spawn(path.join(process.resourcesPath, "elevate.exe"), [pending.installerPath, ...installerArgs], {
+          detached: true,
+          stdio: "ignore",
+        }).unref();
+        /** No pid worth passing — elevate.exe is not the installer. The splash watches the name. */
+        showUpdateSplash({ version: pending.version, installerPath: pending.installerPath });
+        exitForInstaller();
+      } catch (e) {
+        diagLog(`[Update] elevate.exe failed too: ${e.message}`);
+        abortInstall();
+      }
+      return;
+    }
+    /**
+     * Nothing is installing, so exiting now would reproduce the bug this whole path exists to fix:
+     * a click that opens nothing. Start the app instead — `whenReady` has not resolved yet at this
+     * point, and if it somehow has, only a restart can still build a window.
+     */
+    abortInstall();
+  });
+  child.unref();
+
+  diagLog(`[Update] Installing ${pending.version} before startup`);
+  pendingUpdateInstallStarted = true;
+  return true;
+};
+
 // Single instance: prevents two Zenith processes when login startup is slow and the user launches manually.
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   diagLog("Second instance blocked — another Zenith is already running; exiting.");
   app.quit();
+} else if (installPendingUpdateAndExit()) {
+  /**
+   * Deliberately empty. The installer is running and this process exits as soon as the spawn is
+   * confirmed; registering `second-instance` would only hand it a window it is never going to have.
+   *
+   * After the lock, not before: when Rovyl is already open a launch is a second instance asking for
+   * focus, and it must not start an installer over the running app.
+   */
 } else {
   app.on("second-instance", () => {
     diagLog("Second instance launch detected — focusing existing window.");
@@ -3289,7 +3559,12 @@ function configureAutoUpdates() {
   /** Past the guards, so this is the first point the module is genuinely needed. */
   const autoUpdater = getAutoUpdater();
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  /**
+   * OFF on purpose. This is the flag that installed the update in the background of the exit and
+   * turned the very next launch into a race the user lost — see `installPendingUpdateAndExit`,
+   * which now owns the install and runs it before any of the app exists.
+   */
+  autoUpdater.autoInstallOnAppQuit = false;
 
   autoUpdater.on("error", (error) => {
     diagLog(`[Update] ${error?.message || error}`);
@@ -3336,6 +3611,28 @@ function configureAutoUpdates() {
    */
   autoUpdater.on("update-downloaded", (info) => {
     diagLog(`[Update] Downloaded version ${info.version}`);
+    /**
+     * The note the next launch reads. Written here and not on quit, because a crash, a reboot and a
+     * kill from Task Manager are all exits too — and every one of them should still come back on
+     * the new version.
+     *
+     * A note for the SAME version keeps its attempt counter: electron-updater re-emits this event
+     * from its cache in every later session, and a reset counter would hand a broken installer
+     * unlimited retries.
+     */
+    const installerPath = info?.downloadedFile;
+    if (typeof installerPath === "string" && installerPath) {
+      const previous = readPendingUpdate();
+      const sameFile = previous?.version === info.version && previous?.installerPath === installerPath;
+      writePendingUpdate({
+        version: info.version,
+        installerPath,
+        downloadedAt: Date.now(),
+        attempts: sameFile ? Number(previous.attempts) || 0 : 0,
+        lastAttemptAt: sameFile ? Number(previous.lastAttemptAt) || 0 : 0,
+        gaveUp: sameFile ? previous.gaveUp === true : false,
+      });
+    }
     notifyRendererUpdateState("ready", info.version, { checkedAt: Date.now() });
   });
 
@@ -3355,7 +3652,7 @@ function configureAutoUpdates() {
 }
 
 app.whenReady().then(async () => {
-  if (!gotTheLock) return;
+  if (!gotTheLock || pendingUpdateInstallStarted) return;
 
   /**
    * Compiles/initializes the helper while idle; when the radial opens the block lands with no delay.

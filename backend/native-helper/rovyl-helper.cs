@@ -2,6 +2,8 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -783,6 +785,345 @@ namespace Rovyl.NativeHelper {
         }
     }
 
+    /// <summary>
+    /// The window the user looks at while an update installs.
+    ///
+    /// WHY IT IS HERE AND NOT A BrowserWindow
+    ///
+    /// The install replaces the contents of the install folder, and a running Rovyl.exe holds
+    /// handles on the very files being replaced -- which is why nsis/installer.nsh opens by killing
+    /// it. An Electron splash would either die mid-install, leaving the blank screen this exists to
+    /// remove, or survive and break the install. So the window belongs to a process that is not
+    /// Rovyl and owns nothing inside the install folder: electron-main.js copies this helper (and
+    /// the logo) into the temp folder and starts the copy, so not one handle points at the
+    /// directory NSIS is rewriting.
+    ///
+    /// WHY THE ANIMATION IS BUILT THE WAY IT IS
+    ///
+    /// The bar is the only moving thing on screen, so any hitch in it is the whole impression. Two
+    /// rules follow. First, position comes from a Stopwatch rather than from counting ticks: a late
+    /// frame then lands where it belongs instead of dragging the whole animation behind it. Second,
+    /// nothing slow is allowed on the UI thread -- watching for the installer and for the relaunched
+    /// app means enumerating processes, which takes tens of milliseconds, so it runs on a timer of
+    /// its own and only the result is marshalled back.
+    ///
+    /// Frames are requested from a threading timer rather than a WinForms one. A WinForms Timer
+    /// rides on WM_TIMER, which is posted at the system's ~15.6 ms tick, is coalesced, and is
+    /// processed only when nothing else is queued: it cannot hold 60 fps, and what it does hold
+    /// visibly stutters.
+    /// </summary>
+    public class RovylUpdateSplash : Form {
+        [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
+
+        // Design sizes, in the 96-DPI units the layout was drawn at; everything is multiplied by
+        // Scale so the splash is the same physical size on a 150% display.
+        const int BaseWidth = 400;
+        const int BaseHeight = 196;
+        const int BaseLogo = 46;
+        const int BaseBarWidth = 232;
+        const int BaseBarHeight = 3;
+        const int BaseBarTop = 150;
+        const int BaseCorner = 22;
+        // Wide enough that the gradient reads as a travelling highlight rather than a moving block.
+        const int BaseSlice = 116;
+        const double CycleMs = 1150.0;
+
+        // The product's own palette (src/index.css): Rovyl's accent is the absence of colour --
+        // white on near-black, one step of elevation, no hue anywhere.
+        static readonly Color Bg = Color.FromArgb(21, 21, 21);
+        static readonly Color Line = Color.FromArgb(38, 38, 38);
+        static readonly Color TextColor = Color.FromArgb(237, 237, 237);
+        static readonly Color MutedColor = Color.FromArgb(138, 138, 138);
+        static readonly Color TrackColor = Color.FromArgb(36, 36, 36);
+
+        readonly int installerPid;
+        readonly string installerName;
+        readonly string versionText;
+        readonly string logoPath;
+
+        readonly Stopwatch clock = Stopwatch.StartNew();
+        readonly DateTime startedAt = DateTime.Now;
+
+        System.Threading.Timer frameTimer;
+        System.Threading.Timer watchTimer;
+        /// <summary>0 while no repaint is in flight. Stops a slow frame from queueing up behind it.</summary>
+        int framePending;
+
+        float scale = 1f;
+        Rectangle barRect;
+        int slice;
+        GraphicsPath shape;
+        Image logo;
+        Font headFont;
+        Font statusFont;
+
+        Process installer;
+        bool installerSeen;
+        bool starting;
+        DateTime startingAt;
+        DateTime? appSeenAt;
+        string statusText;
+
+        public RovylUpdateSplash(int installerPid, string installerName, string version, string logoPath) {
+            this.installerPid = installerPid;
+            this.installerName = installerName ?? "";
+            this.versionText = version ?? "";
+            this.logoPath = logoPath ?? "";
+            this.statusText = this.versionText.Length > 0
+                ? "Installing version " + this.versionText
+                : "Installing the latest version";
+
+            // Every pixel is painted here, into one back buffer: no flicker, and no child controls
+            // to invalidate behind the bar.
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint
+                     | ControlStyles.OptimizedDoubleBuffer, true);
+            FormBorderStyle = FormBorderStyle.None;
+            // Placed by hand in OnLoad. CenterScreen is resolved when the handle is created, which
+            // here is before ClientSize has been set, so the window ends up centred for WinForms'
+            // default 300x300 -- fifty pixels right of centre and fifty above it.
+            StartPosition = FormStartPosition.Manual;
+            BackColor = Bg;
+            TopMost = true;
+            ShowInTaskbar = true;
+            Text = "Rovyl";
+
+            // The desktop's DC, not this form's: CreateGraphics() would realise the handle, which is
+            // the very thing the comment above is about.
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) scale = g.DpiX / 96f;
+
+            ClientSize = new Size(Px(BaseWidth), Px(BaseHeight));
+            barRect = new Rectangle(
+                (Px(BaseWidth) - Px(BaseBarWidth)) / 2, Px(BaseBarTop),
+                Px(BaseBarWidth), Math.Max(2, Px(BaseBarHeight)));
+            slice = Px(BaseSlice);
+
+            // Rounded corners cut out of the window itself: a borderless square reads as a crash
+            // dialog, not as part of the app.
+            int r = Px(BaseCorner);
+            shape = new GraphicsPath();
+            shape.AddArc(0, 0, r, r, 180, 90);
+            shape.AddArc(ClientSize.Width - r - 1, 0, r, r, 270, 90);
+            shape.AddArc(ClientSize.Width - r - 1, ClientSize.Height - r - 1, r, r, 0, 90);
+            shape.AddArc(0, ClientSize.Height - r - 1, r, r, 90, 90);
+            shape.CloseFigure();
+            Region = new Region(shape);
+
+            headFont = new Font("Segoe UI Semibold", 12f, FontStyle.Regular, GraphicsUnit.Point);
+            statusFont = new Font("Segoe UI", 9f, FontStyle.Regular, GraphicsUnit.Point);
+
+            if (logoPath.Length > 0) {
+                try {
+                    // Through a copy in memory, never Image.FromFile: that holds the file open for
+                    // the life of the image, and the one rule this process has is that it holds
+                    // nothing open.
+                    byte[] bytes = File.ReadAllBytes(logoPath);
+                    using (var ms = new MemoryStream(bytes)) logo = new Bitmap(ms);
+                } catch { logo = null; }
+            }
+
+            if (installerPid > 0) {
+                try { installer = Process.GetProcessById(installerPid); } catch { installer = null; }
+            }
+        }
+
+        int Px(int design) { return (int)Math.Round(design * scale); }
+
+        protected override void OnLoad(EventArgs e) {
+            base.OnLoad(e);
+            // On the screen the user just clicked on, not always the primary one, and inside the
+            // working area so it never sits under the taskbar.
+            Screen screen;
+            try { screen = Screen.FromPoint(Cursor.Position); } catch { screen = Screen.PrimaryScreen; }
+            Rectangle area = screen.WorkingArea;
+            Location = new Point(
+                area.X + (area.Width - Width) / 2,
+                area.Y + (area.Height - Height) / 2);
+        }
+
+        protected override void OnShown(EventArgs e) {
+            base.OnShown(e);
+            // ~8 ms asks for more frames than the screen can show, on purpose: the surplus absorbs
+            // jitter, and the Stopwatch means an early or late frame still draws the right pixel.
+            frameTimer = new System.Threading.Timer(OnFrame, null, 0, 8);
+            watchTimer = new System.Threading.Timer(OnWatch, null, 200, 300);
+        }
+
+        void OnFrame(object state) {
+            if (Interlocked.CompareExchange(ref framePending, 1, 0) != 0) return;
+            try {
+                BeginInvoke((MethodInvoker)delegate {
+                    Interlocked.Exchange(ref framePending, 0);
+                    Invalidate(barRect);
+                });
+            } catch {
+                // The window is closing; there is nothing left to draw on.
+                Interlocked.Exchange(ref framePending, 0);
+            }
+        }
+
+        /// <summary>
+        /// Runs on a pool thread, never on the UI one. Process enumeration costs tens of
+        /// milliseconds and would show up in the bar as a stumble every time it ran.
+        /// </summary>
+        void OnWatch(object state) {
+            try {
+                // An install cannot take five minutes, but a splash with no way out is a window
+                // somebody has to kill from Task Manager.
+                if ((DateTime.Now - startedAt).TotalMinutes > 5) { CloseFromWatcher(); return; }
+
+                if (!starting) {
+                    if (IsInstallerRunning()) { installerSeen = true; return; }
+                    // Never seen at all yet: an elevated install arrives by way of elevate.exe, so
+                    // the installer may simply not exist yet. Giving up on the first look would
+                    // close the splash before the install had begun.
+                    if (!installerSeen && (DateTime.Now - startedAt).TotalSeconds < 8) return;
+                    starting = true;
+                    startingAt = DateTime.Now;
+                    SetStatus("Starting Rovyl");
+                    return;
+                }
+
+                if (appSeenAt.HasValue) {
+                    // A beat after the process appears, so the splash hands over to a window rather
+                    // than to a gap -- and it is TopMost, so it must not sit on top of the app it
+                    // just spent ten seconds waiting for.
+                    if ((DateTime.Now - appSeenAt.Value).TotalMilliseconds > 900) CloseFromWatcher();
+                    return;
+                }
+
+                if (IsAppRelaunched()) { appSeenAt = DateTime.Now; return; }
+
+                // The install finished and nothing came back: it failed, or NSIS declined to
+                // relaunch. Either way this window has nothing left to say.
+                if ((DateTime.Now - startingAt).TotalSeconds > 25) CloseFromWatcher();
+            } catch {
+                // A watchdog that throws must not take the window with it.
+            }
+        }
+
+        bool IsInstallerRunning() {
+            // The cached handle first: HasExited on a Process we already opened is a single cheap
+            // call, where looking the name up again walks every process on the machine.
+            if (installer != null) {
+                try { if (!installer.HasExited) return true; } catch { }
+            }
+            if (installerName.Length > 0) {
+                string bare = Path.GetFileNameWithoutExtension(installerName);
+                if (bare.Length > 0) {
+                    try { if (Process.GetProcessesByName(bare).Length > 0) return true; } catch { }
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Only a Rovyl that started AFTER this window did counts. The process that spawned the
+        /// splash is itself a Rovyl.exe on its way out, and mistaking it for the relaunched app
+        /// would close the splash in the first second of the install.
+        /// </summary>
+        bool IsAppRelaunched() {
+            try {
+                foreach (Process p in Process.GetProcessesByName("Rovyl")) {
+                    try { if (p.StartTime > startedAt) return true; } catch { }
+                }
+            } catch { }
+            return false;
+        }
+
+        void SetStatus(string text) {
+            try {
+                BeginInvoke((MethodInvoker)delegate { statusText = text; Invalidate(); });
+            } catch { }
+        }
+
+        void CloseFromWatcher() {
+            try { BeginInvoke((MethodInvoker)delegate { Close(); }); } catch { }
+        }
+
+        protected override void OnPaint(PaintEventArgs e) {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+
+            using (var bg = new SolidBrush(Bg)) g.FillRectangle(bg, e.ClipRectangle);
+
+            // Only the bar is invalid on an animation frame; the rest is already in the buffer.
+            bool full = e.ClipRectangle.Width > barRect.Width || e.ClipRectangle.Height > barRect.Height * 4;
+            if (full) {
+                using (var pen = new Pen(Line, 1f)) g.DrawPath(pen, shape);
+
+                if (logo != null) {
+                    int size = Px(BaseLogo);
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(logo, new Rectangle((ClientSize.Width - size) / 2, Px(32), size, size));
+                }
+
+                // Grayscale antialiasing, not ClearType: subpixel rendering fringes light text on a
+                // near-black ground with colour that has no business being in this palette.
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                using (var fmt = new StringFormat { Alignment = StringAlignment.Center })
+                using (var text = new SolidBrush(TextColor))
+                using (var muted = new SolidBrush(MutedColor)) {
+                    g.DrawString("Updating Rovyl", headFont, text,
+                        new RectangleF(0, Px(92), ClientSize.Width, Px(26)), fmt);
+                    g.DrawString(statusText, statusFont, muted,
+                        new RectangleF(0, Px(120), ClientSize.Width, Px(20)), fmt);
+                }
+            }
+
+            using (var track = new SolidBrush(TrackColor)) g.FillRectangle(track, barRect);
+
+            // Time, not tick count: a frame that arrives late still draws where the eye expects it.
+            double t = (clock.Elapsed.TotalMilliseconds % CycleMs) / CycleMs;
+            float x = (float)(barRect.Left - slice + (barRect.Width + slice) * t);
+
+            var travel = new RectangleF(x, barRect.Top, slice, barRect.Height);
+            g.SetClip(barRect);
+            using (var brush = new LinearGradientBrush(
+                       new RectangleF(x - 1, barRect.Top, slice + 2, barRect.Height),
+                       Color.Transparent, Color.Transparent, LinearGradientMode.Horizontal)) {
+                // Transparent at both ends, solid through the middle: the highlight has no edges to
+                // catch the eye as it enters and leaves the track.
+                var blend = new ColorBlend(4);
+                blend.Colors = new Color[] {
+                    Color.FromArgb(0, 255, 255, 255),
+                    Color.FromArgb(235, 255, 255, 255),
+                    Color.FromArgb(235, 255, 255, 255),
+                    Color.FromArgb(0, 255, 255, 255),
+                };
+                blend.Positions = new float[] { 0f, 0.42f, 0.58f, 1f };
+                brush.InterpolationColors = blend;
+                g.FillRectangle(brush, travel);
+            }
+            g.ResetClip();
+        }
+
+        protected override void OnFormClosed(FormClosedEventArgs e) {
+            if (frameTimer != null) { frameTimer.Dispose(); frameTimer = null; }
+            if (watchTimer != null) { watchTimer.Dispose(); watchTimer = null; }
+            base.OnFormClosed(e);
+        }
+
+        public static void Run(string[] args) {
+            int pid = 0;
+            string name = "", version = "", logo = "";
+            for (int i = 1; i < args.Length; i++) {
+                string a = args[i];
+                if (a == "--pid" && i + 1 < args.Length) { int.TryParse(args[++i], out pid); }
+                else if (a == "--name" && i + 1 < args.Length) name = args[++i];
+                else if (a == "--version" && i + 1 < args.Length) version = args[++i];
+                else if (a == "--logo" && i + 1 < args.Length) logo = args[++i];
+            }
+
+            // Without this the whole window is bitmap-stretched on a scaled display, and a splash
+            // that is visibly blurrier than the app it is installing is worse than none.
+            try { SetProcessDPIAware(); } catch { }
+
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            using (var form = new RovylUpdateSplash(pid, name, version, logo)) Application.Run(form);
+        }
+    }
+
     class Program {
         [STAThread]
         static void Main(string[] args) {
@@ -802,7 +1143,13 @@ namespace Rovyl.NativeHelper {
                 return;
             }
 
-            Console.WriteLine("Usage: rovyl-helper.exe [mouse-blocker <parentPid> | foreground-focus]");
+            if (args.Length > 0 && args[0] == "update-splash") {
+                RovylUpdateSplash.Run(args);
+                return;
+            }
+
+            Console.WriteLine("Usage: rovyl-helper.exe [mouse-blocker <parentPid> | foreground-focus"
+                + " | update-splash --pid <n> --name <installer.exe> --version <v> --logo <path>]");
         }
     }
 }

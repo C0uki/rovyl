@@ -392,7 +392,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
     if (updateInfo.state === 'ready') {
       return {
         title: version ? `Version ${version} is ready` : 'An update is ready',
-        description: 'Downloaded and verified. Rovyl restarts to finish.',
+        description: 'Downloaded and verified. Rovyl installs it the next time it starts.',
         kind: 'action' as const,
         actionLabel: 'Restart now',
         actionIcon: ArrowUpFromLine,
@@ -405,8 +405,8 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
         title: version ? `Downloading version ${version}` : 'Downloading an update',
         description:
           typeof updateInfo.percent === 'number'
-            ? `${updateInfo.percent}% done. You can keep working — Rovyl installs it when you restart.`
-            : 'You can keep working — Rovyl installs it when you restart.',
+            ? `${updateInfo.percent}% done. You can keep working — Rovyl installs it the next time it starts.`
+            : 'You can keep working — Rovyl installs it the next time it starts.',
         kind: 'action' as const,
         actionLabel: 'Downloading…',
         actionIcon: ArrowDownToLine,

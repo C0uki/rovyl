@@ -50,10 +50,20 @@ function buildNativeHelper() {
       ],
       { stdio: "inherit" },
     );
+    /**
+     * `backend/rovyl-helper.exe` is not a spare copy — `getNativeHelperExePath()` looks there
+     * FIRST, and electron-builder ships it, so a stale one is the binary that runs in the packaged
+     * app. This used to be a warning, and a warning is how a release goes out with a helper that
+     * predates the verb the app is about to ask it for. The usual cause is a Rovyl still running
+     * from this checkout with its helpers alive; closing it is the fix.
+     */
     try {
       fs.copyFileSync(out1, out2);
     } catch (copyErr) {
-      console.warn("[build-native-helper] Note: Could not copy to backend/ (file may be running):", copyErr.message);
+      console.error("[build-native-helper] Could not update backend/rovyl-helper.exe:", copyErr.message);
+      console.error("[build-native-helper] That copy is what the packaged app loads first — close any");
+      console.error("[build-native-helper] Rovyl running from this checkout and build again.");
+      process.exit(1);
     }
     console.log("[build-native-helper] Compiled successfully:", out1);
   } catch (err) {
