@@ -321,11 +321,12 @@ export const DEFAULT_UI_CONFIG: UIConfig = {
    */
   radialPlacement: 'center',
   /**
-   * Not 1 any more, and not a weaker default either: 0.6 on the scale that reaches a black screen
-   * paints the same alpha (0.5) that 1 painted on the scale that topped out at half. The slider
-   * simply has somewhere to go above the shipped look now. See `radialScrimAlphas`.
+   * Deliberately deep: at 0.9 the desktop is a dark suggestion behind the wheel (~0.85 alpha under
+   * it, still falling off at the edge rather than a flat sheet), so the wheel is the only thing on
+   * screen worth looking at. Note this is past `SCRIM_FLATTEN_FROM`, so the radial opens monitor-
+   * wide by default instead of as a box around the wheel. See `radialScrimAlphas`.
    */
-  backdropOpacity: 0.6,
+  backdropOpacity: 0.9,
   backdropDimScale: BACKDROP_DIM_SCALE,
   /**
    * Off, and for the same reason `radialInstantActivate` is off: this one reaches outside the app.

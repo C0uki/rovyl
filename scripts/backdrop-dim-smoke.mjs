@@ -153,9 +153,14 @@ try {
     }
   });
   check(() => {
-    /** A config that lost the key falls back to the default, not to a blacked-out screen. */
-    assert.deepEqual(radialScrimAlphas(undefined), radialScrimAlphas(0.6));
-    assert.ok(!radialScrimNeedsFullBleed(undefined));
+    /**
+     * A config that lost the key falls back to the shipped default (`DEFAULT_UI_CONFIG`), not to a
+     * blacked-out screen. That default is deep enough to need the monitor, so the fallback does
+     * too — what must not happen is a bare 1: an opaque fill over a config that merely lost a key.
+     */
+    assert.deepEqual(radialScrimAlphas(undefined), radialScrimAlphas(0.9));
+    assert.ok(radialScrimAlphas(undefined).floor < radialScrimAlphas(undefined).peak,
+      "the fallback still falls off at the edge: it is a pool, not an opaque sheet");
   });
 
   console.log(`backdrop-dim-smoke: OK (${n} assertions)`);

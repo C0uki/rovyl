@@ -28,7 +28,7 @@ export function radialScrimAlphas(backdropOpacity: number): { peak: number; floo
   /** Fallback is DEFAULT_UI_CONFIG's value: a config that lost the key must not black the screen out. */
   const dim = Number.isFinite(backdropOpacity)
     ? Math.min(1, Math.max(0, backdropOpacity))
-    : 0.6;
+    : 0.9;
   const peak = 0.22 + 0.78 * dim * dim;
   const flatten = Math.max(0, (dim - SCRIM_FLATTEN_FROM) / (1 - SCRIM_FLATTEN_FROM));
   return { peak, floor: peak * flatten * flatten };
