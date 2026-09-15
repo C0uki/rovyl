@@ -19,10 +19,13 @@ import {
   annularSectorPath,
   polarPoint,
   sectorBoundsDeg,
-  sectorBeamEndStop,
+  sectorBeamAlphas,
+  sectorBeamLean,
+  sectorBeamStops,
   sectorCentreDeg,
   sectorGradientStops,
   sectorIndexForDelta,
+  sectorReachStops,
   SECTOR_EDGE_ALPHA,
   SECTOR_FILL_ALPHA,
   SECTOR_SEAM_ALPHA,
@@ -581,50 +584,30 @@ const RadialSectors = React.memo(({
   /**
    * The beam runs STRAIGHT out along the wedge it belongs to, not out in every direction at once.
    *
-   * A radial gradient fades along arcs, so the lit part of a wedge is bounded by a curve and reads
-   * as a piece cut out of a glow centred on the hub — the light belongs to the wheel, and the
-   * wedge is only where it happens to show. Bands perpendicular to the wedge's own bisector read
-   * the other way round: the light is going somewhere, and the direction it goes is the answer the
-   * mode exists to give. One gradient per wedge, because each one points somewhere else.
+   * A ring fades along arcs, so the lit part of a wedge is bounded by a curve and reads as a piece
+   * cut out of one glow belonging to the hub — the light is the wheel's, and the wedge is only
+   * where it happens to show. A gradient along the wedge's own bisector reads the other way round:
+   * the light is going somewhere, and where it goes is the answer the mode exists to give.
    *
-   * `sectorBeamEndStop` is what keeps the straight fade from costing the arrival at zero — see it.
+   * It only LEANS, though. Arriving at nothing is the reach's job, and the two are multiplied —
+   * `sectorBeamStops` in `src/utils/radialSectors.ts` has the whole of why.
    */
-  const beamEnd = sectorBeamEndStop(count, innerStop);
-  const linearBeam = beamEnd !== null;
-  const beamEndStop = beamEnd ?? 1;
+  const lean = sectorBeamLean(count);
 
   if (!drawable) return null;
 
-  /**
-   * One gradient, along `deg` for `length` pixels from the wheel's centre — or, when `deg` is
-   * `null`, the old ring, which is still what a two-item wheel gets.
-   */
-  const gradient = (
+  /** One straight gradient, along `deg`, from the wheel's centre out for `length` pixels. */
+  const beamGradient = (
     id: string,
-    color: string,
     stops: { offset: number; opacity: number }[],
-    deg: number | null,
-    length: number,
+    deg: number,
+    length: number = radiusOuter,
+    color: string = hoverColor,
   ) => {
-    const children = stops.map((stop, index) => (
-      <stop
-        key={index}
-        offset={stop.offset.toFixed(4)}
-        stopColor={color}
-        stopOpacity={stop.opacity.toFixed(4)}
-      />
-    ));
-    if (deg === null) {
-      return (
-        <radialGradient id={id} cx="50%" cy="50%" r="50%">
-          {children}
-        </radialGradient>
-      );
-    }
     /**
      * User space, not the bounding box: every offset here is already a fraction of a RADIUS, and a
-     * box-relative vector would re-scale them against the wedge's own bounds — a different run for
-     * every slice, which is exactly the one thing the shared arithmetic exists to prevent.
+     * box-relative vector would re-scale them against each wedge's own bounds — a different run
+     * per slice, which is the one thing the shared arithmetic exists to prevent.
      */
     const far = polarPoint(radiusOuter, length, deg);
     return (
@@ -636,23 +619,31 @@ const RadialSectors = React.memo(({
         x2={far.x.toFixed(2)}
         y2={far.y.toFixed(2)}
       >
-        {children}
+        {stops.map((stop, index) => (
+          <stop
+            key={index}
+            offset={stop.offset.toFixed(4)}
+            stopColor={color}
+            stopOpacity={stop.opacity.toFixed(4)}
+          />
+        ))}
       </linearGradient>
     );
   };
 
-  const beamStops = sectorGradientStops(
-    innerStop, falloffStop, SECTOR_FILL_ALPHA[0], SECTOR_FILL_ALPHA[1], beamEndStop,
+  /** Tempered for how much of the plane a wedge of this wheel covers — see `sectorBeamAlphas`. */
+  const beamStops = sectorBeamStops(
+    innerStop, falloffStop, ...sectorBeamAlphas(SECTOR_FILL_ALPHA, count), lean,
   );
-  const edgeStops = sectorGradientStops(
-    innerStop, falloffStop, SECTOR_EDGE_ALPHA[0], SECTOR_EDGE_ALPHA[1], beamEndStop,
+  const edgeStops = sectorBeamStops(
+    innerStop, falloffStop, ...sectorBeamAlphas(SECTOR_EDGE_ALPHA, count), lean,
   );
   const seamStops = sectorGradientStops(
     seamInnerStop, seamFalloffStop, SECTOR_SEAM_ALPHA[0], SECTOR_SEAM_ALPHA[1],
   );
   /** Every wedge points somewhere else, so every wedge needs its own pair. */
-  const beamId = (index: number) => `${gradientId}-beam${linearBeam ? `-${index}` : ''}`;
-  const edgeId = (index: number) => `${gradientId}-edge${linearBeam ? `-${index}` : ''}`;
+  const beamId = (index: number) => `${gradientId}-beam-${index}`;
+  const edgeId = (index: number) => `${gradientId}-edge-${index}`;
 
   return (
     <svg
@@ -677,24 +668,31 @@ const RadialSectors = React.memo(({
           blob, and a lit AREA needs the angle it occupies to be visible, which is an angle carried
           entirely by its edges.
         */}
-        {(linearBeam ? wedges : [null]).map((_, index) => (
+        {wedges.map((_, index) => (
           <React.Fragment key={index}>
-            {gradient(
-              beamId(index),
-              hoverColor,
-              beamStops,
-              linearBeam ? sectorCentreDeg(index, count) : null,
-              radiusOuter,
-            )}
-            {gradient(
-              edgeId(index),
-              hoverColor,
-              edgeStops,
-              linearBeam ? sectorCentreDeg(index, count) : null,
-              radiusOuter,
-            )}
+            {beamGradient(beamId(index), beamStops, sectorCentreDeg(index, count))}
+            {beamGradient(edgeId(index), edgeStops, sectorCentreDeg(index, count))}
           </React.Fragment>
         ))}
+        {/*
+          The reach: the wheel's own dissolve, drawn once for the whole plane and multiplied into
+          every wedge as a mask. It depends on nothing but the distance from the hub, so it is zero
+          on the entire rim at once — which is what lets the beam above lean without ever leaving
+          alpha standing where the window cuts.
+        */}
+        <radialGradient id={`${gradientId}-reach`} cx="50%" cy="50%" r="50%">
+          {sectorReachStops(innerStop, falloffStop, lean).map((stop, index) => (
+            <stop
+              key={index}
+              offset={stop.offset.toFixed(4)}
+              stopColor="#FFFFFF"
+              stopOpacity={stop.opacity.toFixed(4)}
+            />
+          ))}
+        </radialGradient>
+        <mask id={`${gradientId}-mask`} maskUnits="userSpaceOnUse" x={0} y={0} width={size} height={size}>
+          <rect width={size} height={size} fill={`url(#${gradientId}-reach)`} />
+        </mask>
         {/*
           The seams, white rather than the hover colour: they belong to the wheel and not to the
           selection, and they are on before anything is aimed at. Each runs along its OWN line for
@@ -703,29 +701,35 @@ const RadialSectors = React.memo(({
         */}
         {dividers.map((_, index) => (
           <React.Fragment key={`seam-${index}`}>
-            {gradient(
+            {beamGradient(
               `${gradientId}-seam-${index}`,
-              '#FFFFFF',
               seamStops,
               sectorBoundsDeg(index, count).startDeg,
               seamEnd,
+              '#FFFFFF',
             )}
           </React.Fragment>
         ))}
       </defs>
 
-      {wedges.map((path, index) => (
-        <path
-          key={index}
-          className="zn-radial-sector"
-          d={path}
-          fill={`url(#${beamId(index)})`}
-          stroke={`url(#${edgeId(index)})`}
-          strokeWidth={1.25}
-          vectorEffect="non-scaling-stroke"
-          style={{ opacity: index === activeIndex ? 1 : 0 }}
-        />
-      ))}
+      {/*
+        One mask for all of them, not one each: it is the same ring every wedge is multiplied by,
+        and a mask per path would be a full-screen rasterisation per shortcut on every open.
+      */}
+      <g mask={`url(#${gradientId}-mask)`}>
+        {wedges.map((path, index) => (
+          <path
+            key={index}
+            className="zn-radial-sector"
+            d={path}
+            fill={`url(#${beamId(index)})`}
+            stroke={`url(#${edgeId(index)})`}
+            strokeWidth={1.25}
+            vectorEffect="non-scaling-stroke"
+            style={{ opacity: index === activeIndex ? 1 : 0 }}
+          />
+        ))}
+      </g>
 
       {/*
         The seams, and they are on from the moment the wheel opens — that is the whole point of the

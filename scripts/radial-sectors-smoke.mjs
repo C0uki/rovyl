@@ -53,8 +53,11 @@ try {
     sectorIndexForDelta,
     annularSectorPath,
     polarPoint,
-    sectorBeamEndStop,
+    sectorBeamAlphas,
+    sectorBeamLean,
+    sectorBeamStops,
     sectorCentreDeg,
+    sectorReachStops,
     sectorGradientStops,
     SECTOR_FILL_ALPHA,
     SECTOR_EDGE_ALPHA,
@@ -274,17 +277,20 @@ try {
     }
   });
 
-  // ── 5. The beam runs straight, and still arrives at nothing ──────────────
+  // ── 5. The beam leans, the reach arrives, and the product does both ──────
   /**
-   * The wedge is lit by a LINEAR gradient along its own bisector, so its fade is a set of bands
-   * perpendicular to that direction rather than arcs around the hub. That buys the direction back
-   * at one cost worth proving away: a band reaches the wedge's far CORNERS before it reaches the
-   * point of the bisector, so a fade that finished at the rim would still have alpha in those
-   * corners — and the outer arc between them would be drawn as a curved cut across the desktop.
-   * `sectorBeamEndStop` lands the zero at the corners instead, which is where `cos(half slice)`
-   * comes from: everything from there to the rim is already nothing.
+   * The wedge is lit by the two multiplied: a LINEAR gradient along its own bisector, masked by
+   * the ring the whole plane shares. Neither could do the job alone. A straight gradient holds its
+   * value on lines ACROSS the beam, and such a line meets the rim — so on its own it would have to
+   * be finished by the wedge's far corners, which on a wide wedge is barely half way out, leaving a
+   * short triangle cut off by a chord with the lit sides running past it. And the ring on its own
+   * fades in arcs, which is the thing that carries no direction at all.
+   *
+   * What is checked here is the product, at the two places it can go wrong: on the rim, where
+   * anything left standing is cut by the window; and across a wedge at one radius, where too much
+   * lean stops being a direction and becomes a bulge out of the slice's own sides.
    */
-  /** What the gradient paints at `offset`, the way SVG does it — straight lines between stops. */
+  /** What a gradient paints at `offset`, the way SVG does it — straight lines between stops. */
   const alphaAt = (stops, offset) => {
     if (offset <= stops[0].offset) return stops[0].opacity;
     for (let i = 1; i < stops.length; i += 1) {
@@ -298,66 +304,170 @@ try {
     return stops[stops.length - 1].opacity;
   };
 
+  /**
+   * What is actually painted at radius `r` (as a fraction of the rim), `theta` off the bisector.
+   * The beam is read at the point's distance ALONG the bisector, which is what a straight gradient
+   * measures; the reach is read at its distance from the hub.
+   */
+  const paintedAlpha = (beam, reach, r, theta) =>
+    alphaAt(beam, r * Math.cos(theta)) * alphaAt(reach, r);
+
+  /** The rim is cut by the window, so the product has to be nothing there — from every direction. */
   check(() => {
-    let linearCases = 0;
     for (const count of COUNTS) {
+      const lean = sectorBeamLean(count);
+      const half = Math.PI / count;
       for (const [inner, falloff] of GEOMETRIES) {
-        const endStop = sectorBeamEndStop(count, inner);
-        if (endStop === null) {
-          /** The ring is the fallback, and the ring is only allowed where the beam cannot go. */
-          assert.ok(
-            count < 3 || inner > Math.cos(Math.PI / count) * 0.7,
-            `${count} items, inner ${inner}: a linear beam was refused where it would have drawn`,
-          );
-          continue;
-        }
-        linearCases += 1;
-        assert.ok(
-          Math.abs(endStop - Math.cos(Math.PI / count)) < 1e-12 && endStop > 0 && endStop < 1,
-          `${count} items: the fade has to end at the corners' projection, not at ${endStop}`,
-        );
+        const reach = sectorReachStops(inner, falloff, lean);
         for (const [near, far] of ALPHAS) {
-          const stops = sectorGradientStops(inner, falloff, near, far, endStop);
-          const last = stops[stops.length - 1];
-          assert.equal(last.offset, 1, `${count} items: the gradient still has to span its whole run`);
-          assert.ok(last.opacity < 1e-9, `${count} items: alpha ${last.opacity} left at the rim`);
-          /**
-           * The corner itself, and every point of the outer arc past it: a wedge point at radius
-           * `r` and `theta` off the bisector falls at `r·cos(theta)` along the gradient, so the
-           * whole rim lies at `endStop` or beyond.
-           */
-          for (const offset of [endStop, (endStop + 1) / 2, 1]) {
+          const beam = sectorBeamStops(inner, falloff, near, far, lean);
+          for (let k = 0; k <= 8; k += 1) {
+            const theta = (-half + (2 * half * k) / 8) * 0.999;
             assert.ok(
-              alphaAt(stops, offset) < 1e-9,
-              `${count} items, inner ${inner}: ${alphaAt(stops, offset)} alpha at ${offset} is a cut on the rim`,
+              paintedAlpha(beam, reach, 1, theta) < 1e-9,
+              `${count} items, inner ${inner}: alpha left on the rim at ${((theta * 180) / Math.PI).toFixed(1)}° off the beam`,
             );
           }
+          /** And it gets there by fading, not by stopping: still falling on the way out. */
+          let previous = Infinity;
+          for (let k = 0; k <= 40; k += 1) {
+            const r = inner + ((1 - inner) * k) / 40;
+            const alpha = paintedAlpha(beam, reach, r, 0);
+            assert.ok(
+              alpha <= previous + 1e-9,
+              `${count} items, inner ${inner}: the beam brightens again at ${r.toFixed(3)} of the way out`,
+            );
+            previous = alpha;
+          }
+        }
+      }
+    }
+  });
+
+  /**
+   * The lean is a direction, not a bulge.
+   *
+   * A straight gradient always leaves the sides of a wedge a little ahead of its axis, so at one
+   * radius the edges are brighter than the middle. That is what makes the light read as going
+   * somewhere — and past a point it instead reads as the highlight spilling sideways out of the
+   * slice it belongs to, which is the three-item wheel's whole complaint. `sectorBeamLean` buys the
+   * lean in proportion to `cos(half slice)` for exactly this reason, so the wider the wedge, the
+   * less of it is taken.
+   */
+  check(() => {
+    for (const count of COUNTS) {
+      const lean = sectorBeamLean(count);
+      assert.ok(lean > 0 && lean <= 1, `${count} items: a lean of ${lean} is not a fraction`);
+      if (count <= 2) {
+        assert.ok(
+          Math.abs(lean - 1) < 1e-9,
+          `${count} items: a half-plane has no direction to lean in — its own flat side lies across the beam`,
+        );
+      }
+      const half = Math.PI / count;
+      for (const [inner, falloff] of GEOMETRIES) {
+        const reach = sectorReachStops(inner, falloff, lean);
+        const [near, far] = SECTOR_FILL_ALPHA;
+        const beam = sectorBeamStops(inner, falloff, near, far, lean);
+        for (let k = 1; k <= 20; k += 1) {
+          const r = inner + ((1 - inner) * k) / 20;
+          const axis = paintedAlpha(beam, reach, r, 0);
+          const edge = paintedAlpha(beam, reach, r, half * 0.999);
           /**
-           * And the near end holds: the dead zone's own corners are foreshortened onto the axis
-           * too, so the hold has to have started before them or the wedge begins on a flat strip.
+           * Only where there is light to be judged. Under this the composite is a rounding error
+           * on a desktop, and the ratio between two numbers that small is not a look anyone sees.
            */
+          if (axis < 0.02) continue;
           assert.ok(
-            stops[0].offset <= inner * endStop + 1e-9,
-            `${count} items, inner ${inner}: the hold starts at ${stops[0].offset}, past the dead zone's corner`,
+            edge <= axis * 1.4 + 1e-9,
+            `${count} items, inner ${inner}: at ${r.toFixed(2)} the sides are ${(edge / axis).toFixed(2)}× the axis — that is a bulge, not a beam`,
           );
-          /** It is still a dissolve on the way there, not a step. */
-          for (let i = 1; i < stops.length; i += 1) {
-            assert.ok(stops[i].offset >= stops[i - 1].offset, `${count} items: stop ${i} goes backwards`);
-            assert.ok(
-              stops[i].opacity <= stops[i - 1].opacity + 1e-9,
-              `${count} items: alpha rises again at stop ${i}`,
-            );
-            assert.ok(stops[i].offset >= 0 && stops[i].offset <= 1, "offset off the gradient");
-          }
-          /** The dissolve needs room, or the fade is a boundary with extra steps in it. */
           assert.ok(
-            endStop - stops[1].offset > 0.05,
-            `${count} items, inner ${inner}: only ${(endStop - stops[1].offset).toFixed(3)} of the run left to fade in`,
+            edge >= axis - 1e-9,
+            `${count} items: a straight beam cannot be dimmer at the sides than on its own axis`,
           );
         }
       }
     }
-    assert.ok(linearCases > 0, "no wheel at all got a linear beam — the fallback has swallowed the mode");
+  });
+
+  /** A wheel with room for the lean has to actually take it, or nothing was bought at all. */
+  check(() => {
+    const [near, far] = SECTOR_FILL_ALPHA;
+    const beam = sectorBeamStops(0.2, 0.5, near, far, sectorBeamLean(8));
+    assert.ok(
+      beam[beam.length - 1].opacity < far * 0.5,
+      "eight items: the beam reaches the rim at nearly full strength — there is no direction in it",
+    );
+    assert.ok(
+      beam[beam.length - 1].opacity > 0,
+      "the beam only leans; arriving at nothing is the reach's job, and a zero here would double it",
+    );
+  });
+
+  /**
+   * And the split costs the wheel nothing it had. Along the bisector the two multiply back to the
+   * curve the wedge has always faded on — same hold, same `(1 - t)²`, same arrival — so what the
+   * beam buys is the direction alone, and not a dimmer or a shorter highlight.
+   */
+  check(() => {
+    for (const count of COUNTS) {
+      const lean = sectorBeamLean(count);
+      for (const [inner, falloff] of GEOMETRIES) {
+        for (const [near, far] of ALPHAS) {
+          const beam = sectorBeamStops(inner, falloff, near, far, lean);
+          const reach = sectorReachStops(inner, falloff, lean);
+          const asBefore = sectorGradientStops(inner, falloff, near, far);
+          const plateau = asBefore[1].offset;
+          for (let k = 0; k <= 40; k += 1) {
+            const r = inner + ((1 - inner) * k) / 40;
+            const painted = paintedAlpha(beam, reach, r, 0);
+            if (r >= plateau) {
+              assert.ok(
+                Math.abs(painted - alphaAt(asBefore, r)) < 0.002,
+                `${count} items, inner ${inner}: at ${r.toFixed(3)} the beam paints ${painted.toFixed(4)} where the wedge always painted ${alphaAt(asBefore, r).toFixed(4)}`,
+              );
+            } else {
+              /**
+               * Inside the hold the two differ by design and by one thing only: the beam's ramp
+               * from `near` to `far` starts at the centre rather than at the dead zone, so that the
+               * wedge's foreshortened inner corners land on it instead of in front of it. It is
+               * still the same hold, between the same two alphas.
+               */
+              assert.ok(
+                painted <= near + 1e-9 && painted >= far - 1e-9,
+                `${count} items, inner ${inner}: the hold paints ${painted.toFixed(4)}, outside [${far}, ${near}]`,
+              );
+            }
+          }
+        }
+      }
+    }
+  });
+
+  /** The reach is a factor, so it has to be one: never above full, never negative, never rising. */
+  check(() => {
+    for (const count of COUNTS) {
+      const lean = sectorBeamLean(count);
+      for (const [inner, falloff] of GEOMETRIES) {
+        const reach = sectorReachStops(inner, falloff, lean);
+        assert.equal(reach[reach.length - 1].offset, 1, `${count} items: the reach must span the plane`);
+        assert.ok(reach[reach.length - 1].opacity < 1e-9, `${count} items: the reach must end at nothing`);
+        for (let i = 0; i < reach.length; i += 1) {
+          assert.ok(
+            reach[i].opacity >= 0 && reach[i].opacity <= 1 + 1e-9,
+            `${count} items: a mask value of ${reach[i].opacity} is not a factor`,
+          );
+          if (i > 0) {
+            assert.ok(reach[i].offset >= reach[i - 1].offset, `${count} items: reach stop ${i} goes backwards`);
+            assert.ok(
+              reach[i].opacity <= reach[i - 1].opacity + 1e-9,
+              `${count} items: the reach brightens again at stop ${i}`,
+            );
+          }
+        }
+      }
+    }
   });
 
   /**
@@ -381,6 +491,48 @@ try {
         );
       }
     }
+  });
+
+  /**
+   * The wider the wedge, the less alpha it is given, because what the eye weighs is the light and
+   * a wedge's share of the plane is `1 / count`. Never above what the numbers were tuned to be.
+   */
+  check(() => {
+    let previous = 0;
+    for (const count of COUNTS) {
+      const [near, far] = sectorBeamAlphas(SECTOR_FILL_ALPHA, count);
+      assert.ok(
+        near <= SECTOR_FILL_ALPHA[0] + 1e-9 && far <= SECTOR_FILL_ALPHA[1] + 1e-9,
+        `${count} items: the temper brightened the wedge past its calibration`,
+      );
+      assert.ok(near > far && far > 0, `${count} items: ${near}/${far} is not a hold that ramps down`);
+      assert.ok(
+        near >= previous - 1e-9,
+        `${count} items: a narrower wedge came out dimmer than a wider one`,
+      );
+      previous = near;
+      /**
+       * The point of the square root: the light a wedge puts on the desktop — alpha times its
+       * share of the plane — has to FALL as the wedge widens, or the wide one is a wash; and it has
+       * to rise, or the crowded wheel's slivers are invisible. Halfway is between the two.
+       */
+      const light = near / count;
+      if (count > 1) {
+        const wider = sectorBeamAlphas(SECTOR_FILL_ALPHA, count - 1)[0] / (count - 1);
+        assert.ok(
+          light < wider + 1e-9 || near >= SECTOR_FILL_ALPHA[0] - 1e-9,
+          `${count} items: a narrower wedge puts more light on the desktop than a wider one`,
+        );
+      }
+    }
+    assert.ok(
+      Math.abs(sectorBeamAlphas(SECTOR_FILL_ALPHA, 20)[0] - SECTOR_FILL_ALPHA[0]) < 1e-9,
+      "a crowded wheel is the wheel these alphas were calibrated on — it must get them unchanged",
+    );
+    assert.ok(
+      sectorBeamAlphas(SECTOR_FILL_ALPHA, 3)[0] < SECTOR_FILL_ALPHA[0] * 0.8,
+      "three items covers a third of the plane per wedge and has to be tempered for it",
+    );
   });
 
   /** The seams are furniture, not the highlight: shorter, and fainter than the fill. */

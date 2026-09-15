@@ -102,13 +102,17 @@ const FALLOFF_SAMPLES = [
   0, 0.06, 0.12, 0.19, 0.25, 0.32, 0.38, 0.44, 0.5, 0.56, 0.62, 0.69, 0.75, 0.82, 0.88, 0.94, 1,
 ];
 
+/** Where the hold ends and the dissolve begins. Everything that fades has to agree on it. */
+export function sectorPlateauStop(innerStop: number, falloffStop: number): number {
+  return Math.min(0.98, Math.max(innerStop + 0.01, falloffStop));
+}
+
 /**
  * The stops of one wedge gradient: hold, then dissolve.
  *
  * Two regions. From the dead zone out to `falloffStop` the wedge holds near full strength, ramping
  * gently from `nearAlpha` to `farAlpha` — that is the part with the icon in it, and it has to read
- * as a lit SECTION. Past it the alpha falls as `(1 - t)²` all the way to `endStop`, which is the
- * rim unless the caller knows the shape runs out sooner along the gradient's own axis.
+ * as a lit SECTION. Past it the alpha falls as `(1 - t)²` all the way to the rim.
  *
  * The square matters twice. Its slope is zero at the end, so the wedge arrives at nothing instead
  * of stopping at something — there is no radius at which a boundary appears. And it is steep at
@@ -121,61 +125,158 @@ export function sectorGradientStops(
   falloffStop: number,
   nearAlpha: number,
   farAlpha: number,
-  endStop: number = 1,
 ): { offset: number; opacity: number }[] {
-  const end = Math.min(1, Math.max(0.05, endStop));
-  /**
-   * Where the hold has to have STARTED, which is not the dead zone when the run is a straight line.
-   *
-   * A wedge point at radius `r`, `θ` off the axis, falls at `r·cosθ` along that line — so the
-   * nearest thing the wedge owns is the corner of its dead zone, foreshortened by the same `end`
-   * the rim's corners are. Starting the hold at `innerStop` would leave those corners in front of
-   * the first stop, holding `nearAlpha` flat over a strip that is meant to be inside the hub.
-   */
-  const start = Math.min(end - 0.03, innerStop * end);
-  /**
-   * The hold keeps its true reach where the run is long enough to afford it, and gives way when it
-   * is not: past this the dissolve would have fewer pixels than it needs and the wedge would end on
-   * a step. Both are worse than a highlight that hugs the wheel a little more closely.
-   */
-  const plateau = Math.min(
-    end - 0.02,
-    Math.max(start + 0.01, Math.min(falloffStop, start + 0.6 * (end - start))),
-  );
+  const plateau = sectorPlateauStop(innerStop, falloffStop);
   return [
-    { offset: start, opacity: nearAlpha },
+    { offset: innerStop, opacity: nearAlpha },
     ...FALLOFF_SAMPLES.map((t) => ({
-      offset: plateau + t * (end - plateau),
+      offset: plateau + t * (1 - plateau),
       opacity: farAlpha * (1 - t) * (1 - t),
     })),
-    /** Past the point where the fade landed on zero there is only zero — see `sectorBeamEndStop`. */
-    ...(end < 1 ? [{ offset: 1, opacity: 0 }] : []),
   ];
 }
 
 /**
- * Where a wedge's LINEAR beam must have reached zero — or `null` when it must not be linear at all.
+ * The wedge's light, as two things multiplied — which is the only way it can be both.
  *
- * The beam runs straight out along the wedge's bisector, so it fades in bands across that
- * direction instead of in rings around the hub. The last thing the wedge has on screen is a
- * CORNER, out where a straight side meets the rim, and a corner sits half a slice off-axis — it
- * therefore falls on the band `cos(half slice)` along. Land the zero there and the corners, the
- * arc between them and everything past it are already nothing: the wedge still reaches the frame
- * having disappeared, which is the property the radial version was built around and the one a
- * curved cut across the desktop would cost.
+ * A wedge has to say a DIRECTION, and it has to arrive at nothing on a circle: the rim is where
+ * the window cuts, and alpha still standing there is drawn as a hard edge across the desktop. One
+ * gradient cannot do both. A gradient running straight out along the wedge holds its value on
+ * lines ACROSS that direction, and such a line meets the rim — so its fade would have to be over
+ * by the time it reached the wedge's far corners, which on a wide wedge is barely half way out.
+ * That is the three-item wheel: a short bright triangle near the hub, cut off by a straight chord,
+ * with the two lit sides carrying on past it to the rim on their own. It reads as an outline that
+ * lost its fill, because that is what it is.
  *
- * `null` is the two cases where that cannot be bought:
- *  - Two items or one. A half-plane's straight side is a full 90° off its bisector, so the whole
- *    diameter lies on ONE band: no gradient along that axis fades it, and it ends at the frame at
- *    whatever alpha it was holding.
- *  - A dead zone so large against the rim that the wedge's corners are behind it. There is no
- *    room left between the two for a dissolve, and what is drawn would be a step.
- * Both go back to the ring, where every ray fades alike and neither can happen.
+ * So the fade is split in two and multiplied by a mask:
+ *  - The BEAM is the straight one, per wedge, along its bisector. It carries the colour, and it
+ *    falls on the same square as ever but lands on `lean` instead of on nothing.
+ *  - The REACH is the ring, drawn once for the whole plane. It is whatever is left over — the
+ *    quotient that makes the product come out at exactly `(1 - t)²` — and since it depends on
+ *    nothing but the distance from the hub, it is zero on the entire rim in every direction.
+ *
+ * The point of splitting it that way: ALONG the bisector the wedge is painted exactly as it was
+ * before any of this, the calibrated fade unchanged. The direction is bought entirely off-axis,
+ * where a straight gradient leaves the sides of a wedge a little ahead of its middle.
  */
-export function sectorBeamEndStop(count: number, innerStop: number): number | null {
-  if (count < 3) return null;
-  const end = Math.cos(Math.PI / count);
-  return innerStop <= end * 0.7 ? end : null;
+function beamCurve(t: number, lean: number): number {
+  return lean + (1 - lean) * (1 - t) * (1 - t);
+}
+
+/**
+ * How much of the run a full lean wants after the hold has ended.
+ *
+ * A lean is a slope, and a slope needs distance. Where the hold reaches almost to the rim — a dead
+ * zone squeezed against a window edge — what is left is a sliver, and the same drop crammed into
+ * it stops being a direction and becomes a step at one radius, with the wedge's own sides landing
+ * on the near side of that step and reading as a bulge. Below this much room the lean is taken in
+ * proportion to what there is.
+ */
+const SECTOR_BEAM_RUN = 0.5;
+
+function leanWithRoom(lean: number, plateau: number): number {
+  return 1 - (1 - lean) * Math.min(1, (1 - plateau) / SECTOR_BEAM_RUN);
+}
+
+/**
+ * How much of its own strength the beam still has at the rim: the sine of the wedge's half-slice.
+ *
+ * A straight gradient holds its value across the beam, so at any distance from the hub the parts
+ * of a wedge off to the sides are always a little ahead of the part on the axis — nearer the start
+ * of the run, and therefore brighter. That is what makes the light read as going somewhere. Past a
+ * point it instead reads as the highlight spilling sideways out of the slice it belongs to, and
+ * the point is decided by one thing: how far off-axis the wedge's own sides are.
+ *
+ * Which is what the sine is. It is small on a crowded wheel, where the sides are nearly parallel
+ * to the beam and almost the whole fade can be spent on the lean; it is most of the way to 1 on a
+ * three-item wheel, where they are 60° out and there is almost nothing to spend. Across every size
+ * of wheel it holds the sides to within about a fifth of the axis at the same radius — a beam,
+ * rather than a bulge.
+ *
+ * One and two items get no lean at all, which is correct rather than a special case: a half-plane
+ * has no direction a straight gradient can point in that its own flat side does not lie across.
+ * `Math.max(count, 2)` is what folds the single-item wheel — a reflex wedge, with no axis to lean
+ * along — in with the two-item one.
+ */
+export function sectorBeamLean(count: number): number {
+  return Math.sin(Math.PI / Math.max(count, 2));
+}
+
+/**
+ * The beam's own ramp: the hold, then the square landing on `lean` rather than on nothing.
+ *
+ * It starts at the centre rather than at the dead zone, and that is not laziness about a region
+ * nothing is drawn in. The wedge's inner CORNERS are foreshortened onto this axis like everything
+ * else — they sit at `innerStop · cos(half slice)` along it — so a first stop at `innerStop` would
+ * leave them in front of it, on a flat strip of the near alpha instead of on the ramp.
+ */
+export function sectorBeamStops(
+  innerStop: number,
+  falloffStop: number,
+  nearAlpha: number,
+  farAlpha: number,
+  lean: number,
+): { offset: number; opacity: number }[] {
+  const plateau = sectorPlateauStop(innerStop, falloffStop);
+  const reached = leanWithRoom(lean, plateau);
+  return [
+    { offset: 0, opacity: nearAlpha },
+    ...FALLOFF_SAMPLES.map((t) => ({
+      offset: plateau + t * (1 - plateau),
+      opacity: farAlpha * beamCurve(t, reached),
+    })),
+  ];
+}
+
+/**
+ * The reach: what the beam did not do, so that the two together come out at `(1 - t)²`.
+ *
+ * White, and used as a mask rather than as paint — it is a factor, not a colour. It holds at 1
+ * through the section with the icons in it and is zero at the rim, which is the whole of what the
+ * wedges need from it: whatever the beam is still holding out there, this takes to nothing, in
+ * every direction at once and therefore on the window's edge wherever that edge happens to be.
+ */
+export function sectorReachStops(
+  innerStop: number,
+  falloffStop: number,
+  lean: number,
+): { offset: number; opacity: number }[] {
+  const plateau = sectorPlateauStop(innerStop, falloffStop);
+  const reached = leanWithRoom(lean, plateau);
+  return [
+    { offset: innerStop, opacity: 1 },
+    ...FALLOFF_SAMPLES.map((t) => ({
+      offset: plateau + t * (1 - plateau),
+      opacity: ((1 - t) * (1 - t)) / beamCurve(t, reached),
+    })),
+  ];
+}
+
+/**
+ * The wheel these alphas were calibrated on, in items.
+ *
+ * What the eye weighs is not the alpha, it is the LIGHT — and a wedge's share of the plane is
+ * `1 / count`, so the same alpha on a three-item wheel puts nearly three times as much of it on
+ * the desktop. At that width the highlight stops reading as a lit section and becomes a wash with
+ * two hard rails on it, which is the whole of what a three-item wheel looks wrong for.
+ */
+const SECTOR_ALPHA_COUNT = 8;
+
+/**
+ * The same light, spread over however much plane this wheel gives a wedge.
+ *
+ * The square root rather than the share itself: matching the area exactly would take a three-item
+ * wedge down to a third and leave nothing to see, and the eye does not add brightness over an area
+ * linearly anyway. Halfway between "the same alpha" and "the same total light" is where a wide
+ * wedge stops shouting without going quiet. Never above 1 — past eight items the wedges are narrow
+ * and the numbers below are already what they were tuned to be.
+ */
+export function sectorBeamAlphas(
+  alphas: readonly [number, number],
+  count: number,
+): [number, number] {
+  const temper = Math.min(1, Math.sqrt(Math.max(count, 1) / SECTOR_ALPHA_COUNT));
+  return [alphas[0] * temper, alphas[1] * temper];
 }
 
 /**

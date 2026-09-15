@@ -4,9 +4,12 @@ import {
   annularSectorPath,
   polarPoint,
   sectorBoundsDeg,
-  sectorBeamEndStop,
+  sectorBeamAlphas,
+  sectorBeamLean,
+  sectorBeamStops,
   sectorCentreDeg,
   sectorGradientStops,
+  sectorReachStops,
   SECTOR_EDGE_ALPHA,
   SECTOR_FILL_ALPHA,
   SECTOR_SEAM_ALPHA,
@@ -187,26 +190,16 @@ export const WheelPreview: React.FC<{ config: UIConfig; apps: AppItem[] }> = ({ 
       (sectorOuterRadiusFull * SECTOR_SEAM_FALLOFF_SCALE) / (sectorOuterRadius * SECTOR_SEAM_REACH),
     ),
   );
-  /** The wheel's own beam: straight out along each wedge's bisector. See `RadialSectors`. */
-  const sectorBeamEnd = sectorBeamEndStop(items.length, sectorInnerStop);
-  const sectorLinearBeam = sectorBeamEnd !== null;
-  const sectorBeamFadeEnd = sectorBeamEnd ?? 1;
+  /** The wheel's own beam and reach, multiplied the same way. See `RadialSectors`. */
+  const sectorLean = sectorBeamLean(items.length);
   const sectorSeamEnd = sectorOuterRadius * SECTOR_SEAM_REACH;
-  const sectorBeamId = (index: number) => `zs-wheel-beam${sectorLinearBeam ? `-${index}` : ''}`;
-  const sectorEdgeId = (index: number) => `zs-wheel-beam-edge${sectorLinearBeam ? `-${index}` : ''}`;
   const sectorGradient = (
     id: string,
     color: string,
     stops: { offset: number; opacity: number }[],
-    deg: number | null,
+    deg: number,
     length: number,
   ) => {
-    const children = stops.map((stop, index) => (
-      <stop key={index} offset={stop.offset.toFixed(4)} stopColor={color} stopOpacity={stop.opacity.toFixed(4)} />
-    ));
-    if (deg === null) {
-      return <radialGradient id={id} cx="50%" cy="50%" r="50%">{children}</radialGradient>;
-    }
     const far = polarPoint(sectorOuterRadius, length, deg);
     return (
       <linearGradient
@@ -217,7 +210,9 @@ export const WheelPreview: React.FC<{ config: UIConfig; apps: AppItem[] }> = ({ 
         x2={far.x.toFixed(2)}
         y2={far.y.toFixed(2)}
       >
-        {children}
+        {stops.map((stop, index) => (
+          <stop key={index} offset={stop.offset.toFixed(4)} stopColor={color} stopOpacity={stop.opacity.toFixed(4)} />
+        ))}
       </linearGradient>
     );
   };
@@ -269,31 +264,55 @@ export const WheelPreview: React.FC<{ config: UIConfig; apps: AppItem[] }> = ({ 
               viewBox={`0 0 ${sectorOuterRadius * 2} ${sectorOuterRadius * 2}`}
               shapeRendering="geometricPrecision"
             >
-              {/* The wheel's own three gradients — fill, lit edges, seams. See `RadialSectors`. */}
+              {/* The wheel's own gradients — beam, lit edges, the reach they are masked by, seams. */}
               <defs>
                 {/* One pair per wedge, because each one is aimed somewhere else. */}
-                {(sectorLinearBeam ? items : [null]).map((_, index) => (
+                {items.map((_, index) => (
                   <React.Fragment key={`grad-${index}`}>
                     {sectorGradient(
-                      sectorBeamId(index), hoverColor,
-                      sectorGradientStops(
+                      `zs-wheel-beam-${index}`, hoverColor,
+                      sectorBeamStops(
                         sectorInnerStop, sectorFalloffStop,
-                        SECTOR_FILL_ALPHA[0], SECTOR_FILL_ALPHA[1], sectorBeamFadeEnd,
+                        ...sectorBeamAlphas(SECTOR_FILL_ALPHA, items.length), sectorLean,
                       ),
-                      sectorLinearBeam ? sectorCentreDeg(index, items.length) : null,
+                      sectorCentreDeg(index, items.length),
                       sectorOuterRadius,
                     )}
                     {sectorGradient(
-                      sectorEdgeId(index), hoverColor,
-                      sectorGradientStops(
+                      `zs-wheel-beam-edge-${index}`, hoverColor,
+                      sectorBeamStops(
                         sectorInnerStop, sectorFalloffStop,
-                        SECTOR_EDGE_ALPHA[0], SECTOR_EDGE_ALPHA[1], sectorBeamFadeEnd,
+                        ...sectorBeamAlphas(SECTOR_EDGE_ALPHA, items.length), sectorLean,
                       ),
-                      sectorLinearBeam ? sectorCentreDeg(index, items.length) : null,
+                      sectorCentreDeg(index, items.length),
                       sectorOuterRadius,
                     )}
                   </React.Fragment>
                 ))}
+                <radialGradient id="zs-wheel-reach" cx="50%" cy="50%" r="50%">
+                  {sectorReachStops(sectorInnerStop, sectorFalloffStop, sectorLean).map((stop, index) => (
+                    <stop
+                      key={index}
+                      offset={stop.offset.toFixed(4)}
+                      stopColor="#FFFFFF"
+                      stopOpacity={stop.opacity.toFixed(4)}
+                    />
+                  ))}
+                </radialGradient>
+                <mask
+                  id="zs-wheel-reach-mask"
+                  maskUnits="userSpaceOnUse"
+                  x={0}
+                  y={0}
+                  width={sectorOuterRadius * 2}
+                  height={sectorOuterRadius * 2}
+                >
+                  <rect
+                    width={sectorOuterRadius * 2}
+                    height={sectorOuterRadius * 2}
+                    fill="url(#zs-wheel-reach)"
+                  />
+                </mask>
                 {items.map((_, index) => (
                   <React.Fragment key={`seam-grad-${index}`}>
                     {sectorGradient(
@@ -308,32 +327,40 @@ export const WheelPreview: React.FC<{ config: UIConfig; apps: AppItem[] }> = ({ 
                   </React.Fragment>
                 ))}
               </defs>
-              {items.map((item, index) => {
-                const { startDeg, endDeg } = sectorBoundsDeg(index, items.length);
-                const near = polarPoint(sectorOuterRadius, sectorInnerRadius, startDeg);
-                /** Seams stop short of the wedges — see `SECTOR_SEAM_REACH`. */
-                const far = polarPoint(sectorOuterRadius, sectorOuterRadius * SECTOR_SEAM_REACH, startDeg);
-                return (
-                  <React.Fragment key={item.id}>
+              {/* The beams, under the one reach that takes them all to nothing at the rim. */}
+              <g mask="url(#zs-wheel-reach-mask)">
+                {items.map((item, index) => {
+                  const { startDeg, endDeg } = sectorBoundsDeg(index, items.length);
+                  return (
                     <path
+                      key={item.id}
                       d={annularSectorPath(sectorInnerRadius, sectorOuterRadius, startDeg, endDeg)}
-                      fill={`url(#${sectorBeamId(index)})`}
-                      stroke={`url(#${sectorEdgeId(index)})`}
+                      fill={`url(#zs-wheel-beam-${index})`}
+                      stroke={`url(#zs-wheel-beam-edge-${index})`}
                       strokeWidth={1.25}
                       vectorEffect="non-scaling-stroke"
                       /** The same lit slice as the tiles': the preview shows one aim, not a live one. */
                       opacity={index === 0 ? 1 : 0}
                     />
-                    <line
-                      x1={near.x}
-                      y1={near.y}
-                      x2={far.x}
-                      y2={far.y}
-                      stroke={`url(#zs-wheel-beam-seam-${index})`}
-                      strokeWidth={1}
-                      vectorEffect="non-scaling-stroke"
-                    />
-                  </React.Fragment>
+                  );
+                })}
+              </g>
+              {items.map((item, index) => {
+                const { startDeg } = sectorBoundsDeg(index, items.length);
+                const near = polarPoint(sectorOuterRadius, sectorInnerRadius, startDeg);
+                /** Seams stop short of the wedges — see `SECTOR_SEAM_REACH`. */
+                const far = polarPoint(sectorOuterRadius, sectorSeamEnd, startDeg);
+                return (
+                  <line
+                    key={item.id}
+                    x1={near.x}
+                    y1={near.y}
+                    x2={far.x}
+                    y2={far.y}
+                    stroke={`url(#zs-wheel-beam-seam-${index})`}
+                    strokeWidth={1}
+                    vectorEffect="non-scaling-stroke"
+                  />
                 );
               })}
             </svg>
