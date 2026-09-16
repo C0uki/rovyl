@@ -1,6 +1,7 @@
 import React from 'react';
 import { Keyboard, Mouse, SquareStack, Target } from 'lucide-react';
 import type { UIConfig } from '../types';
+import { useTranslation } from '../i18n/useTranslation';
 
 /**
  * What a new user cannot work out by looking, said once.
@@ -18,18 +19,26 @@ import type { UIConfig } from '../types';
  * the user does not have is worse than none: it teaches them the wrong gesture on their first try.
  */
 
-const MOUSE_BUTTON_NAMES: Record<string, string> = {
-  middle: 'the mouse wheel button',
-  x1: 'the back side-button',
-  x2: 'the forward side-button',
-};
+/** Key per button, resolved through `t` at render — the names are prose, not identifiers. */
+const MOUSE_BUTTON_KEYS = {
+  middle: 'firstRunBtnMiddle',
+  x1: 'firstRunBtnX1',
+  x2: 'firstRunBtnX2',
+} as const;
 
 export const FirstRun: React.FC<{
   config: UIConfig;
   onDismiss: () => void;
 }> = ({ config, onDismiss }) => {
+  const { t, tf } = useTranslation(config.language);
   const shortcut = (config.globalShortcut || 'Alt+Z').split('+').filter(Boolean);
-  const mouseButton = MOUSE_BUTTON_NAMES[config.mouseTriggerButton ?? 'middle'] ?? 'the mouse wheel button';
+  const mouseButton = t(MOUSE_BUTTON_KEYS[config.mouseTriggerButton as keyof typeof MOUSE_BUTTON_KEYS] ?? 'firstRunBtnMiddle');
+  /**
+   * The shortcut is rendered as `<kbd>` chips, so the sentence carries one `%s` where they go
+   * rather than being split into a fixed before-and-after: English opens with "Press %s", Japanese
+   * puts the keys mid-sentence, and only a slot can hold both.
+   */
+  const shortcutHint = t('firstRunShortcutDesc').split('%s');
   const byHold = config.mouseTriggerMode === 'hold';
   /** Both triggers can be turned off independently now, so neither point is guaranteed a place. */
   const byKeyboard = config.enableKeyboardTrigger !== false;
@@ -42,9 +51,9 @@ export const FirstRun: React.FC<{
     <div className="zs-firstrun-layer" role="presentation">
       <section className="zs-firstrun" role="dialog" aria-modal="true" aria-labelledby="zs-firstrun-title">
         <header>
-          <h1 id="zs-firstrun-title">Rovyl is running</h1>
+          <h1 id="zs-firstrun-title">{t('firstRunTitle')}</h1>
           {/* No count in the sentence: the mouse point only exists when the mouse trigger does. */}
-          <p>It stays out of the way in the tray. Here is what to know.</p>
+          <p>{t('firstRunSubtitle')}</p>
         </header>
 
         <ol className="zs-firstrun-points">
@@ -52,16 +61,16 @@ export const FirstRun: React.FC<{
             <li>
               <span className="zs-firstrun-mark" aria-hidden><Keyboard size={15} strokeWidth={1.9} /></span>
               <div>
-                <b>Open the wheel</b>
+                <b>{t('firstRunOpenWheel')}</b>
                 <p>
-                  Press{' '}
+                  {shortcutHint[0]}
                   {shortcut.map((key, index) => (
                     <React.Fragment key={key}>
                       {index > 0 && <span className="zs-firstrun-plus">+</span>}
                       <kbd>{key}</kbd>
                     </React.Fragment>
-                  ))}{' '}
-                  anywhere in Windows — over any application, without leaving it.
+                  ))}
+                  {shortcutHint[1] ?? ''}
                 </p>
               </div>
             </li>
@@ -72,11 +81,9 @@ export const FirstRun: React.FC<{
               <span className="zs-firstrun-mark" aria-hidden><Mouse size={15} strokeWidth={1.9} /></span>
               <div>
                 {/* "Or" only makes sense as the second way in. */}
-                <b>{byKeyboard ? 'Or use the mouse' : 'Open the wheel'}</b>
+                <b>{byKeyboard ? t('firstRunOrMouse') : t('firstRunOpenWheel')}</b>
                 <p>
-                  {byHold
-                    ? `Hold ${mouseButton} to open the wheel, and let go on a target to run it.`
-                    : `Click ${mouseButton} to open the wheel. It stays open until you pick something.`}
+                  {tf(byHold ? 'firstRunMouseHold' : 'firstRunMouseClick', { button: mouseButton })}
                 </p>
               </div>
             </li>
@@ -85,12 +92,10 @@ export const FirstRun: React.FC<{
           <li>
             <span className="zs-firstrun-mark" aria-hidden><Target size={15} strokeWidth={1.9} /></span>
             <div>
-              <b>Aim, do not hunt</b>
+              <b>{t('firstRunAimTitle')}</b>
               <p>
-                {byDirection
-                  ? 'Every target owns a whole wedge of the screen, so a flick in its direction is enough — you never have to land on the icon.'
-                  : 'Move onto the icon you want and click it. Release away from every icon to cancel.'}
-                {' '}Start typing to narrow a crowded wheel down to what you meant.
+                {byDirection ? t('firstRunAimDirection') : t('firstRunAimCursor')}
+                {' '}{t('firstRunAimSuffix')}
               </p>
             </div>
           </li>
@@ -98,11 +103,11 @@ export const FirstRun: React.FC<{
           <li>
             <span className="zs-firstrun-mark" aria-hidden><SquareStack size={15} strokeWidth={1.9} /></span>
             <div>
-              <b>Workspaces</b>
+              <b>{t('workspaces')}</b>
               <p>
                 {workspaces > 1
-                  ? `You have ${workspaces} sets of shortcuts — one for work, one for whatever else. Switch between them from the wheel or the tray.`
-                  : 'Keep separate sets of shortcuts — one for work, one for whatever else — and switch between them from the wheel or the tray.'}
+                  ? tf('firstRunWorkspacesMany', { count: workspaces })
+                  : t('firstRunWorkspacesOne')}
               </p>
             </div>
           </li>
@@ -111,9 +116,9 @@ export const FirstRun: React.FC<{
         <footer>
           {/* Nothing here is a setting, so there is nothing to cancel — only one way out. */}
           <button type="button" className="zs-btn is-primary" onClick={onDismiss} autoFocus>
-            Got it
+            {t('firstRunGotIt')}
           </button>
-          <small>Everything above is in Settings, and can be changed there.</small>
+          <small>{t('firstRunFooter')}</small>
         </footer>
       </section>
     </div>

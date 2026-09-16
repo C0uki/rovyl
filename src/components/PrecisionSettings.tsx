@@ -65,6 +65,7 @@ import {
 } from '../constants/radialBackKey';
 import { nextTypeAheadBuffer, selectMenuPlacement, typeAheadIndex } from './selectMenu';
 import { LANGUAGES, normalizeLanguage, translations, useTranslation } from '../i18n/useTranslation';
+import { PanelLanguageProvider, usePanelLanguage } from '../i18n/panelLanguage';
 
 interface PrecisionSettingsProps {
   isOpen: boolean;
@@ -198,17 +199,14 @@ interface SettingItem {
 }
 
 /**
- * Glyphs in the vocabulary of macOS System Settings: a simple, recognisable object (gear, mouse,
- * palette, stack of windows, shield) instead of the abstract Windows/web panel icon.
- * Monochrome — color stays reserved for action or state, never for navigation.
+ * The sidebar's order, and only the order.
+ *
+ * This carried a second copy of every label and caption in English until the panel translated in
+ * full, which is how one of two lists goes stale: the sidebar read from `sectionsList` below and
+ * nobody had reason to open this one again. What the arithmetic actually needs is the sequence, so
+ * that is all it holds now.
  */
-const SECTIONS: Array<{ id: SectionId; label: string; caption: string; icon: LucideIcon }> = [
-  { id: 'spaces', label: 'Workspaces', caption: 'Contexts and their shortcuts.', icon: SquareStack },
-  { id: 'trigger', label: 'Activation', caption: 'How and where the wheel appears.', icon: Mouse },
-  { id: 'advanced', label: 'Advanced', caption: 'Performance, protection, and data.', icon: Shield },
-  { id: 'appearance', label: 'Appearance', caption: 'Shape, presence, and theme.', icon: Palette },
-  { id: 'general', label: 'General', caption: 'Core Rovyl behavior.', icon: Settings },
-];
+const SECTION_ORDER: readonly SectionId[] = ['spaces', 'trigger', 'advanced', 'appearance', 'general'];
 
 export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
   isOpen,
@@ -221,8 +219,13 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
   setNav,
   discoveryPhase = 'idle',
 }) => {
-  const { t, dir } = useTranslation(config.language);
+  const { t, tf, dir } = useTranslation(config.language);
 
+  /**
+   * Glyphs in the vocabulary of macOS System Settings: a simple, recognisable object (gear, mouse,
+   * palette, stack of windows, shield) instead of the abstract Windows/web panel icon.
+   * Monochrome — color stays reserved for action or state, never for navigation.
+   */
   const sectionsList = useMemo(() => [
     { id: 'spaces' as const, label: t('workspaces'), caption: t('workspacesDesc'), icon: SquareStack },
     { id: 'trigger' as const, label: t('trigger'), caption: t('triggerDesc'), icon: Mouse },
@@ -391,10 +394,10 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
 
     if (updateInfo.state === 'ready') {
       return {
-        title: version ? `Version ${version} is ready` : 'An update is ready',
-        description: 'Downloaded and verified. Rovyl installs it the next time it starts.',
+        title: version ? tf('updateReadyVersion', { version }) : t('updateReady'),
+        description: t('updateReadyDesc'),
         kind: 'action' as const,
-        actionLabel: 'Restart now',
+        actionLabel: t('updateRestartNow'),
         actionIcon: ArrowUpFromLine,
         onRun: () => window.electron?.installUpdateNow?.(),
       };
@@ -402,13 +405,13 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
 
     if (updateInfo.state === 'downloading') {
       return {
-        title: version ? `Downloading version ${version}` : 'Downloading an update',
+        title: version ? tf('updateDownloadingVersion', { version }) : t('updateDownloadingTitle'),
         description:
           typeof updateInfo.percent === 'number'
-            ? `${updateInfo.percent}% done. You can keep working — Rovyl installs it the next time it starts.`
-            : 'You can keep working — Rovyl installs it the next time it starts.',
+            ? tf('updateDownloadingPercentDesc', { percent: updateInfo.percent })
+            : t('updateDownloadingDesc'),
         kind: 'action' as const,
-        actionLabel: 'Downloading…',
+        actionLabel: t('updateDownloadingAction'),
         actionIcon: ArrowDownToLine,
         actionDisabled: true,
         onRun: () => {},
@@ -417,25 +420,29 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
 
     const checking = updateChecking || updateInfo.state === 'checking';
     const description = checking
-      ? 'Looking for a newer version…'
+      ? t('updateLookingDesc')
       : updateInfo.state === 'error'
-        ? 'Could not reach the update server.'
+        ? t('updateErrorDesc')
         : updateInfo.state === 'current'
           ? version
-            ? `You're on the latest version (${version}).`
-            : "You're on the latest version."
-          : 'Rovyl checks automatically a few seconds after launch.';
+            ? tf('updateCurrentVersionDesc', { version })
+            : t('updateCurrentDesc')
+          : t('updateIdleDesc');
 
     return {
-      title: 'Check for updates',
+      title: t('updateCheck'),
       description,
       kind: 'action' as const,
-      actionLabel: checking ? 'Checking…' : updateInfo.state === 'error' ? 'Try again' : 'Check now',
+      actionLabel: checking
+        ? t('updateCheckingAction')
+        : updateInfo.state === 'error'
+          ? t('tryAgain')
+          : t('updateCheckNow'),
       actionIcon: ArrowDownToLine,
       actionDisabled: checking,
       onRun: () => void runUpdateCheck(),
     };
-  }, [updateInfo, updateChecking, runUpdateCheck]);
+  }, [updateInfo, updateChecking, runUpdateCheck, t, tf]);
 
   const reduceMotion = useReducedMotion();
 
@@ -651,9 +658,9 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
       const direction = (event as CustomEvent<'back' | 'forward'>).detail;
       setQuery('');
       setSectionId((current) => {
-        const currentIndex = SECTIONS.findIndex((section) => section.id === current);
+        const currentIndex = SECTION_ORDER.indexOf(current);
         const delta = direction === 'back' ? -1 : 1;
-        return SECTIONS[Math.max(0, Math.min(SECTIONS.length - 1, currentIndex + delta))].id;
+        return SECTION_ORDER[Math.max(0, Math.min(SECTION_ORDER.length - 1, currentIndex + delta))];
       });
     };
 
@@ -702,7 +709,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
         ]),
       };
     });
-    showToast('Workspace created');
+    showToast(t('toastWorkspaceCreated'));
   };
 
   /**
@@ -722,7 +729,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
     const workspace = config.workspaces[index];
     if (!workspace) return;
     if (config.workspaces.length <= 1) {
-      showToast('Keep at least one workspace');
+      showToast(t('toastKeepOneWorkspace'));
       return;
     }
     const previousActiveIndex = config.activeWorkspaceIndex;
@@ -743,8 +750,11 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
     const shortcuts = workspace.apps?.length ?? 0;
     showToast(
       shortcuts > 0
-        ? `Deleted “${workspace.name}” and ${shortcuts} ${shortcuts === 1 ? 'shortcut' : 'shortcuts'}`
-        : `Deleted “${workspace.name}”`,
+        ? tf(shortcuts === 1 ? 'toastDeletedWithOne' : 'toastDeletedWithMany', {
+            name: workspace.name,
+            count: shortcuts,
+          })
+        : tf('toastDeleted', { name: workspace.name }),
       () => {
         setConfig((current) => {
           /** Undo twice, or undo something that came back another way, must not duplicate it. */
@@ -856,7 +866,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
 
     return {
       general: [
-        ...(canUpdate ? [{ key: 'update', group: 'Updates', ...updateRow }] : []),
+        ...(canUpdate ? [{ key: 'update', group: t('updates'), ...updateRow }] : []),
         {
           /**
            * A select, not the segmented control this was while it held two languages: seven
@@ -886,8 +896,8 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
           onChange: (value) => update('language', value as UIConfig['language']),
         },
         {
-          key: 'openAtLogin', configKey: 'openAtLogin', group: 'Startup', title: 'Start with Windows',
-          description: 'Rovyl is ready as soon as you sign in to Windows.',
+          key: 'openAtLogin', configKey: 'openAtLogin', group: t('groupStartup'), title: t('startWithWindows'),
+          description: t('startWithWindowsDesc'),
           kind: 'bool', enabled: Boolean(config.openAtLogin),
           onToggle: () => {
             const next = !config.openAtLogin;
@@ -896,10 +906,13 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
           },
         },
         {
-          key: 'workspaceSwitchMode', configKey: 'workspaceSwitchMode', group: 'Workspaces', title: 'Workspace switching',
-          description: 'Use the visual wheel picker or number keys.',
+          key: 'workspaceSwitchMode', configKey: 'workspaceSwitchMode', group: t('workspaces'), title: t('workspaceSwitching'),
+          description: t('workspaceSwitchingDesc'),
           kind: 'segmented', current: config.workspaceSwitchMode ?? 'picker',
-          choices: [{ value: 'picker', label: 'Picker' }, { value: 'hotkeys', label: 'Keys' }],
+          choices: [
+            { value: 'picker', label: t('workspaceSwitchPicker') },
+            { value: 'hotkeys', label: t('workspaceSwitchKeys') },
+          ],
           onChange: (value) => update('workspaceSwitchMode', value as UIConfig['workspaceSwitchMode']),
         },
       ],
@@ -917,21 +930,21 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
          * about the wheel once it is open, however it got there, so they stay put.
          */
         {
-          key: 'keyboard', configKey: 'enableKeyboardTrigger', group: 'Keyboard',
-          title: 'Enable keyboard trigger',
-          description: 'Open the wheel with a keyboard shortcut.',
+          key: 'keyboard', configKey: 'enableKeyboardTrigger', group: t('groupKeyboard'),
+          title: t('enableKeyboardTrigger'),
+          description: t('enableKeyboardTriggerDesc'),
           kind: 'bool', enabled: keyboardTriggerOn,
           onToggle: () => toggleTrigger('enableKeyboardTrigger'),
         },
         ...(keyboardTriggerOn
           ? ([
               {
-                key: 'shortcut', group: 'Keyboard', title: 'Global shortcut',
-                description: 'Open the wheel over any application.',
+                key: 'shortcut', group: t('groupKeyboard'), title: t('globalShortcut'),
+                description: t('globalShortcutRowDesc'),
                 kind: 'open', value: config.globalShortcut, onOpen: () => setEditor({ kind: 'shortcut' }),
               },
               {
-                key: 'shortcutMode', configKey: 'shortcutTriggerMode' as const, group: 'Keyboard',
+                key: 'shortcutMode', configKey: 'shortcutTriggerMode' as const, group: t('groupKeyboard'),
                 title: t('shortcutBehavior'),
                 description: t('shortcutBehaviorDesc'),
                 kind: 'segmented', current: config.shortcutTriggerMode ?? 'toggle',
@@ -941,36 +954,39 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
             ] as SettingItem[])
           : []),
         {
-          key: 'mouse', configKey: 'enableMouseTrigger', group: 'Mouse',
-          title: 'Enable mouse trigger',
-          description: 'Open the wheel with a mouse button.',
+          key: 'mouse', configKey: 'enableMouseTrigger', group: t('mouse'),
+          title: t('enableMouseTrigger'),
+          description: t('enableMouseTriggerDesc'),
           kind: 'bool', enabled: mouseTriggerOn,
           onToggle: () => toggleTrigger('enableMouseTrigger'),
         },
         ...(mouseTriggerOn
           ? ([
               {
-                key: 'mouseButton', configKey: 'mouseTriggerButton' as const, group: 'Mouse', title: 'Trigger button',
-                description: 'Side buttons are usually free; left and right stay with Windows.',
+                key: 'mouseButton', configKey: 'mouseTriggerButton' as const, group: t('mouse'), title: t('triggerButton'),
+                description: t('triggerButtonDesc'),
                 kind: 'segmented', current: config.mouseTriggerButton ?? 'middle',
                 choices: [
-                  { value: 'middle', label: 'Wheel' },
-                  { value: 'x1', label: 'Back' },
-                  { value: 'x2', label: 'Forward' },
+                  { value: 'middle', label: t('mouseBtnWheel') },
+                  { value: 'x1', label: t('mouseBtnBack') },
+                  { value: 'x2', label: t('mouseBtnForward') },
                 ],
                 onChange: (value) => update('mouseTriggerButton', value as UIConfig['mouseTriggerButton']),
               },
               {
-                key: 'mouseMode', configKey: 'mouseTriggerMode' as const, group: 'Mouse', title: 'Gesture behavior',
-                description: 'Click keeps the wheel open; hold runs the selection on release.',
+                key: 'mouseMode', configKey: 'mouseTriggerMode' as const, group: t('mouse'), title: t('gestureBehavior'),
+                description: t('gestureBehaviorRowDesc'),
                 kind: 'segmented', current: config.mouseTriggerMode ?? 'click',
-                choices: [{ value: 'click', label: 'Click' }, { value: 'hold', label: 'Hold' }],
+                choices: [
+                  { value: 'click', label: t('gestureClick') },
+                  { value: 'hold', label: t('gestureHold') },
+                ],
                 onChange: (value) => update('mouseTriggerMode', value as UIConfig['mouseTriggerMode']),
               },
             ] as SettingItem[])
           : []),
         {
-          key: 'radialMonitor', configKey: 'radialMonitor', group: 'Position', title: 'Monitor',
+          key: 'radialMonitor', configKey: 'radialMonitor', group: t('groupPosition'), title: t('monitorRow'),
           /**
            * The consequence, not the mechanism. Nobody opens this panel wanting to know which
            * `Display` object main asks for — they want to know which screen the thing they are about
@@ -978,26 +994,25 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
            */
           description:
             config.radialPlacement === 'cursor'
-              ? 'Appearance opens the wheel under the pointer, so it is already on the screen the pointer is on — this choice has nothing left to decide.'
+              ? t('monitorDescPlacementCursor')
               : config.radialMonitor === 'cursor'
-                ? 'The wheel opens on the screen the pointer is already on, so what you launch lands where you are working.'
-                : 'The wheel always opens on the main screen, wherever the pointer happens to be.',
+                ? t('monitorDescCursor')
+                : t('monitorDescPrimary'),
           kind: 'segmented',
           choices: [
-            { value: 'primary', label: 'Main screen' },
-            { value: 'cursor', label: 'Follow pointer' },
+            { value: 'primary', label: t('monitorMain') },
+            { value: 'cursor', label: t('monitorFollowPointer') },
           ],
           current: config.radialMonitor === 'cursor' ? 'cursor' : 'primary',
           onChange: (value) => update('radialMonitor', value as UIConfig['radialMonitor']),
         },
-        range('threshold', 'Position', 'Activation zone', 'Cursor distance required to confirm a target.',
+        range('threshold', t('groupPosition'), t('activationZone'), t('activationZoneDesc'),
           config.activationThreshold, 20, 120, (value) => update('activationThreshold', value), (value) => `${Math.round(value)} px`,
           1, 'activationThreshold'),
         {
-          key: 'instant', configKey: 'radialInstantActivate', group: 'Hands-free', title: 'Launch without clicking',
+          key: 'instant', configKey: 'radialInstantActivate', group: t('groupHandsFree'), title: t('launchWithoutClicking'),
           /** The way OUT belongs in the description: with the pointer hidden, it is not guessable. */
-          description:
-            'Hides the pointer and picks by direction — move toward a target and it opens by itself. Escape closes the wheel without opening anything.',
+          description: t('launchWithoutClickingDesc'),
           /**
            * A switch, not a segmented control. Everything binary in this panel is `bool`; a
            * segmented control is always a choice between named pairs (Picker/Keys, Click/Hold,
@@ -1029,22 +1044,21 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
               {
                 key: 'instantSensitivity',
                 configKey: 'radialInstantSensitivity' as const,
-                group: 'Hands-free',
-                title: 'Direction sensitivity',
-                description:
-                  'How far your hand must travel before that direction is chosen. High picks on the smallest movement.',
+                group: t('groupHandsFree'),
+                title: t('directionSensitivity'),
+                description: t('directionSensitivityDesc'),
                 kind: 'segmented' as const,
                 current: clampDirectionSensitivity(config.radialInstantSensitivity),
                 choices: [
-                  { value: 'low', label: 'Low' },
-                  { value: 'medium', label: 'Medium' },
-                  { value: 'high', label: 'High' },
+                  { value: 'low', label: t('sensitivityLow') },
+                  { value: 'medium', label: t('sensitivityMedium') },
+                  { value: 'high', label: t('sensitivityHigh') },
                 ],
                 onChange: (value: number | string) =>
                   update('radialInstantSensitivity', value as UIConfig['radialInstantSensitivity']),
               },
-              range('dwellMs', 'Hands-free', 'Hover time',
-                'How long a target must stay aimed before it opens. Drag to zero and the direction opens the moment it commits.',
+              range('dwellMs', t('groupHandsFree'), t('hoverTime'),
+                t('hoverTimeDesc'),
                 clampDwellMs(config.radialInstantDwellMs), DWELL_MS_MIN, DWELL_MS_MAX,
                 (value) => update('radialInstantDwellMs', value),
                 /**
@@ -1052,13 +1066,13 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
                  * less, it is to have no wait at all. The word says the behavior; the rest of the
                  * scale goes on saying the time.
                  */
-                (value) => (Math.round(value) === 0 ? 'Instant' : `${Math.round(value)} ms`),
+                (value) => (Math.round(value) === 0 ? t('instantValue') : `${Math.round(value)} ms`),
                 DWELL_MS_STEP, 'radialInstantDwellMs'),
             ]
           : []),
         {
-          key: 'numberLaunch', configKey: 'radialNumberLaunch', group: 'Number keys',
-          title: 'Quick launch with number keys',
+          key: 'numberLaunch', configKey: 'radialNumberLaunch', group: t('groupNumberKeys'),
+          title: t('quickLaunchNumbers'),
           /**
            * Three things have to be here and nowhere else: that there is no Enter (it is the whole
            * point, and every other keyboard path on the wheel needs one), that the count follows
@@ -1068,10 +1082,10 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
            */
           description:
             numberLaunchOn && workspaceHotkeysOn
-              ? 'Press 1–9 to run the shortcut in that position — no Enter. The digits are the wheel’s now, so switching workspace by number is off; use the wheel or the scroll wheel instead.'
+              ? t('quickLaunchNumbersDescBoth')
               : workspaceHotkeysOn
-                ? 'Press 1–9 to run the shortcut in that position, counting clockwise from the top — no Enter. It takes the number keys away from workspace switching.'
-                : 'Press 1–9 to run the shortcut in that position, counting clockwise from the top — no Enter, no aiming. Also turns on the key that steps back out of a folder.',
+                ? t('quickLaunchNumbersDescWorkspace')
+                : t('quickLaunchNumbersDesc'),
           kind: 'bool', enabled: numberLaunchOn,
           onToggle: () => update('radialNumberLaunch', !numberLaunchOn),
         },
@@ -1079,17 +1093,16 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
         ...(numberLaunchOn
           ? ([
               {
-                key: 'numberLabels', configKey: 'radialNumberLabels' as const, group: 'Number keys',
-                title: 'Show numbers on the wheel',
-                description:
-                  'Draws each position’s digit on its icon. Turn it off once the wheel is in your hands — the keys go on working.',
+                key: 'numberLabels', configKey: 'radialNumberLabels' as const, group: t('groupNumberKeys'),
+                title: t('showNumbers'),
+                description: t('showNumbersDesc'),
                 kind: 'bool', enabled: config.radialNumberLabels !== false,
                 onToggle: () =>
                   update('radialNumberLabels', config.radialNumberLabels === false),
               },
               {
-                key: 'backKey', configKey: 'radialBackKey' as const, group: 'Number keys',
-                title: 'Key to leave a folder',
+                key: 'backKey', configKey: 'radialBackKey' as const, group: t('groupNumberKeys'),
+                title: t('backKeyRow'),
                 /**
                  * Where it does NOT work is the whole reason a plain letter is safe to bind, so it
                  * is the sentence the row leads with. Someone who reads only the title would
@@ -1097,9 +1110,9 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
                  * as broken.
                  */
                 description: backKey
-                  ? `Press ${backKey} inside a folder to step back out, the same as clicking the hub. At the top level it stays an ordinary letter, so searching is unaffected.`
-                  : 'No key assigned. The hub still goes back when clicked, and Backspace still works.',
-                kind: 'open' as const, value: backKey || 'Off',
+                  ? tf('backKeyRowDesc', { key: backKey })
+                  : t('backKeyRowDescNone'),
+                kind: 'open' as const, value: backKey || t('offValue'),
                 onOpen: () => setEditor({ kind: 'backKey' }),
               },
             ] as SettingItem[])
@@ -1107,29 +1120,32 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
       ],
       appearance: [
         {
-          key: 'theme', configKey: 'appearanceTheme', group: 'Theme', title: 'Rovyl surfaces',
-          description: 'Applies to the window and title bar. The wheel remains dark.',
+          key: 'theme', configKey: 'appearanceTheme', group: t('groupTheme'), title: t('rovylSurfaces'),
+          description: t('rovylSurfacesDesc'),
           kind: 'segmented', current: theme,
-          choices: [{ value: 'black', label: 'Black' }, { value: 'white', label: 'White' }],
+          choices: [
+            { value: 'black', label: t('themeBlack') },
+            { value: 'white', label: t('themeWhite') },
+          ],
           onChange: (value) => update('appearanceTheme', value as UIConfig['appearanceTheme']),
         },
-        range('radius', 'Wheel', 'Orbital radius', 'Perceived wheel diameter.',
+        range('radius', t('wheel'), t('orbitalRadius'), t('orbitalRadiusDesc'),
           config.menuRadius, 90, 220, (value) => update('menuRadius', value), (value) => `${Math.round(value)} px`,
           1, 'menuRadius'),
-        range('iconSize', 'Wheel', 'Icon size', 'Visual weight of each target.',
+        range('iconSize', t('wheel'), t('iconSizeRow'), t('iconSizeRowDesc'),
           config.iconSize, 36, 92, (value) => update('iconSize', value), (value) => `${Math.round(value)} px`,
           1, 'iconSize'),
-        range('spacing', 'Wheel', 'Target spacing', 'Free space between items.',
+        range('spacing', t('wheel'), t('targetSpacing'), t('targetSpacingDesc'),
           config.appSpacing ?? 10, 0, 40, (value) => update('appSpacing', value), (value) => `${Math.round(value)} px`,
           1, 'appSpacing'),
         {
-          key: 'radialHoverColor', configKey: 'radialHoverColor', group: 'Wheel', title: 'Hover color',
-          description: 'Color used by the target under the pointer.',
+          key: 'radialHoverColor', configKey: 'radialHoverColor', group: t('wheel'), title: t('hoverColor'),
+          description: t('hoverColorDesc'),
           kind: 'color', value: config.radialHoverColor ?? '#FFFFFF',
           onChange: (value) => update('radialHoverColor', String(value)),
         },
         {
-          key: 'aim', configKey: 'radialSelectionMode', group: 'Wheel', title: 'Targeting',
+          key: 'aim', configKey: 'radialSelectionMode', group: t('wheel'), title: t('targeting'),
           /**
            * With launch without clicking on there is no pointer on screen, so "aim with the
            * pointer" is not an option that can exist — the wheel always falls back to sectors by
@@ -1138,12 +1154,12 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
            */
           description:
             config.radialSelectionMode === 'area'
-              ? 'The wheel is cut into equal wedges — one per shortcut — and the one you point at fills up. Click anywhere inside it.'
+              ? t('targetingDescArea')
               : config.radialInstantActivate === 'dwell'
-                ? 'Launch without clicking is on, so the wheel always aims by direction — each item owns an equal slice of the screen.'
+                ? t('targetingDescHandsFree')
                 : config.radialSelectionMode === 'cursor'
-                  ? 'Only the icon under the pointer highlights. Release away from every icon to cancel.'
-                  : 'Aim by direction: the slice you point toward highlights from anywhere on screen.',
+                  ? t('targetingDescCursor')
+                  : t('targetingDescAngle'),
           kind: 'segmented',
           /**
            * Area is Direction with the boundaries drawn — same maths, same muscle memory — so the
@@ -1151,9 +1167,9 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
            * something else, sits at the end.
            */
           choices: [
-            { value: 'angle', label: 'Direction' },
-            { value: 'area', label: 'Area' },
-            { value: 'cursor', label: 'Pointer' },
+            { value: 'angle', label: t('aimDirection') },
+            { value: 'area', label: t('aimArea') },
+            { value: 'cursor', label: t('aimPointer') },
           ],
           current:
             config.radialSelectionMode === 'cursor'
@@ -1164,13 +1180,13 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
           onChange: (value) => update('radialSelectionMode', value as UIConfig['radialSelectionMode']),
         },
         {
-          key: 'labels', configKey: 'alwaysShowAppLabels', group: 'Wheel', title: 'Persistent labels',
-          description: 'Keep every target name visible.',
+          key: 'labels', configKey: 'alwaysShowAppLabels', group: t('wheel'), title: t('persistentLabels'),
+          description: t('persistentLabelsRowDesc'),
           kind: 'bool', enabled: config.alwaysShowAppLabels,
           onToggle: () => update('alwaysShowAppLabels', !config.alwaysShowAppLabels),
         },
         {
-          key: 'radialPlacement', configKey: 'radialPlacement', group: 'Position', title: 'Where it opens',
+          key: 'radialPlacement', configKey: 'radialPlacement', group: t('groupPosition'), title: t('whereItOpens'),
           /**
            * Said as the consequence, because that is the whole of the choice: the same wheel, the
            * same targets, a different distance for the hand. The clamp near an edge is mentioned —
@@ -1179,27 +1195,27 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
            */
           description:
             config.radialPlacement === 'cursor'
-              ? 'The wheel blooms under the pointer, so nothing is further away than the gesture that opened it. Near an edge it steps inward just enough to keep every target on screen.'
-              : 'The wheel always blooms at the middle of the screen, wherever the pointer happens to be.',
+              ? t('whereItOpensDescCursor')
+              : t('whereItOpensDescCenter'),
           kind: 'segmented',
           choices: [
-            { value: 'center', label: 'Screen center' },
-            { value: 'cursor', label: 'At pointer' },
+            { value: 'center', label: t('placeScreenCenter') },
+            { value: 'cursor', label: t('placeAtPointer') },
           ],
           current: config.radialPlacement === 'cursor' ? 'cursor' : 'center',
           keywords: 'mouse cursor location position place spawn appear under pointer center centre',
           onChange: (value) => update('radialPlacement', value as UIConfig['radialPlacement']),
         },
-        range('backdrop', 'Presence', 'Background dimming',
-          'How much the rest of the screen recedes. At 100% it goes: the desktop is covered edge to edge.',
+        range('backdrop', t('presence'), t('bgDimming'),
+          t('bgDimmingRowDesc'),
           config.backdropOpacity ?? DEFAULT_UI_CONFIG.backdropOpacity, 0, 1,
           (value) => update('backdropOpacity', value), (value) => `${Math.round(value * 100)}%`,
           0.01, 'backdropOpacity'),
         {
-          key: 'taskbar', configKey: 'taskbarOverlay', group: 'Presence', title: 'Quiet the taskbar',
+          key: 'taskbar', configKey: 'taskbarOverlay', group: t('presence'), title: t('quietTaskbar'),
           description: taskbarElementsReachable
-            ? 'Hide parts of the Windows taskbar while the wheel is open, on the screen the wheel is on. Everything comes back when it closes.'
-            : 'This version of Windows builds its taskbar in a way no other app can take apart, so only the background can be changed here.',
+            ? t('quietTaskbarDesc')
+            : t('quietTaskbarDescUnavailable'),
           kind: 'bool', enabled: taskbar.enabled,
           onToggle: () => updateTaskbar({ enabled: !taskbar.enabled }),
         },
@@ -1210,39 +1226,38 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
          */
         ...(taskbar.enabled && taskbarElementsReachable ? ([
           {
-            key: 'taskbar-start', group: 'Presence', title: 'Keep the Start button',
-            description: 'Start and Task View stay on the bar.',
+            key: 'taskbar-start', group: t('presence'), title: t('keepStart'),
+            description: t('keepStartDesc'),
             kind: 'bool' as const, enabled: taskbar.showStart,
             onToggle: () => updateTaskbar({ showStart: !taskbar.showStart }),
           },
           {
-            key: 'taskbar-apps', group: 'Presence', title: 'Keep pinned and open apps',
-            description: 'The app buttons, and anything else docked beside them.',
+            key: 'taskbar-apps', group: t('presence'), title: t('keepApps'),
+            description: t('keepAppsDesc'),
             kind: 'bool' as const, enabled: taskbar.showApps,
             onToggle: () => updateTaskbar({ showApps: !taskbar.showApps }),
           },
           {
-            key: 'taskbar-tray', group: 'Presence', title: 'Keep the notification area',
-            description: 'Tray icons and the chevron that holds the rest.',
+            key: 'taskbar-tray', group: t('presence'), title: t('keepTray'),
+            description: t('keepTrayDesc'),
             kind: 'bool' as const, enabled: taskbar.showTray,
             onToggle: () => updateTaskbar({ showTray: !taskbar.showTray }),
           },
           {
-            key: 'taskbar-clock', group: 'Presence', title: 'Keep the clock',
-            description: 'The time and date at the end of the bar.',
+            key: 'taskbar-clock', group: t('presence'), title: t('keepClock'),
+            description: t('keepClockDesc'),
             kind: 'bool' as const, enabled: taskbar.showClock,
             onToggle: () => updateTaskbar({ showClock: !taskbar.showClock }),
           },
         ]) : []),
         ...(taskbar.enabled ? ([
           {
-            key: 'taskbar-transparent', group: 'Presence', title: 'Make the bar transparent',
+            key: 'taskbar-transparent', group: t('presence'), title: t('barTransparent'),
             /**
              * The caveat belongs in the row, not in a release note. This is the only part of Rovyl
              * that changes something about Windows it cannot put back exactly.
              */
-            description:
-              'The bar itself goes, and whatever you kept above still shows. Windows does not report how the bar was painted before, so its background is restored to the standard look — which can differ slightly from a custom theme.',
+            description: t('barTransparentDesc'),
             kind: 'bool' as const, enabled: taskbar.transparent,
             onToggle: () => updateTaskbar({ transparent: !taskbar.transparent }),
           },
@@ -1251,67 +1266,70 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
       spaces: [
         ...config.workspaces.map((workspace, index) => ({
           key: workspace.id,
-          group: 'Your workspaces',
+          group: t('yourWorkspaces'),
           title: workspace.name,
-          description: workspace.hotkey ? `Key ${workspace.hotkey}` : 'Picker / mouse wheel',
+          description: workspace.hotkey ? tf('workspaceHotkeyDesc', { key: workspace.hotkey }) : t('workspacePickerDesc'),
           kind: 'open' as const,
           /** Same vocabulary as the editor: current / available / paused. */
-          value: config.activeWorkspaceIndex === index ? 'Current' : workspace.enabled ? 'Available' : 'Paused',
+          value: config.activeWorkspaceIndex === index ? t('current') : workspace.enabled ? t('available') : t('paused'),
           onOpen: () => setEditor({ kind: 'workspace' as const, index }),
           onDelete: config.workspaces.length > 1 ? () => deleteWorkspace(index) : undefined,
-          deleteLabel: `Delete ${workspace.name}`,
+          deleteLabel: tf('deleteWorkspaceNamed', { name: workspace.name }),
           reorderIndex: index,
           onReorder: reorderWorkspaces,
         })),
         {
-          key: 'new-space', group: 'Your workspaces', title: 'New workspace',
-          description: 'Create another context for your shortcuts.',
-          kind: 'action', actionLabel: 'Create', actionIcon: Plus, onRun: addWorkspace,
+          key: 'new-space', group: t('yourWorkspaces'), title: t('newWorkspace'),
+          description: t('newWorkspaceDesc'),
+          kind: 'action', actionLabel: t('create'), actionIcon: Plus, onRun: addWorkspace,
         },
       ],
       advanced: [
         {
-          key: 'performance', group: 'Performance', title: 'Precision mode',
-          description: 'Prioritize immediate response and reduce visual effects.',
+          key: 'performance', group: t('performance'), title: t('precisionMode'),
+          description: t('precisionModeRowDesc'),
           kind: 'bool', enabled: config.performanceMode,
           onToggle: () => update('performanceMode', !config.performanceMode),
         },
         {
-          key: 'strictOffline', configKey: 'strictOfflineMode', group: 'Performance', title: t('strictOffline'),
+          key: 'strictOffline', configKey: 'strictOfflineMode', group: t('performance'), title: t('strictOffline'),
           description: t('strictOfflineDesc'),
           kind: 'bool', enabled: Boolean(config.strictOfflineMode),
           onToggle: () => update('strictOfflineMode', !config.strictOfflineMode),
         },
         {
-          key: 'game', group: 'Protection', title: 'Fullscreen protection',
-          description: 'Prevent accidental openings during games and videos.',
+          key: 'game', group: t('groupProtection'), title: t('fullscreenProtection'),
+          description: t('fullscreenProtectionDesc'),
           kind: 'bool', enabled: gameMode.enabled,
           onToggle: () => updateGameMode({ enabled: !gameMode.enabled }),
         },
         ...(gameMode.enabled ? [{
-          key: 'scope', group: 'Protection', title: 'Scope', description: 'All fullscreen apps or only a selected list.',
+          key: 'scope', group: t('groupProtection'), title: t('protectionScope'), description: t('protectionScopeDesc'),
           kind: 'segmented' as const, current: gameMode.mode,
-          choices: [{ value: 'all', label: 'All' }, { value: 'list', label: 'List' }],
+          choices: [
+            { value: 'all', label: t('scopeAll') },
+            { value: 'list', label: t('scopeList') },
+          ],
           onChange: (value: number | string) => updateGameMode({ mode: value as 'all' | 'list' }),
         }] : []),
         ...(gameMode.enabled && gameMode.mode === 'list' ? [
           {
-            key: 'auto-games', group: 'Protection', title: 'Detect games automatically',
-            description: 'Uses game-store folders and engine files; protection still applies only in fullscreen.',
+            key: 'auto-games', group: t('groupProtection'), title: t('detectGames'),
+            description: t('detectGamesDesc'),
             kind: 'bool' as const, enabled: gameMode.autoDetectGames,
             onToggle: () => updateGameMode({ autoDetectGames: !gameMode.autoDetectGames }),
           },
           {
-            key: 'blocked', group: 'Protection', title: 'Protected applications',
-            description: 'Choose installed applications visually. No executable names required.',
+            key: 'blocked', group: t('groupProtection'), title: t('protectedApps'),
+            description: t('protectedAppsDesc'),
             kind: 'open' as const,
-            value: gameMode.blockedApps ? 'Edit list' : 'Choose apps',
+            value: gameMode.blockedApps ? t('editList') : t('chooseApps'),
             onOpen: () => setEditor({ kind: 'blocked' as const }),
           },
         ] : []),
         {
-          key: 'settingsCorner', configKey: 'showSettingsCorner', group: 'Settings shortcut',
-          title: 'Settings button on the wheel',
+          key: 'settingsCorner', configKey: 'showSettingsCorner', group: t('groupSettingsShortcut'),
+          title: t('settingsButtonOnWheel'),
           /**
            * Said with its cost, because it has one that shows: the overlay normally opens as a box
            * around the wheel, and a corner only means the screen's corner if the window is the
@@ -1320,16 +1338,16 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
            */
           description:
             config.radialInstantActivate === 'dwell'
-              ? 'A gear in the corner of the open wheel, one click from these settings. Launch without clicking aims by direction and hides the pointer, so the gear stays off while that is on.'
-              : 'A gear in the corner of the open wheel, one click from these settings. The wheel then opens over the whole screen instead of a box around itself, so the corner is a real one.',
+              ? t('settingsButtonDescHandsFree')
+              : t('settingsButtonDesc'),
           kind: 'bool', enabled: config.showSettingsCorner === true,
           keywords: 'gear cog icon corner open settings preferences shortcut button',
           onToggle: () => update('showSettingsCorner', !config.showSettingsCorner),
         },
         ...(config.showSettingsCorner === true ? [{
-          key: 'settingsCornerPosition', configKey: 'settingsCorner' as const, group: 'Settings shortcut',
-          title: 'Which corner',
-          description: 'Where the gear sits. It steps inboard if the battery or weather pill is already there.',
+          key: 'settingsCornerPosition', configKey: 'settingsCorner' as const, group: t('groupSettingsShortcut'),
+          title: t('whichCorner'),
+          description: t('whichCornerDesc'),
           /**
            * A select: four corner names are ~380px of segmented control, wider than the column,
            * and the same reason the Language row stopped being one.
@@ -1339,37 +1357,37 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
             ? (config.settingsCorner as SettingsCorner)
             : 'top-right',
           choices: [
-            { value: 'top-right', label: 'Top right' },
-            { value: 'top-left', label: 'Top left' },
-            { value: 'bottom-right', label: 'Bottom right' },
-            { value: 'bottom-left', label: 'Bottom left' },
+            { value: 'top-right', label: t('cornerTopRight') },
+            { value: 'top-left', label: t('cornerTopLeft') },
+            { value: 'bottom-right', label: t('cornerBottomRight') },
+            { value: 'bottom-left', label: t('cornerBottomLeft') },
           ],
           onChange: (value: number | string) => update('settingsCorner', value as SettingsCorner),
         }] : []),
         {
-          key: 'export', group: 'Data', title: 'Export settings',
-          description: 'Save a portable copy of your configuration.',
-          kind: 'action', actionLabel: 'Export', actionIcon: ArrowUpFromLine, onRun: exportConfig,
+          key: 'export', group: t('groupData'), title: t('exportSettings'),
+          description: t('exportSettingsDesc'),
+          kind: 'action', actionLabel: t('exportAction'), actionIcon: ArrowUpFromLine, onRun: exportConfig,
         },
         {
-          key: 'import', group: 'Data', title: 'Import settings',
-          kind: 'action', actionLabel: 'Import', actionIcon: ArrowDownToLine, onRun: importConfig,
+          key: 'import', group: t('groupData'), title: t('importSettings'),
+          kind: 'action', actionLabel: t('importAction'), actionIcon: ArrowDownToLine, onRun: importConfig,
         },
         {
-          key: 'reset', group: 'Data', title: 'Restore defaults',
-          description: 'Erase local settings and start over.',
-          kind: 'action', actionLabel: 'Restore', onRun: onReset,
+          key: 'reset', group: t('groupData'), title: t('restoreDefaults'),
+          description: t('restoreDefaultsDesc'),
+          kind: 'action', actionLabel: t('restoreAction'), onRun: onReset,
           confirm: {
-            body: 'Every workspace, shortcut, icon and preference on this PC is deleted and Rovyl restarts. This cannot be undone — use Export settings first if you want a copy.',
-            cta: 'Erase everything',
+            body: t('restoreConfirmBody'),
+            cta: t('restoreConfirmCta'),
           },
         },
       ],
     };
-  }, [config, gameMode, taskbar, taskbarElementsReachable, theme, apps, update, setConfig, updateRow, canUpdate, onReset, deleteWorkspace, reorderWorkspaces]);
+  }, [config, gameMode, taskbar, taskbarElementsReachable, theme, apps, update, setConfig, updateRow, canUpdate, onReset, deleteWorkspace, reorderWorkspaces, t, tf]);
 
   const trimmedQuery = query.trim().toLowerCase();
-  const activeMeta = sectionsList.find((section) => section.id === sectionId) || SECTIONS[0];
+  const activeMeta = sectionsList.find((section) => section.id === sectionId) || sectionsList[0];
 
   /**
    * Where the list was, after touching a setting.
@@ -1484,6 +1502,12 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
   if (!isOpen) return null;
 
   return (
+    /**
+     * The language, once, for every small component inside this panel. They reach the text through
+     * `useTranslation(usePanelLanguage())` rather than a prop passed down five levels for no other
+     * purpose — see `src/i18n/panelLanguage.ts`.
+     */
+    <PanelLanguageProvider value={config.language ?? 'en'}>
     <div
       id="settings-container"
       className={`zs-shell${isDismissing ? ' is-dismissing' : ''}`}
@@ -1495,7 +1519,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: reduceMotion ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
-        aria-label="Rovyl Settings"
+        aria-label={t('settingsWindowLabel')}
       >
         <aside className="zs-sidebar">
           <div className="zs-sidebar-head">
@@ -1514,13 +1538,13 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
               aria-label={t('searchSettings')}
             />
             {query && (
-              <button type="button" onClick={() => setQuery('')} aria-label="Clear search">
+              <button type="button" onClick={() => setQuery('')} aria-label={t('clearSearch')}>
                 <X size={13} strokeWidth={2} />
               </button>
             )}
           </div>
 
-          <nav className="zs-nav" aria-label="Settings sections">
+          <nav className="zs-nav" aria-label={t('settingsSections')}>
             {sectionsList.map((section) => {
               const Icon = section.icon;
               return (
@@ -1577,7 +1601,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
               </motion.header>
 
               {isEmpty ? (
-                <p className="zs-empty">No settings found.</p>
+                <p className="zs-empty">{t('noSettingsFound')}</p>
               ) : (
                 <motion.div
                   key={`body-${trimmedQuery ? `q-${trimmedQuery}` : sectionId}`}
@@ -1702,13 +1726,14 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
                   /** Closing here and not in each undo: a toast still offering what it just did is
                       an invitation to press it twice, and every undo would have to remember. */
                   onClick={() => { toast.undo?.(); setToast(null); setToastHeld(false); }}
-                >Undo</button>
+                >{t('undo')}</button>
               )}
             </motion.div>
           )}
         </AnimatePresence>
       </motion.section>
     </div>
+    </PanelLanguageProvider>
   );
 };
 
@@ -1721,6 +1746,7 @@ function SettingRow({
   /** Present only while the row differs from `DEFAULT_UI_CONFIG`; absent is "nothing to revert". */
   onResetToDefault?: () => void;
 }) {
+  const { t } = useTranslation(usePanelLanguage());
   const ActionIcon = item.actionIcon;
   const describedBy = item.description ? `${item.key}-desc` : undefined;
   const reorderable = typeof item.reorderIndex === 'number' && Boolean(item.onReorder);
@@ -1812,7 +1838,7 @@ function SettingRow({
               className="zs-row-revert"
               onClick={onResetToDefault}
               aria-label={`Reset ${item.title} to default`}
-              title="Reset to default"
+              title={t('resetToDefault')}
             >
               <RotateCcw size={13} strokeWidth={1.9} />
             </button>
@@ -2202,6 +2228,7 @@ function SelectSettingControl({ item, describedBy }: { item: SettingItem; descri
 }
 
 function ColorSettingControl({ item, describedBy }: { item: SettingItem; describedBy?: string }) {
+  const { t } = useTranslation(usePanelLanguage());
   const normalizedValue = normalizeHexInput(item.value ?? '') ?? '#FFFFFF';
   const [draft, setDraft] = useState(normalizedValue.slice(1));
 
@@ -2214,7 +2241,7 @@ function ColorSettingControl({ item, describedBy }: { item: SettingItem; describ
 
   return (
     <div className="zs-color-control">
-      <label className="zs-color-swatch" title="Open color palette">
+      <label className="zs-color-swatch" title={t('openColorPalette')}>
         <span style={{ backgroundColor: normalizedValue }} />
         <input
           type="color"
@@ -2232,7 +2259,7 @@ function ColorSettingControl({ item, describedBy }: { item: SettingItem; describ
         maxLength={6}
         inputMode="text"
         spellCheck={false}
-        aria-label="Hex color"
+        aria-label={t('hexColor')}
         onChange={(event) => {
           const next = event.target.value
             .replace(/^#/, '')
@@ -2287,6 +2314,7 @@ function protectedAppSegment(app: InstalledApp): ProtectedAppRow | null {
 }
 
 function ProtectedAppsManager({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const { t } = useTranslation(usePanelLanguage());
   const { apps, loading, error, reload } = useInstalledApps(true);
   const [search, setSearch] = useState('');
   const [visibleCount, setVisibleCount] = useState(40);
@@ -2309,14 +2337,14 @@ function ProtectedAppsManager({ value, onChange }: { value: string; onChange: (v
     <div className="zs-workspace-manager">
       <section className="zs-workspace-shortcuts">
         <div className="zs-workspace-section-head">
-          <div><h3>Selected applications</h3></div>
+          <div><h3>{t('selectedApplications')}</h3></div>
         </div>
         <div className="zs-workspace-items">
           {rows.map((row) => (
             <div className="zs-workspace-item" key={row.raw}>
               <div className="zs-workspace-item-main">
                 <span className="zs-workspace-app-icon"><Monitor size={16} /></span>
-                <div className="zs-workspace-item-copy"><b>{row.label}</b><small><em>Protected in fullscreen</em></small></div>
+                <div className="zs-workspace-item-copy"><b>{row.label}</b><small><em>{t('protectedInFullscreen')}</em></small></div>
                 <div className="zs-item-actions">
                   <button type="button" onClick={() => commit(rows.filter((item) => item.raw !== row.raw))} aria-label={`Remove ${row.label}`}><Trash2 size={13} /></button>
                 </div>
@@ -2331,9 +2359,9 @@ function ProtectedAppsManager({ value, onChange }: { value: string; onChange: (v
         <div className="zs-add-panel-head">
           <label className="zs-search is-manager-search">
             <Search size={14} />
-            <input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search installed applications" />
+            <input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('searchApps')} />
           </label>
-          <button type="button" className="zs-btn" onClick={() => reload(true)}>Reload</button>
+          <button type="button" className="zs-btn" onClick={() => reload(true)}>{t('reload')}</button>
         </div>
         <div
           className="zs-installed-apps"
@@ -2357,9 +2385,9 @@ function ProtectedAppsManager({ value, onChange }: { value: string; onChange: (v
               );
             })
           ) : error ? (
-            <div className="zs-manager-empty">Could not list applications.<button type="button" className="zs-btn" onClick={() => reload(true)}>Try again</button></div>
+            <div className="zs-manager-empty">{t('couldNotListApps')}<button type="button" className="zs-btn" onClick={() => reload(true)}>{t('tryAgain')}</button></div>
           ) : (
-            <div className="zs-manager-empty">No applications found.</div>
+            <div className="zs-manager-empty">{t('noAppsFound')}</div>
           )}
         </div>
       </section>
@@ -2405,6 +2433,7 @@ function SettingsEditor({
   focusAppId?: string | null;
   onFocusApplied?: () => void;
 }) {
+  const { t } = useTranslation(usePanelLanguage());
   let title = 'Edit setting';
   let description = 'Changes are applied immediately.';
   let content: React.ReactNode = null;
@@ -2492,13 +2521,13 @@ function SettingsEditor({
             <h2>{title}</h2>
             <p>{description}</p>
           </div>
-          <button type="button" onClick={close} aria-label="Close">
+          <button type="button" onClick={close} aria-label={t('close')}>
             <X size={15} strokeWidth={1.9} />
           </button>
         </header>
         <div className="zs-editor-body">{content}</div>
         <footer>
-          <button type="button" className="zs-btn is-primary" onClick={close}>Done</button>
+          <button type="button" className="zs-btn is-primary" onClick={close}>{t('done')}</button>
         </footer>
       </motion.div>
     </div>
@@ -2717,6 +2746,7 @@ function IconPickerModal({
   titleId,
   title,
   hint,
+  language,
   selectedIcon,
   defaultIcon,
   onSelect,
@@ -2726,6 +2756,7 @@ function IconPickerModal({
   titleId: string;
   title: string;
   hint: string;
+  language?: string;
   /** The name in force — never empty, so the grid always has a cell highlighted. */
   selectedIcon: string;
   /** What the item wears when nothing has been picked; enables the reset button when it differs. */
@@ -2734,6 +2765,7 @@ function IconPickerModal({
   onReset?: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation(usePanelLanguage());
   /** A modal that only closes with the mouse is a modal that traps whoever uses the keyboard. */
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -2778,12 +2810,12 @@ function IconPickerModal({
             <b id={titleId}>{title}</b>
             <small>{hint}</small>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close icon picker">
+          <button type="button" onClick={onClose} aria-label={t('closeIconPicker')}>
             <X size={14} />
           </button>
         </header>
         <div className="zs-icon-modal-body">
-          <IconPicker selectedIcon={selectedIcon} onSelect={onSelect} />
+          <IconPicker selectedIcon={selectedIcon} language={language} onSelect={onSelect} />
         </div>
         {/**
           * Picking writes straight through, so once a glyph was clicked the modal had
@@ -2802,7 +2834,7 @@ function IconPickerModal({
                 <RotateCcw size={13} /> Default
               </button>
             )}
-            <button type="button" className="zs-btn is-primary" onClick={onClose}>Done</button>
+            <button type="button" className="zs-btn is-primary" onClick={onClose}>{t('done')}</button>
           </span>
         </footer>
       </motion.div>
@@ -2820,6 +2852,7 @@ function IconPickerModal({
  * invisible, which was precisely what made being able to reorder them mean anything.
  */
 function WorkspaceWheelPreview({ workspace, accent }: { workspace: Workspace; accent: string }) {
+  const { t } = useTranslation(usePanelLanguage());
   const items = workspace.apps.slice(0, 8);
   const radius = 34;
   return (
@@ -2846,7 +2879,7 @@ function WorkspaceWheelPreview({ workspace, accent }: { workspace: Workspace; ac
           </span>
         );
       })}
-      {workspace.apps.length === 0 && <span className="zs-ws-preview-empty">empty</span>}
+      {workspace.apps.length === 0 && <span className="zs-ws-preview-empty">{t('workspacePreviewEmpty')}</span>}
     </div>
   );
 }
@@ -2866,6 +2899,7 @@ function WorkspaceCards({
   onReorder: (from: number, insertBefore: number) => void;
   onDelete: (index: number) => void;
 }) {
+  const { t } = useTranslation(usePanelLanguage());
   /**
    * In a grid the WHOLE card is the thing you pick up — there is no handle.
    *
@@ -2959,7 +2993,7 @@ function WorkspaceCards({
       })}
       <button type="button" className="zs-ws-card is-new" onClick={onCreate}>
         <Plus size={18} strokeWidth={1.9} />
-        <small>New workspace</small>
+        <small>{t('newWorkspace')}</small>
       </button>
     </div>
   );
@@ -2996,7 +3030,7 @@ function WorkspaceManager({
   discoveryPhase: 'idle' | 'waiting' | 'scanning';
   language?: string;
 }) {
-  const { t } = useTranslation(language);
+  const { t, tf } = useTranslation(language);
   const [addMode, setAddMode] = useState<WorkspaceAddMode>(null);
   const [isMultiSelect, setIsMultiSelect] = useState(false);
   const [isAddingSelected, setIsAddingSelected] = useState(false);
@@ -3396,14 +3430,14 @@ function WorkspaceManager({
             className={`zs-workspace-icon-button${isIconPickerOpen ? ' is-active' : ''}`}
             onClick={() => setIsIconPickerOpen((open) => !open)}
             aria-expanded={isIconPickerOpen}
-            aria-label="Change workspace icon"
-            title="Change icon"
+            aria-label={t('changeWorkspaceIcon')}
+            title={t('changeIcon')}
           >
             <WorkspaceIcon size={24} strokeWidth={1.6} />
             <Pencil size={10} strokeWidth={2} />
           </button>
           <label className="zs-workspace-name-field">
-            <span>Workspace name</span>
+            <span>{t('workspaceName')}</span>
             <input
               value={workspace.name}
               onChange={(event) => updateWorkspace(workspaceIndex, { name: event.target.value })}
@@ -3425,7 +3459,7 @@ function WorkspaceManager({
               type="button"
               role="switch"
               aria-checked={workspace.enabled}
-              aria-label="Available on the wheel"
+              aria-label={t('availableOnWheel')}
               aria-disabled={isActive}
               className={`zs-flag-btn${workspace.enabled ? ' is-on' : ''}${isActive ? ' is-inert' : ''}`}
               data-tip={
@@ -3444,11 +3478,11 @@ function WorkspaceManager({
             </button>
             <button
               type="button"
-              aria-label="Make current workspace"
+              aria-label={t('makeCurrent')}
               aria-pressed={isActive}
               aria-disabled={isActive}
               className={`zs-flag-btn${isActive ? ' is-on is-inert' : ''}`}
-              data-tip={isActive ? 'This is the current workspace' : 'Make this the current workspace'}
+              data-tip={isActive ? t('isCurrentWorkspace') : t('makeThisCurrent')}
               onClick={() => {
                 if (isActive) return;
                 /** Making it current implies being available — otherwise the result is an impossible state. */
@@ -3490,8 +3524,9 @@ function WorkspaceManager({
           <IconPickerModal
             key="workspace-icon"
             titleId="ws-icon-modal-title"
-            title="Workspace icon"
-            hint="Shown in the wheel picker, and on the workspace card."
+            language={language}
+            title={t('workspaceIcon')}
+            hint={t('workspaceIconHint')}
             selectedIcon={workspace.pickerIconName?.trim() || 'Layers'}
             defaultIcon="Layers"
             onSelect={(iconName) => updateWorkspace(workspaceIndex, { pickerIconName: iconName })}
@@ -3511,8 +3546,9 @@ function WorkspaceManager({
           <IconPickerModal
             key="item-icon"
             titleId="item-icon-modal-title"
-            title="Folder icon"
-            hint={`Shown on the wheel for “${iconEditItem.label || 'this folder'}”.`}
+            language={language}
+            title={t('folderIcon')}
+            hint={tf('folderIconHint', { label: iconEditItem.label || t('thisFolder') })}
             selectedIcon={itemFallbackIcon(iconEditItem)}
             defaultIcon={DEFAULT_FOLDER_ICON}
             onSelect={(iconName) => updateItem(iconEditIndex, { iconName })}
@@ -3524,8 +3560,8 @@ function WorkspaceManager({
 
       <section className="zs-workspace-shortcuts">
         <div className="zs-workspace-section-head">
-          <div><h3>Shortcuts</h3></div>
-          <div className="zs-add-actions" aria-label="Add shortcut">
+          <div><h3>{t('shortcutsTitle')}</h3></div>
+          <div className="zs-add-actions" aria-label={t('addShortcut')}>
             <button type="button" className={addMode === 'app' ? 'is-active' : ''} onClick={() => setAddMode(addMode === 'app' ? null : 'app')}><Monitor size={14} /> Application</button>
             <button type="button" className={addMode === 'url' ? 'is-active' : ''} onClick={() => setAddMode(addMode === 'url' ? null : 'url')}><Globe2 size={14} /> URL</button>
             <button type="button" className={addMode === 'folder' ? 'is-active' : ''} onClick={() => setAddMode(addMode === 'folder' ? null : 'folder')}><FolderOpen size={14} /> Folder</button>
@@ -3666,8 +3702,8 @@ function WorkspaceManager({
               )}
               {addMode === 'url' && (
                 <div className="zs-add-form">
-                  <label className="zs-field"><span>Address</span><input autoFocus value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com" onKeyDown={(event) => { if (event.key === 'Enter') void addUrl(); }} /></label>
-                  <label className="zs-field"><span>Name</span><input value={urlLabel} onChange={(event) => { setUrlLabel(event.target.value); setUrlLabelTyped(true); }} placeholder={urlTitleLoading ? 'Reading the page title…' : 'Filled automatically'} onKeyDown={(event) => { if (event.key === 'Enter') void addUrl(); }} /></label>
+                  <label className="zs-field"><span>{t('address')}</span><input autoFocus value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com" onKeyDown={(event) => { if (event.key === 'Enter') void addUrl(); }} /></label>
+                  <label className="zs-field"><span>Name</span><input value={urlLabel} onChange={(event) => { setUrlLabel(event.target.value); setUrlLabelTyped(true); }} placeholder={urlTitleLoading ? t('readingPageTitle') : t('filledAutomatically')} onKeyDown={(event) => { if (event.key === 'Enter') void addUrl(); }} /></label>
                   <button type="button" className="zs-btn is-primary" disabled={!url.trim()} onClick={() => void addUrl()}><Plus size={14} /> Add URL</button>
                 </div>
               )}
@@ -3785,7 +3821,7 @@ function WorkspaceManager({
                       const ItemGlyph = getIcon(itemFallbackIcon(item));
                       return (
                         <div className="zs-field">
-                          <span>Icon</span>
+                          <span>{t('iconLabel')}</span>
                           <button
                             type="button"
                             className="zs-icon-field-button"
@@ -3797,7 +3833,7 @@ function WorkspaceManager({
                             </span>
                             <div>
                               <b>{itemFallbackIcon(item)}</b>
-                              <small>Shown on the wheel</small>
+                              <small>{t('shownOnWheel')}</small>
                             </div>
                             <Pencil size={13} aria-hidden />
                           </button>
@@ -3823,7 +3859,7 @@ function WorkspaceManager({
                     */}
                     {item.type !== 'folder' && item.commandType === 'file' && (
                       <label className="zs-field is-with-action">
-                        <span>File path</span>
+                        <span>{t('filePath')}</span>
                         <div className="zs-field-row">
                           <input
                             value={item.command}
@@ -3843,7 +3879,7 @@ function WorkspaceManager({
                     )}
                     {item.type !== 'folder' && item.commandType === 'app' && isPathLikeCommand(item.command) && (
                       <label className="zs-field is-with-action">
-                        <span>Target</span>
+                        <span>{t('target')}</span>
                         <div className="zs-field-row">
                           <input
                             value={item.command}
@@ -3869,7 +3905,7 @@ function WorkspaceManager({
                     {item.type !== 'folder' && item.commandType !== 'folder' && item.commandType !== 'file' && (
                       <div className="zs-launch-options">
                         <div>
-                          <b>Launch mode</b>
+                          <b>{t('launchMode')}</b>
                           <small>
                             {item.commandType === 'url' && (item.launchMode ?? 'normal') === 'reuse'
                               ? 'Uses the existing default browser process when available.'
@@ -3880,7 +3916,7 @@ function WorkspaceManager({
                                 : 'Uses the standard Windows launch behavior.'}
                           </small>
                         </div>
-                        <div className="zs-segmented" role="radiogroup" aria-label="Launch mode">
+                        <div className="zs-segmented" role="radiogroup" aria-label={t('launchMode')}>
                           {(item.commandType === 'url'
                             ? ([['normal', 'Normal'], ['reuse', 'Reuse']] as const)
                             : ([['normal', 'Normal'], ['reuse', 'Reuse'], ['prewarm', 'Warm']] as const)
@@ -3980,11 +4016,11 @@ function WorkspaceManager({
               /** Empty because a scan has not run yet, not because there is nothing to add. */
               <div className="zs-manager-empty is-large">
                 <Loader2 className="zs-spin" size={22} />
-                <b>{discoveryPhase === 'scanning' ? 'Looking through your Start menu…' : 'Finding your applications'}</b>
-                <span>Rovyl fills this workspace by itself. You can add more above at any time.</span>
+                <b>{discoveryPhase === 'scanning' ? t('scanningStartMenu') : t('findingApplications')}</b>
+                <span>{t('fillingWorkspaceDesc')}</span>
               </div>
             ) : (
-              <div className="zs-manager-empty is-large"><SquareStack size={22} /><b>This workspace is empty</b><span>Add an application, URL, or folder above.</span></div>
+              <div className="zs-manager-empty is-large"><SquareStack size={22} /><b>{t('workspaceEmpty')}</b><span>{t('workspaceEmptyDesc')}</span></div>
             )
           )}
         </div>
@@ -4047,6 +4083,7 @@ function BackKeyRecorder({
   value: string | undefined;
   onChange: (value: string) => void;
 }) {
+  const { t } = useTranslation(usePanelLanguage());
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const current = normalizeBackKey(value);
@@ -4085,7 +4122,7 @@ function BackKeyRecorder({
   return (
     <div className="zs-shortcut">
       <div className="zs-shortcut-keys">
-        {current ? <kbd>{current}</kbd> : <kbd>None</kbd>}
+        {current ? <kbd>{current}</kbd> : <kbd>{t('noneValue')}</kbd>}
       </div>
       <button
         type="button"
@@ -4095,7 +4132,7 @@ function BackKeyRecorder({
           setRecording((on) => !on);
         }}
       >
-        {recording ? 'Press any key… (Escape to stop)' : 'Record new key'}
+        {recording ? t('recordingKey') : t('recordNewKey')}
       </button>
       {/* Both ways back to a sane state: the shipped default, or nothing at all. */}
       <button
@@ -4128,6 +4165,7 @@ function ShortcutRecorder({
   onChange: (value: string) => void;
   config: UIConfig;
 }) {
+  const { t } = useTranslation(usePanelLanguage());
   const [recording, setRecording] = useState(false);
   const [status, setStatus] = useState<ShortcutStatus>({ kind: 'idle' });
 
@@ -4241,7 +4279,7 @@ function ShortcutRecorder({
           }
         }}
       >
-        {recording ? 'Press a key or mouse button…' : 'Record new shortcut'}
+        {recording ? t('recording') : t('recordNewShortcut')}
       </button>
       {note && (
         <p className={`zs-shortcut-note${note.tone === 'warn' ? ' is-warn' : ''}`} role="status">
