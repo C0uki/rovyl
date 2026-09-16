@@ -2731,6 +2731,7 @@ function IconPickerModal({
   titleId,
   title,
   hint,
+  language,
   selectedIcon,
   defaultIcon,
   onSelect,
@@ -2740,6 +2741,7 @@ function IconPickerModal({
   titleId: string;
   title: string;
   hint: string;
+  language?: string;
   /** The name in force — never empty, so the grid always has a cell highlighted. */
   selectedIcon: string;
   /** What the item wears when nothing has been picked; enables the reset button when it differs. */
@@ -2797,7 +2799,7 @@ function IconPickerModal({
           </button>
         </header>
         <div className="zs-icon-modal-body">
-          <IconPicker selectedIcon={selectedIcon} onSelect={onSelect} />
+          <IconPicker selectedIcon={selectedIcon} language={language} onSelect={onSelect} />
         </div>
         {/**
           * Picking writes straight through, so once a glyph was clicked the modal had
@@ -3504,6 +3506,7 @@ function WorkspaceManager({
           <IconPickerModal
             key="workspace-icon"
             titleId="ws-icon-modal-title"
+            language={language}
             title="Workspace icon"
             hint="Shown in the wheel picker, and on the workspace card."
             selectedIcon={workspace.pickerIconName?.trim() || 'Layers'}
@@ -3525,6 +3528,7 @@ function WorkspaceManager({
           <IconPickerModal
             key="item-icon"
             titleId="item-icon-modal-title"
+            language={language}
             title="Folder icon"
             hint={`Shown on the wheel for “${iconEditItem.label || 'this folder'}”.`}
             selectedIcon={itemFallbackIcon(iconEditItem)}
