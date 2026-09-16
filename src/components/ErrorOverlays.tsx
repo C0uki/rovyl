@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { AlertTriangle, Wrench, X } from 'lucide-react';
+import { useTranslation } from '../i18n/useTranslation';
+import { usePanelLanguage } from '../i18n/panelLanguage';
 import {
   humanizeExecutionError,
   type FaultShortcutRef,
@@ -57,6 +59,7 @@ const FaultCard: React.FC<{
   onDismiss: (seq: number) => void;
   onFixShortcut?: (target: FaultShortcutRef) => void;
 }> = ({ fault, theme, interactive, onDismiss, onFixShortcut }) => {
+  const { t } = useTranslation(usePanelLanguage());
   const reduceMotion = useReducedMotion();
   const [expanded, setExpanded] = useState(false);
   /**
@@ -176,7 +179,7 @@ const FaultCard: React.FC<{
             */}
             {fixTarget && (
               <button type="button" className="is-primary" onClick={fix}>
-                <Wrench size={12} strokeWidth={1.9} aria-hidden /> Fix shortcut
+                <Wrench size={12} strokeWidth={1.9} aria-hidden /> {t('faultFixShortcut')}
               </button>
             )}
             {human.raw && (
@@ -186,16 +189,16 @@ const FaultCard: React.FC<{
                 aria-expanded={expanded}
                 aria-controls={`zs-fault-raw-${seq}`}
               >
-                {expanded ? 'Hide details' : 'Details'}
+                {expanded ? t('faultHideDetails') : t('faultDetails')}
               </button>
             )}
-            <button type="button" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
+            <button type="button" onClick={copy}>{copied ? t('faultCopied') : t('faultCopy')}</button>
           </div>
         )}
       </div>
 
       {interactive && (
-        <button type="button" className="zs-fault-close" onClick={dismiss} aria-label="Dismiss">
+        <button type="button" className="zs-fault-close" onClick={dismiss} aria-label={t('faultDismiss')}>
           <X size={14} strokeWidth={1.9} />
         </button>
       )}

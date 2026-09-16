@@ -65,6 +65,7 @@ import {
 } from '../constants/radialBackKey';
 import { nextTypeAheadBuffer, selectMenuPlacement, typeAheadIndex } from './selectMenu';
 import { LANGUAGES, normalizeLanguage, translations, useTranslation } from '../i18n/useTranslation';
+import { PanelLanguageProvider, usePanelLanguage } from '../i18n/panelLanguage';
 
 interface PrecisionSettingsProps {
   isOpen: boolean;
@@ -708,7 +709,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
         ]),
       };
     });
-    showToast('Workspace created');
+    showToast(t('toastWorkspaceCreated'));
   };
 
   /**
@@ -728,7 +729,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
     const workspace = config.workspaces[index];
     if (!workspace) return;
     if (config.workspaces.length <= 1) {
-      showToast('Keep at least one workspace');
+      showToast(t('toastKeepOneWorkspace'));
       return;
     }
     const previousActiveIndex = config.activeWorkspaceIndex;
@@ -749,8 +750,11 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
     const shortcuts = workspace.apps?.length ?? 0;
     showToast(
       shortcuts > 0
-        ? `Deleted “${workspace.name}” and ${shortcuts} ${shortcuts === 1 ? 'shortcut' : 'shortcuts'}`
-        : `Deleted “${workspace.name}”`,
+        ? tf(shortcuts === 1 ? 'toastDeletedWithOne' : 'toastDeletedWithMany', {
+            name: workspace.name,
+            count: shortcuts,
+          })
+        : tf('toastDeleted', { name: workspace.name }),
       () => {
         setConfig((current) => {
           /** Undo twice, or undo something that came back another way, must not duplicate it. */
@@ -1498,6 +1502,12 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
   if (!isOpen) return null;
 
   return (
+    /**
+     * The language, once, for every small component inside this panel. They reach the text through
+     * `useTranslation(usePanelLanguage())` rather than a prop passed down five levels for no other
+     * purpose — see `src/i18n/panelLanguage.ts`.
+     */
+    <PanelLanguageProvider value={config.language ?? 'en'}>
     <div
       id="settings-container"
       className={`zs-shell${isDismissing ? ' is-dismissing' : ''}`}
@@ -1509,7 +1519,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: reduceMotion ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
-        aria-label="Rovyl Settings"
+        aria-label={t('settingsWindowLabel')}
       >
         <aside className="zs-sidebar">
           <div className="zs-sidebar-head">
@@ -1528,13 +1538,13 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
               aria-label={t('searchSettings')}
             />
             {query && (
-              <button type="button" onClick={() => setQuery('')} aria-label="Clear search">
+              <button type="button" onClick={() => setQuery('')} aria-label={t('clearSearch')}>
                 <X size={13} strokeWidth={2} />
               </button>
             )}
           </div>
 
-          <nav className="zs-nav" aria-label="Settings sections">
+          <nav className="zs-nav" aria-label={t('settingsSections')}>
             {sectionsList.map((section) => {
               const Icon = section.icon;
               return (
@@ -1591,7 +1601,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
               </motion.header>
 
               {isEmpty ? (
-                <p className="zs-empty">No settings found.</p>
+                <p className="zs-empty">{t('noSettingsFound')}</p>
               ) : (
                 <motion.div
                   key={`body-${trimmedQuery ? `q-${trimmedQuery}` : sectionId}`}
@@ -1716,13 +1726,14 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
                   /** Closing here and not in each undo: a toast still offering what it just did is
                       an invitation to press it twice, and every undo would have to remember. */
                   onClick={() => { toast.undo?.(); setToast(null); setToastHeld(false); }}
-                >Undo</button>
+                >{t('undo')}</button>
               )}
             </motion.div>
           )}
         </AnimatePresence>
       </motion.section>
     </div>
+    </PanelLanguageProvider>
   );
 };
 
@@ -1735,6 +1746,7 @@ function SettingRow({
   /** Present only while the row differs from `DEFAULT_UI_CONFIG`; absent is "nothing to revert". */
   onResetToDefault?: () => void;
 }) {
+  const { t } = useTranslation(usePanelLanguage());
   const ActionIcon = item.actionIcon;
   const describedBy = item.description ? `${item.key}-desc` : undefined;
   const reorderable = typeof item.reorderIndex === 'number' && Boolean(item.onReorder);
@@ -1826,7 +1838,7 @@ function SettingRow({
               className="zs-row-revert"
               onClick={onResetToDefault}
               aria-label={`Reset ${item.title} to default`}
-              title="Reset to default"
+              title={t('resetToDefault')}
             >
               <RotateCcw size={13} strokeWidth={1.9} />
             </button>
@@ -2216,6 +2228,7 @@ function SelectSettingControl({ item, describedBy }: { item: SettingItem; descri
 }
 
 function ColorSettingControl({ item, describedBy }: { item: SettingItem; describedBy?: string }) {
+  const { t } = useTranslation(usePanelLanguage());
   const normalizedValue = normalizeHexInput(item.value ?? '') ?? '#FFFFFF';
   const [draft, setDraft] = useState(normalizedValue.slice(1));
 
@@ -2228,7 +2241,7 @@ function ColorSettingControl({ item, describedBy }: { item: SettingItem; describ
 
   return (
     <div className="zs-color-control">
-      <label className="zs-color-swatch" title="Open color palette">
+      <label className="zs-color-swatch" title={t('openColorPalette')}>
         <span style={{ backgroundColor: normalizedValue }} />
         <input
           type="color"
@@ -2246,7 +2259,7 @@ function ColorSettingControl({ item, describedBy }: { item: SettingItem; describ
         maxLength={6}
         inputMode="text"
         spellCheck={false}
-        aria-label="Hex color"
+        aria-label={t('hexColor')}
         onChange={(event) => {
           const next = event.target.value
             .replace(/^#/, '')
@@ -2301,6 +2314,7 @@ function protectedAppSegment(app: InstalledApp): ProtectedAppRow | null {
 }
 
 function ProtectedAppsManager({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const { t } = useTranslation(usePanelLanguage());
   const { apps, loading, error, reload } = useInstalledApps(true);
   const [search, setSearch] = useState('');
   const [visibleCount, setVisibleCount] = useState(40);
@@ -2323,14 +2337,14 @@ function ProtectedAppsManager({ value, onChange }: { value: string; onChange: (v
     <div className="zs-workspace-manager">
       <section className="zs-workspace-shortcuts">
         <div className="zs-workspace-section-head">
-          <div><h3>Selected applications</h3></div>
+          <div><h3>{t('selectedApplications')}</h3></div>
         </div>
         <div className="zs-workspace-items">
           {rows.map((row) => (
             <div className="zs-workspace-item" key={row.raw}>
               <div className="zs-workspace-item-main">
                 <span className="zs-workspace-app-icon"><Monitor size={16} /></span>
-                <div className="zs-workspace-item-copy"><b>{row.label}</b><small><em>Protected in fullscreen</em></small></div>
+                <div className="zs-workspace-item-copy"><b>{row.label}</b><small><em>{t('protectedInFullscreen')}</em></small></div>
                 <div className="zs-item-actions">
                   <button type="button" onClick={() => commit(rows.filter((item) => item.raw !== row.raw))} aria-label={`Remove ${row.label}`}><Trash2 size={13} /></button>
                 </div>
@@ -2345,9 +2359,9 @@ function ProtectedAppsManager({ value, onChange }: { value: string; onChange: (v
         <div className="zs-add-panel-head">
           <label className="zs-search is-manager-search">
             <Search size={14} />
-            <input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search installed applications" />
+            <input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t('searchApps')} />
           </label>
-          <button type="button" className="zs-btn" onClick={() => reload(true)}>Reload</button>
+          <button type="button" className="zs-btn" onClick={() => reload(true)}>{t('reload')}</button>
         </div>
         <div
           className="zs-installed-apps"
@@ -2371,9 +2385,9 @@ function ProtectedAppsManager({ value, onChange }: { value: string; onChange: (v
               );
             })
           ) : error ? (
-            <div className="zs-manager-empty">Could not list applications.<button type="button" className="zs-btn" onClick={() => reload(true)}>Try again</button></div>
+            <div className="zs-manager-empty">{t('couldNotListApps')}<button type="button" className="zs-btn" onClick={() => reload(true)}>{t('tryAgain')}</button></div>
           ) : (
-            <div className="zs-manager-empty">No applications found.</div>
+            <div className="zs-manager-empty">{t('noAppsFound')}</div>
           )}
         </div>
       </section>
@@ -2419,6 +2433,7 @@ function SettingsEditor({
   focusAppId?: string | null;
   onFocusApplied?: () => void;
 }) {
+  const { t } = useTranslation(usePanelLanguage());
   let title = 'Edit setting';
   let description = 'Changes are applied immediately.';
   let content: React.ReactNode = null;
@@ -2506,13 +2521,13 @@ function SettingsEditor({
             <h2>{title}</h2>
             <p>{description}</p>
           </div>
-          <button type="button" onClick={close} aria-label="Close">
+          <button type="button" onClick={close} aria-label={t('close')}>
             <X size={15} strokeWidth={1.9} />
           </button>
         </header>
         <div className="zs-editor-body">{content}</div>
         <footer>
-          <button type="button" className="zs-btn is-primary" onClick={close}>Done</button>
+          <button type="button" className="zs-btn is-primary" onClick={close}>{t('done')}</button>
         </footer>
       </motion.div>
     </div>
@@ -2750,6 +2765,7 @@ function IconPickerModal({
   onReset?: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation(usePanelLanguage());
   /** A modal that only closes with the mouse is a modal that traps whoever uses the keyboard. */
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -2794,7 +2810,7 @@ function IconPickerModal({
             <b id={titleId}>{title}</b>
             <small>{hint}</small>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close icon picker">
+          <button type="button" onClick={onClose} aria-label={t('closeIconPicker')}>
             <X size={14} />
           </button>
         </header>
@@ -2818,7 +2834,7 @@ function IconPickerModal({
                 <RotateCcw size={13} /> Default
               </button>
             )}
-            <button type="button" className="zs-btn is-primary" onClick={onClose}>Done</button>
+            <button type="button" className="zs-btn is-primary" onClick={onClose}>{t('done')}</button>
           </span>
         </footer>
       </motion.div>
@@ -2836,6 +2852,7 @@ function IconPickerModal({
  * invisible, which was precisely what made being able to reorder them mean anything.
  */
 function WorkspaceWheelPreview({ workspace, accent }: { workspace: Workspace; accent: string }) {
+  const { t } = useTranslation(usePanelLanguage());
   const items = workspace.apps.slice(0, 8);
   const radius = 34;
   return (
@@ -2862,7 +2879,7 @@ function WorkspaceWheelPreview({ workspace, accent }: { workspace: Workspace; ac
           </span>
         );
       })}
-      {workspace.apps.length === 0 && <span className="zs-ws-preview-empty">empty</span>}
+      {workspace.apps.length === 0 && <span className="zs-ws-preview-empty">{t('workspacePreviewEmpty')}</span>}
     </div>
   );
 }
@@ -2882,6 +2899,7 @@ function WorkspaceCards({
   onReorder: (from: number, insertBefore: number) => void;
   onDelete: (index: number) => void;
 }) {
+  const { t } = useTranslation(usePanelLanguage());
   /**
    * In a grid the WHOLE card is the thing you pick up — there is no handle.
    *
@@ -2975,7 +2993,7 @@ function WorkspaceCards({
       })}
       <button type="button" className="zs-ws-card is-new" onClick={onCreate}>
         <Plus size={18} strokeWidth={1.9} />
-        <small>New workspace</small>
+        <small>{t('newWorkspace')}</small>
       </button>
     </div>
   );
@@ -3012,7 +3030,7 @@ function WorkspaceManager({
   discoveryPhase: 'idle' | 'waiting' | 'scanning';
   language?: string;
 }) {
-  const { t } = useTranslation(language);
+  const { t, tf } = useTranslation(language);
   const [addMode, setAddMode] = useState<WorkspaceAddMode>(null);
   const [isMultiSelect, setIsMultiSelect] = useState(false);
   const [isAddingSelected, setIsAddingSelected] = useState(false);
@@ -3412,14 +3430,14 @@ function WorkspaceManager({
             className={`zs-workspace-icon-button${isIconPickerOpen ? ' is-active' : ''}`}
             onClick={() => setIsIconPickerOpen((open) => !open)}
             aria-expanded={isIconPickerOpen}
-            aria-label="Change workspace icon"
-            title="Change icon"
+            aria-label={t('changeWorkspaceIcon')}
+            title={t('changeIcon')}
           >
             <WorkspaceIcon size={24} strokeWidth={1.6} />
             <Pencil size={10} strokeWidth={2} />
           </button>
           <label className="zs-workspace-name-field">
-            <span>Workspace name</span>
+            <span>{t('workspaceName')}</span>
             <input
               value={workspace.name}
               onChange={(event) => updateWorkspace(workspaceIndex, { name: event.target.value })}
@@ -3441,7 +3459,7 @@ function WorkspaceManager({
               type="button"
               role="switch"
               aria-checked={workspace.enabled}
-              aria-label="Available on the wheel"
+              aria-label={t('availableOnWheel')}
               aria-disabled={isActive}
               className={`zs-flag-btn${workspace.enabled ? ' is-on' : ''}${isActive ? ' is-inert' : ''}`}
               data-tip={
@@ -3460,11 +3478,11 @@ function WorkspaceManager({
             </button>
             <button
               type="button"
-              aria-label="Make current workspace"
+              aria-label={t('makeCurrent')}
               aria-pressed={isActive}
               aria-disabled={isActive}
               className={`zs-flag-btn${isActive ? ' is-on is-inert' : ''}`}
-              data-tip={isActive ? 'This is the current workspace' : 'Make this the current workspace'}
+              data-tip={isActive ? t('isCurrentWorkspace') : t('makeThisCurrent')}
               onClick={() => {
                 if (isActive) return;
                 /** Making it current implies being available — otherwise the result is an impossible state. */
@@ -3507,8 +3525,8 @@ function WorkspaceManager({
             key="workspace-icon"
             titleId="ws-icon-modal-title"
             language={language}
-            title="Workspace icon"
-            hint="Shown in the wheel picker, and on the workspace card."
+            title={t('workspaceIcon')}
+            hint={t('workspaceIconHint')}
             selectedIcon={workspace.pickerIconName?.trim() || 'Layers'}
             defaultIcon="Layers"
             onSelect={(iconName) => updateWorkspace(workspaceIndex, { pickerIconName: iconName })}
@@ -3529,8 +3547,8 @@ function WorkspaceManager({
             key="item-icon"
             titleId="item-icon-modal-title"
             language={language}
-            title="Folder icon"
-            hint={`Shown on the wheel for “${iconEditItem.label || 'this folder'}”.`}
+            title={t('folderIcon')}
+            hint={tf('folderIconHint', { label: iconEditItem.label || t('thisFolder') })}
             selectedIcon={itemFallbackIcon(iconEditItem)}
             defaultIcon={DEFAULT_FOLDER_ICON}
             onSelect={(iconName) => updateItem(iconEditIndex, { iconName })}
@@ -3542,8 +3560,8 @@ function WorkspaceManager({
 
       <section className="zs-workspace-shortcuts">
         <div className="zs-workspace-section-head">
-          <div><h3>Shortcuts</h3></div>
-          <div className="zs-add-actions" aria-label="Add shortcut">
+          <div><h3>{t('shortcutsTitle')}</h3></div>
+          <div className="zs-add-actions" aria-label={t('addShortcut')}>
             <button type="button" className={addMode === 'app' ? 'is-active' : ''} onClick={() => setAddMode(addMode === 'app' ? null : 'app')}><Monitor size={14} /> Application</button>
             <button type="button" className={addMode === 'url' ? 'is-active' : ''} onClick={() => setAddMode(addMode === 'url' ? null : 'url')}><Globe2 size={14} /> URL</button>
             <button type="button" className={addMode === 'folder' ? 'is-active' : ''} onClick={() => setAddMode(addMode === 'folder' ? null : 'folder')}><FolderOpen size={14} /> Folder</button>
@@ -3684,8 +3702,8 @@ function WorkspaceManager({
               )}
               {addMode === 'url' && (
                 <div className="zs-add-form">
-                  <label className="zs-field"><span>Address</span><input autoFocus value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com" onKeyDown={(event) => { if (event.key === 'Enter') void addUrl(); }} /></label>
-                  <label className="zs-field"><span>Name</span><input value={urlLabel} onChange={(event) => { setUrlLabel(event.target.value); setUrlLabelTyped(true); }} placeholder={urlTitleLoading ? 'Reading the page title…' : 'Filled automatically'} onKeyDown={(event) => { if (event.key === 'Enter') void addUrl(); }} /></label>
+                  <label className="zs-field"><span>{t('address')}</span><input autoFocus value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com" onKeyDown={(event) => { if (event.key === 'Enter') void addUrl(); }} /></label>
+                  <label className="zs-field"><span>Name</span><input value={urlLabel} onChange={(event) => { setUrlLabel(event.target.value); setUrlLabelTyped(true); }} placeholder={urlTitleLoading ? t('readingPageTitle') : t('filledAutomatically')} onKeyDown={(event) => { if (event.key === 'Enter') void addUrl(); }} /></label>
                   <button type="button" className="zs-btn is-primary" disabled={!url.trim()} onClick={() => void addUrl()}><Plus size={14} /> Add URL</button>
                 </div>
               )}
@@ -3803,7 +3821,7 @@ function WorkspaceManager({
                       const ItemGlyph = getIcon(itemFallbackIcon(item));
                       return (
                         <div className="zs-field">
-                          <span>Icon</span>
+                          <span>{t('iconLabel')}</span>
                           <button
                             type="button"
                             className="zs-icon-field-button"
@@ -3815,7 +3833,7 @@ function WorkspaceManager({
                             </span>
                             <div>
                               <b>{itemFallbackIcon(item)}</b>
-                              <small>Shown on the wheel</small>
+                              <small>{t('shownOnWheel')}</small>
                             </div>
                             <Pencil size={13} aria-hidden />
                           </button>
@@ -3841,7 +3859,7 @@ function WorkspaceManager({
                     */}
                     {item.type !== 'folder' && item.commandType === 'file' && (
                       <label className="zs-field is-with-action">
-                        <span>File path</span>
+                        <span>{t('filePath')}</span>
                         <div className="zs-field-row">
                           <input
                             value={item.command}
@@ -3861,7 +3879,7 @@ function WorkspaceManager({
                     )}
                     {item.type !== 'folder' && item.commandType === 'app' && isPathLikeCommand(item.command) && (
                       <label className="zs-field is-with-action">
-                        <span>Target</span>
+                        <span>{t('target')}</span>
                         <div className="zs-field-row">
                           <input
                             value={item.command}
@@ -3887,7 +3905,7 @@ function WorkspaceManager({
                     {item.type !== 'folder' && item.commandType !== 'folder' && item.commandType !== 'file' && (
                       <div className="zs-launch-options">
                         <div>
-                          <b>Launch mode</b>
+                          <b>{t('launchMode')}</b>
                           <small>
                             {item.commandType === 'url' && (item.launchMode ?? 'normal') === 'reuse'
                               ? 'Uses the existing default browser process when available.'
@@ -3898,7 +3916,7 @@ function WorkspaceManager({
                                 : 'Uses the standard Windows launch behavior.'}
                           </small>
                         </div>
-                        <div className="zs-segmented" role="radiogroup" aria-label="Launch mode">
+                        <div className="zs-segmented" role="radiogroup" aria-label={t('launchMode')}>
                           {(item.commandType === 'url'
                             ? ([['normal', 'Normal'], ['reuse', 'Reuse']] as const)
                             : ([['normal', 'Normal'], ['reuse', 'Reuse'], ['prewarm', 'Warm']] as const)
@@ -3998,11 +4016,11 @@ function WorkspaceManager({
               /** Empty because a scan has not run yet, not because there is nothing to add. */
               <div className="zs-manager-empty is-large">
                 <Loader2 className="zs-spin" size={22} />
-                <b>{discoveryPhase === 'scanning' ? 'Looking through your Start menu…' : 'Finding your applications'}</b>
-                <span>Rovyl fills this workspace by itself. You can add more above at any time.</span>
+                <b>{discoveryPhase === 'scanning' ? t('scanningStartMenu') : t('findingApplications')}</b>
+                <span>{t('fillingWorkspaceDesc')}</span>
               </div>
             ) : (
-              <div className="zs-manager-empty is-large"><SquareStack size={22} /><b>This workspace is empty</b><span>Add an application, URL, or folder above.</span></div>
+              <div className="zs-manager-empty is-large"><SquareStack size={22} /><b>{t('workspaceEmpty')}</b><span>{t('workspaceEmptyDesc')}</span></div>
             )
           )}
         </div>
@@ -4065,6 +4083,7 @@ function BackKeyRecorder({
   value: string | undefined;
   onChange: (value: string) => void;
 }) {
+  const { t } = useTranslation(usePanelLanguage());
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const current = normalizeBackKey(value);
@@ -4103,7 +4122,7 @@ function BackKeyRecorder({
   return (
     <div className="zs-shortcut">
       <div className="zs-shortcut-keys">
-        {current ? <kbd>{current}</kbd> : <kbd>None</kbd>}
+        {current ? <kbd>{current}</kbd> : <kbd>{t('noneValue')}</kbd>}
       </div>
       <button
         type="button"
@@ -4113,7 +4132,7 @@ function BackKeyRecorder({
           setRecording((on) => !on);
         }}
       >
-        {recording ? 'Press any key… (Escape to stop)' : 'Record new key'}
+        {recording ? t('recordingKey') : t('recordNewKey')}
       </button>
       {/* Both ways back to a sane state: the shipped default, or nothing at all. */}
       <button
@@ -4146,6 +4165,7 @@ function ShortcutRecorder({
   onChange: (value: string) => void;
   config: UIConfig;
 }) {
+  const { t } = useTranslation(usePanelLanguage());
   const [recording, setRecording] = useState(false);
   const [status, setStatus] = useState<ShortcutStatus>({ kind: 'idle' });
 
@@ -4259,7 +4279,7 @@ function ShortcutRecorder({
           }
         }}
       >
-        {recording ? 'Press a key or mouse button…' : 'Record new shortcut'}
+        {recording ? t('recording') : t('recordNewShortcut')}
       </button>
       {note && (
         <p className={`zs-shortcut-note${note.tone === 'warn' ? ' is-warn' : ''}`} role="status">
