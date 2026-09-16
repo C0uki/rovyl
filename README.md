@@ -10,7 +10,7 @@ A radial launcher for Windows. Hold the middle mouse button anywhere, aim, relea
 
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4?style=flat-square)
 ![Electron](https://img.shields.io/badge/Electron-28-47848f?style=flat-square&logo=electron&logoColor=white)
-![React](https://img.shields.io/badge/React-19-149eca?style=flat-square&logo=react&logoColor=white)
+![React](https://img.shields.io/badge/React-18-149eca?style=flat-square&logo=react&logoColor=white)
 
 <img src="docs/media/banner.png" alt="" width="720">
 
@@ -36,12 +36,14 @@ never puts a window between you and your work.
 ## Features
 
 - **Opens over anything** — any window, including fullscreen apps
-- **Your monitor** — always the main screen, or the one your pointer is already on
+- **Where you want it** — centred on the main screen, on the monitor your pointer is on, or right under the pointer
 - **Launch anything** — applications, folders, files, websites, custom commands
-- **Automatic discovery** — reads your Start Menu and extracts real app icons
-- **Workspaces** — separate wheels for work, games, streaming; switch with a number key
-- **Your trigger** — middle mouse button, a side button, or a global hotkey
-- **Two aiming modes** — by direction for speed, or by pointer for precision
+- **Automatic discovery** — reads your Start Menu and extracts real app icons; folders can pick their own icon
+- **Workspaces** — separate wheels for work, games, streaming; switch from the picker or with a number key
+- **Your trigger** — middle mouse button, a side button, a global hotkey, or both; each can be turned off
+- **Three aiming modes** — by direction for speed, by pointer for precision, or by area with each slice's share drawn on screen
+- **Keyboard driven** — optional: press 1–9 to open a slice, and Q to step back out of a folder
+- **Docks** — optional: your own shortcuts and a system dock (clock, battery, network, volume) beside the wheel
 - **Launch without clicking** — optional: hides the pointer, picks by direction, and opens on its own
 - **Focus protection** — stays out of the way while you are in a fullscreen game
 - **Fully offline** — no account, no telemetry, no ads, nothing leaves your machine
@@ -77,9 +79,10 @@ steps:
 
 **Hold**
 
-Press and hold the middle mouse button anywhere in Windows. The wheel appears centred on
-your screen — one throw in any direction reaches every shortcut. Two monitors? Activation →
-**Monitor** picks between **Main screen** and **Follow pointer**.
+Press and hold the middle mouse button anywhere in Windows. The screen dims and the wheel
+appears — one throw in any direction reaches every shortcut. It opens in the centre by
+default; Appearance → **Where it opens** can put it under the pointer instead. Two monitors?
+Activation → **Monitor** picks between **Main screen** and **Follow pointer**.
 
 </td>
 <td width="50%" valign="top">
@@ -87,7 +90,9 @@ your screen — one throw in any direction reaches every shortcut. Two monitors?
 **Aim**
 
 Move toward the shortcut you want. In direction mode the slice you point at lights up from
-anywhere on screen; in pointer mode only the icon under the cursor does.
+anywhere on screen; area mode does the same and draws each slice's share; in pointer mode
+only the icon under the cursor lights up. With keyboard launching on, a number key picks the
+slice outright.
 
 </td>
 </tr>
@@ -104,7 +109,8 @@ cancel without launching anything.
 
 **Switch**
 
-Number keys move between workspaces while the wheel is open, or use the picker in the hub.
+By default the wheel opens on a picker of your workspaces. Prefer number keys? General →
+**Workspace switching** → **Keys**, and 1–9 move between them while the wheel is open.
 
 </td>
 </tr>
@@ -114,7 +120,7 @@ Number keys move between workspaces while the wheel is open, or use the picker i
 
 <div align="center">
 <img src="docs/media/workspaces.png" alt="Workspace cards, each previewing its own wheel" width="440">
-<img src="docs/media/settings.png" alt="Activation settings" width="440">
+<img src="docs/media/settings.png" alt="Appearance settings with a live preview of the wheel" width="440">
 </div>
 
 ## Building
@@ -129,8 +135,11 @@ npm install
 npm start
 ```
 
-`npm start` brings up Vite and waits for it before launching Electron. To run the halves
-separately, use `npm run dev` and `npm run electron`.
+`npm start` builds once if `dist/` is missing, then runs the production renderer under
+Electron — no dev server. For hot reload, `npm run start:dev` brings up Vite and waits for it
+before launching Electron; to run the halves separately, use `npm run dev` and
+`npm run electron`. Anything that only exists in a real install (the updater, for one) needs
+`npm run start:packaged`, which packages the app without an installer and runs it.
 
 Google sign-in needs credentials of your own — copy `.env.example` to `.env.local` and
 fill in a client ID from your own Google Cloud project. There is deliberately no default,
@@ -145,15 +154,22 @@ so a fork never inherits someone else's OAuth client.
 
 | Command | What it does |
 | --- | --- |
-| `npm start` | Dev server + Electron |
+| `npm start` | Production build under Electron, builds first if needed |
+| `npm run start:dev` | Vite dev server + Electron |
+| `npm run start:packaged` | Packaged app without an installer, built to `%LOCALAPPDATA%` |
 | `npm run dev` | Vite only |
 | `npm run electron` | Electron only, waits for port 5173 |
-| `npm run build` | `tsc` → Vite build → radial verification → icon generation |
+| `npm run build` | Native helper → `tsc` → Vite build → radial and renderer-budget checks → icons and Store assets |
 | `npm run dist` | `build` + electron-builder, installer in `build-out/` |
 | `npm run dist:store` | `build` + electron-builder, MSIX package for the Store |
-| `npm run verify:radial-windowing` | Checks the radial handshake invariants |
+| `npm run release` | Cuts a release (`release:check` to dry-run) |
+| `npm run verify:radial-windowing` | Checks the wheel/Settings window-split invariants |
+| `npm run verify:renderer-budget` | Keeps the wheel's bundle within its size budget |
 | `npm run test:win32-launch` | Command parsing and quoting |
 | `npm run test:persistence-shape` | Persistence blob normalisation |
+| `npm run test:window-split` | Starts the real app on a throwaway profile and opens the wheel |
+
+The other `test:*` scripts in `package.json` are focused smoke tests, one per feature.
 
 </details>
 
@@ -163,9 +179,9 @@ Issues and pull requests are welcome. Before changing anything that looks arbitr
 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — most of it exists because something
 broke, and the reason is written down.
 
-Two things worth knowing up front: the code comments are in Portuguese and explain *why*
-rather than *what*, and `npm run build` runs a verification script that enforces the
-window-handshake invariants. If it fails, the handshake was broken, not the test.
+Two things worth knowing up front: the code comments explain *why* rather than *what*, and
+`npm run build` runs verification scripts that enforce the wheel's window contract and bundle
+budget. If one fails, the contract was broken, not the test.
 
 ## Links
 
