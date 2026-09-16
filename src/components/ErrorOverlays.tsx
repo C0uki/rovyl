@@ -3,6 +3,8 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { AlertTriangle, Wrench, X } from 'lucide-react';
 import { useTranslation } from '../i18n/useTranslation';
 import { usePanelLanguage } from '../i18n/panelLanguage';
+import { useFaultStrings } from '../i18n/faults/useFaultStrings';
+import type { LaunchFailureStrings } from '../i18n/faults';
 import {
   humanizeExecutionError,
   type FaultShortcutRef,
@@ -33,7 +35,7 @@ const GLANCE_MS = 6000;
 
 type Described = HumanFault & { severity: 'error' | 'warning'; sticky: boolean };
 
-const describe = (fault: SurfacedFault): Described =>
+const describe = (fault: SurfacedFault, strings: LaunchFailureStrings): Described =>
   fault.kind === 'notice'
     ? {
         /** The persistence warning arrives already written and never leaves on its own: data loss. */
@@ -49,7 +51,7 @@ const describe = (fault: SurfacedFault): Described =>
     : {
         severity: 'error',
         sticky: false,
-        ...humanizeExecutionError(fault.raw, fault.details, fault.appLabel),
+        ...humanizeExecutionError(fault.raw, fault.details, fault.appLabel, strings),
       };
 
 const FaultCard: React.FC<{
@@ -59,7 +61,10 @@ const FaultCard: React.FC<{
   onDismiss: (seq: number) => void;
   onFixShortcut?: (target: FaultShortcutRef) => void;
 }> = ({ fault, theme, interactive, onDismiss, onFixShortcut }) => {
-  const { t } = useTranslation(usePanelLanguage());
+  const language = usePanelLanguage();
+  const { t } = useTranslation(language);
+  /** The classifier stays pure; the words for this language are fetched here and handed to it. */
+  const faultStrings = useFaultStrings(language);
   const reduceMotion = useReducedMotion();
   const [expanded, setExpanded] = useState(false);
   /**
@@ -71,7 +76,7 @@ const FaultCard: React.FC<{
   const [focusWithin, setFocusWithin] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const human = useMemo(() => describe(fault), [fault]);
+  const human = useMemo(() => describe(fault, faultStrings), [fault, faultStrings]);
   const seq = fault.seq;
 
   /**
