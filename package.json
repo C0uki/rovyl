@@ -44,6 +44,7 @@
     "test:number-launch": "node scripts/number-launch-smoke.mjs",
     "test:back-key": "node scripts/back-key-smoke.mjs",
     "test:i18n": "node scripts/i18n-smoke.mjs",
+    "test:wheel-i18n": "node scripts/wheel-i18n-smoke.mjs",
     "test:select-menu": "node scripts/select-menu-smoke.mjs",
     "test:window-split": "node scripts/window-split-smoke.mjs",
     "test:trigger-gesture": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/trigger-gesture-smoke.ps1",

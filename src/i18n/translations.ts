@@ -310,6 +310,11 @@ export const translations = {
     restoreAction: 'Restore',
     restoreConfirmBody: 'Every workspace, shortcut, icon and preference on this PC is deleted and Rovyl restarts. This cannot be undone — use Export settings first if you want a copy.',
     restoreConfirmCta: 'Erase everything',
+
+    // Icon picker
+    iconPickerSearch: 'Search icons…',
+    iconPickerKeywordsHint: 'Tip: English words (work, time, home…) also surface related icons by meaning, not only by name.',
+    iconPickerNoResults: 'No icons found.',
   },
 
   es: {
@@ -593,6 +598,11 @@ export const translations = {
     restoreAction: 'Restaurar',
     restoreConfirmBody: 'Se eliminan todos los espacios, accesos, iconos y preferencias de este PC y Rovyl se reinicia. Esto no se puede deshacer: usa Exportar ajustes antes si quieres una copia.',
     restoreConfirmCta: 'Borrarlo todo',
+
+    // Icon picker
+    iconPickerSearch: 'Buscar iconos…',
+    iconPickerKeywordsHint: 'Consejo: las palabras en inglés (work, time, home…) también muestran iconos relacionados por significado, no solo por nombre.',
+    iconPickerNoResults: 'No se han encontrado iconos.',
   },
 
   zh: {
@@ -876,6 +886,11 @@ export const translations = {
     restoreAction: '恢复',
     restoreConfirmBody: '本机上的每一个工作区、快捷方式、图标和偏好设置都会被删除，Rovyl 随后重启。此操作无法撤销——如果想留一份副本，请先使用「导出设置」。',
     restoreConfirmCta: '全部清除',
+
+    // Icon picker
+    iconPickerSearch: '搜索图标…',
+    iconPickerKeywordsHint: '提示：英文词（work、time、home…）也能按含义找出相关图标，而不只是按名称匹配。',
+    iconPickerNoResults: '未找到图标。',
   },
 
   ja: {
@@ -1159,6 +1174,11 @@ export const translations = {
     restoreAction: '戻す',
     restoreConfirmBody: 'この PC のワークスペース、ショートカット、アイコン、設定はすべて削除され、Rovyl が再起動します。取り消せません。控えが必要なら先に「設定を書き出す」を使ってください。',
     restoreConfirmCta: 'すべて消去',
+
+    // Icon picker
+    iconPickerSearch: 'アイコンを検索…',
+    iconPickerKeywordsHint: 'ヒント：英単語（work、time、home…）でも、名前だけでなく意味の近いアイコンが出てきます。',
+    iconPickerNoResults: 'アイコンが見つかりません。',
   },
 
   pt: {
@@ -1442,6 +1462,11 @@ export const translations = {
     restoreAction: 'Restaurar',
     restoreConfirmBody: 'Todos os espaços, atalhos, ícones e preferências deste PC são excluídos e o Rovyl reinicia. Isso não pode ser desfeito — use Exportar ajustes antes se quiser uma cópia.',
     restoreConfirmCta: 'Apagar tudo',
+
+    // Icon picker
+    iconPickerSearch: 'Buscar ícones…',
+    iconPickerKeywordsHint: 'Dica: palavras em inglês (work, time, home…) também trazem ícones relacionados por significado, não só por nome.',
+    iconPickerNoResults: 'Nenhum ícone encontrado.',
   },
 
   ru: {
@@ -1725,6 +1750,11 @@ export const translations = {
     restoreAction: 'Восстановить',
     restoreConfirmBody: 'Все рабочие пространства, ярлыки, значки и настройки на этом ПК будут удалены, и Rovyl перезапустится. Это необратимо — сначала воспользуйтесь экспортом настроек, если нужна копия.',
     restoreConfirmCta: 'Стереть всё',
+
+    // Icon picker
+    iconPickerSearch: 'Поиск значков…',
+    iconPickerKeywordsHint: 'Подсказка: английские слова (work, time, home…) тоже находят значки по смыслу, а не только по названию.',
+    iconPickerNoResults: 'Значки не найдены.',
   },
 
   de: {
@@ -2008,6 +2038,11 @@ export const translations = {
     restoreAction: 'Wiederherstellen',
     restoreConfirmBody: 'Jeder Arbeitsbereich, jede Verknüpfung, jedes Symbol und jede Einstellung auf diesem PC wird gelöscht und Rovyl startet neu. Das lässt sich nicht rückgängig machen — exportieren Sie vorher, wenn Sie eine Kopie möchten.',
     restoreConfirmCta: 'Alles löschen',
+
+    // Icon picker
+    iconPickerSearch: 'Symbole suchen…',
+    iconPickerKeywordsHint: 'Tipp: Englische Wörter (work, time, home…) finden passende Symbole auch nach Bedeutung, nicht nur nach Namen.',
+    iconPickerNoResults: 'Keine Symbole gefunden.',
   },
 
   ar: {
@@ -2290,6 +2325,11 @@ export const translations = {
     restoreAction: 'استعادة',
     restoreConfirmBody: 'تُحذف كل مساحات العمل والاختصارات والأيقونات والتفضيلات على هذا الجهاز ثم يُعاد تشغيل Rovyl. لا يمكن التراجع عن ذلك — استخدم «تصدير الإعدادات» أولًا إن أردت نسخة.',
     restoreConfirmCta: 'امحُ كل شيء',
+
+    // Icon picker
+    iconPickerSearch: 'البحث عن أيقونات…',
+    iconPickerKeywordsHint: 'تلميح: الكلمات الإنجليزية (work، time، home…) تُظهر أيضًا أيقونات مرتبطة بالمعنى، لا بالاسم فقط.',
+    iconPickerNoResults: 'لم يتم العثور على أيقونات.',
   },
 } as const;
 

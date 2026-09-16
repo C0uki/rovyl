@@ -4,7 +4,7 @@ import { getIcon } from '../iconMap';
 import { CornerUpLeft } from 'lucide-react';
 import { SmartIcon } from './SmartIcon';
 import { RovylLogo } from './RovylLogo';
-import { uiString } from '../strings';
+import { formatWheelString, type WheelStrings } from '../i18n/wheel';
 import {
   HUD_STATUS_HEIGHT,
   RadialHud,
@@ -114,11 +114,11 @@ function sameRadialLevel(a: AppItem[], b: AppItem[]): boolean {
 }
 
 /** When "recent folders" is enabled but MRU fetch is empty or fails, show one explicit slice — never auto-launch the parent IDE. */
-function buildRecentsEmptyFallback(parent: AppItem): AppItem[] {
+function buildRecentsEmptyFallback(parent: AppItem, label: string): AppItem[] {
   return [
     {
       id: `${parent.id}__recents-empty-fallback`,
-      label: uiString('menu.recents_fallback'),
+      label,
       command: parent.command,
       commandType: parent.commandType || 'app',
       iconName: parent.iconName || 'AppWindow',
@@ -213,6 +213,8 @@ interface RadialMenuProps {
   onClose: (selectedId: string | null, selectedApp?: AppItem | null) => void;
   apps: AppItem[];
   config: UIConfig;
+  /** The wheel's own strings for the configured language — see `src/i18n/wheel`. */
+  strings: WheelStrings;
   triggerSource?: 'mmb' | 'mmb-click' | 'shortcut';
   /**
    * Where this window's top-left corner is on screen, as main reported it when it opened the wheel.
@@ -368,6 +370,8 @@ const LAUNCH_ECHO_FAST_MS = 340;
 
 interface RadialMenuItemProps {
   app: AppItem;
+  /** Announced while an icon is still being extracted — the wheel's pack, passed down. */
+  fetchingIconLabel: string;
   index: number;
   isActive: boolean;
   /** Circular distance in slices from the aimed one; `null` while nothing is aimed. */
@@ -773,6 +777,7 @@ RadialSectors.displayName = 'RadialSectors';
 
 const RadialMenuItem = React.memo(({
   app,
+  fetchingIconLabel,
   index,
   isActive,
   angularDistance,
@@ -1101,7 +1106,7 @@ const RadialMenuItem = React.memo(({
                 <span
                   className="absolute inset-0 flex items-center justify-center"
                   style={{ background: 'rgba(6,7,9,0.72)' }}
-                  aria-label="Fetching icon"
+                  aria-label={fetchingIconLabel}
                 >
                   <span
                     className="rounded-full border-2 border-white/15 border-t-white/70 animate-spin"
@@ -1233,6 +1238,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
   systemStatus,
   apps,
   config,
+  strings,
   triggerSource = 'shortcut',
   windowOrigin = null,
   onWorkspaceSwitch,
@@ -1667,7 +1673,13 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
 
   // The root hub carries the Rovyl identity; deeper levels keep the Back affordance.
   const isRoot = folderStack.length === 0;
-  const centerLabel = !isRoot ? uiString('menu.back') : (config.centerButton?.label || uiString('menu.center'));
+  const centerLabel = !isRoot ? strings.menuBack : (config.centerButton?.label || strings.menuCenter);
+  /**
+   * The hint names a key, so the sentence is one string with one `%s` rather than a pair of halves:
+   * English puts the key near the end and Japanese puts it in the middle, and a before/after pair
+   * would have made that untranslatable.
+   */
+  const directionHintParts = React.useMemo(() => strings.menuDirectionHint.split('%s'), [strings]);
 
 
   // Reset state when menu opens.
@@ -2309,7 +2321,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                 setActiveIndex(null);
               } else if (selectedItem.hasRecents) {
                 setIsLoadingRecents(false);
-                const fallback = buildRecentsEmptyFallback(selectedItem);
+                const fallback = buildRecentsEmptyFallback(selectedItem, strings.menuRecentsFallback);
                 setFolderStack([...folderStack, { label: selectedItem.label, apps: fallback }]);
                 setCurrentLevelApps(fallback);
                 setHasMoved(false);
@@ -2320,7 +2332,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
             }).catch(() => {
               setIsLoadingRecents(false);
               if (selectedItem.hasRecents) {
-                const fallback = buildRecentsEmptyFallback(selectedItem);
+                const fallback = buildRecentsEmptyFallback(selectedItem, strings.menuRecentsFallback);
                 setFolderStack([...folderStack, { label: selectedItem.label, apps: fallback }]);
                 setCurrentLevelApps(fallback);
                 setHasMoved(false);
@@ -2781,7 +2793,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                   setActiveIndex(null);
                 } else if (selectedItem.hasRecents) {
                   setIsLoadingRecents(false);
-                  const fallback = buildRecentsEmptyFallback(selectedItem);
+                  const fallback = buildRecentsEmptyFallback(selectedItem, strings.menuRecentsFallback);
                   setFolderStack(prev => [...prev, { label: selectedItem.label, apps: fallback }]);
                   setCurrentLevelApps(fallback);
                   setHasMoved(false);
@@ -2792,7 +2804,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
               }).catch(() => {
                 setIsLoadingRecents(false);
                 if (selectedItem.hasRecents) {
-                  const fallback = buildRecentsEmptyFallback(selectedItem);
+                  const fallback = buildRecentsEmptyFallback(selectedItem, strings.menuRecentsFallback);
                   setFolderStack(prev => [...prev, { label: selectedItem.label, apps: fallback }]);
                   setCurrentLevelApps(fallback);
                   setHasMoved(false);
@@ -3007,7 +3019,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
             setActiveIndex(null);
           } else if (app.hasRecents) {
             setIsLoadingRecents(false);
-            const fallback = buildRecentsEmptyFallback(app);
+            const fallback = buildRecentsEmptyFallback(app, strings.menuRecentsFallback);
             setFolderStack(prev => [...prev, { label: app.label, apps: fallback }]);
             setCurrentLevelApps(fallback);
             setHasMoved(false);
@@ -3018,7 +3030,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
         }).catch(() => {
           setIsLoadingRecents(false);
           if (app.hasRecents) {
-            const fallback = buildRecentsEmptyFallback(app);
+            const fallback = buildRecentsEmptyFallback(app, strings.menuRecentsFallback);
             setFolderStack(prev => [...prev, { label: app.label, apps: fallback }]);
             setCurrentLevelApps(fallback);
             setHasMoved(false);
@@ -3423,6 +3435,8 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
               isOpen={isOpen && !isExiting && bloom && !echoActive}
               corner={settingsCorner}
               dodgeBy={gearDodge}
+              openLabel={strings.hudOpenSettings}
+              openTitle={strings.hudSettingsTitle}
               onOpen={onOpenSettings!}
             />
           )}
@@ -3462,8 +3476,11 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
               <span className="zn-radial-filter-query">{typeAhead}</span>
               <span className="zn-radial-filter-count">
                 {currentLevelApps.length === 0
-                  ? 'no matches'
-                  : `${currentLevelApps.length} of ${rawLevelApps.length}`}
+                  ? strings.menuNoMatches
+                  : formatWheelString(strings.menuFilterCount, {
+                      shown: currentLevelApps.length,
+                      total: rawLevelApps.length,
+                    })}
               </span>
             </div>
           )}
@@ -3477,8 +3494,8 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
             <div className="zn-radial-filter is-notice" role="status" aria-live="polite">
               <span className="zn-radial-filter-count">
                 {discoveryPhase === 'scanning'
-                  ? 'Looking through your Start menu…'
-                  : 'Your apps are on their way — this wheel fills itself in a moment.'}
+                  ? strings.menuDiscoveryScanning
+                  : strings.menuDiscoveryPending}
               </span>
             </div>
           )}
@@ -3501,7 +3518,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
           {directionHintVisible && (
             <div className="zn-radial-filter is-hint" role="note">
               <span className="zn-radial-filter-count">
-                Push toward a target to open it — or press <kbd>Esc</kbd> to close the wheel.
+                {directionHintParts[0]}<kbd>Esc</kbd>{directionHintParts[1] ?? ''}
               </span>
             </div>
           )}
@@ -3675,7 +3692,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                     boxSizing: 'border-box',
                     zIndex: 40,
                   }}
-                  aria-label="Update ready"
+                  aria-label={strings.menuUpdateReady}
                 >
                   <svg viewBox="0 0 24 24" fill="none" style={{ display: 'block', width: '100%', height: '100%' }}>
                     <path
@@ -3784,7 +3801,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                   className="text-[10px] leading-none text-white/45 px-1.5 py-1 rounded-[5px]"
                   style={{ background: 'rgba(255,255,255,0.09)' }}
                 >
-                  {isRoot ? centerLabel : uiString('menu.back')}
+                  {isRoot ? centerLabel : strings.menuBack}
                 </span>
               </div>
             </div>
@@ -3826,6 +3843,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                   <RadialMenuItem
                     key={`${app.id}-${folderStack.length}-${index}`}
                     app={app}
+                    fetchingIconLabel={strings.menuFetchingIcon}
                     index={index}
                     isActive={isActive}
                     angularDistance={angularDistance}
