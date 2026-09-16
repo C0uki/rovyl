@@ -27,7 +27,233 @@
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-  /* The seven the app ships, in the app's order, each under its own name for itself.
+  /* ── Japanese ────────────────────────────────────────────────────────────
+     The page under /ja is the same replica with the same rows, and a Japanese
+     landing page whose centrepiece demo is in English argues against itself.
+
+     Keyed by the English string rather than by a row id on purpose: the rows
+     below are data, not components, and a second parallel structure is how one
+     of two lists goes stale. A string with no entry falls through to English,
+     so adding a row never breaks the page - it just leaves that row untranslated
+     until someone adds the line. The wording matches `src/i18n/translations.ts`;
+     this is the app's own copy, not a second translation of it. */
+  const JA = {
+    'Core Rovyl behavior.':
+      'Rovyl の基本の動き。',
+    'How and where the wheel appears.':
+      'ホイールをどこで、どう開くか。',
+    'Shape, presence, and theme.':
+      '形、存在感、テーマ。',
+    'Contexts and their shortcuts.':
+      'コンテキストと、そのショートカット。',
+    'Performance, protection, and data.':
+      'パフォーマンス、保護、データ。',
+    'Activation':
+      '呼び出し',
+    'Activation zone':
+      '確定までの距離',
+    'Advanced':
+      '詳細',
+    'All':
+      'すべて',
+    'All fullscreen apps or only a selected list.':
+      '全画面のアプリすべてか、選んだ一覧だけか。',
+    'Appearance':
+      '外観',
+    'Applies to the window and title bar. The wheel remains dark.':
+      'ウィンドウとタイトルバーに適用されます。ホイールは暗いままです。',
+    'Background dimming':
+      '背景を暗くする',
+    'Black':
+      'ブラック',
+    'Click':
+      'クリック',
+    'Click keeps the wheel open; hold runs the selection on release.':
+      'クリックではホイールが開いたままになり、長押しでは離した時点で実行します。',
+    'Color used by the target under the pointer.':
+      'ポインターが指している対象に使われる色。',
+    'Cursor distance required to confirm a target.':
+      '対象を確定するのに必要なカーソルの移動距離。',
+    'Data':
+      'データ',
+    'Direction':
+      '方向',
+    'Direction sensitivity':
+      '方向の感度',
+    'Erase local settings and start over.':
+      'この PC の設定を消して、最初からやり直します。',
+    'Export':
+      '書き出す',
+    'Export settings':
+      '設定を書き出す',
+    'Follow pointer':
+      'ポインターを追う',
+    'Free space between items.':
+      '項目のあいだの余白。',
+    'Fullscreen protection':
+      '全画面時の保護',
+    'General':
+      '一般',
+    'Gesture behavior':
+      'ジェスチャの挙動',
+    'Global shortcut':
+      'グローバルショートカット',
+    'Hands-free':
+      'ハンズフリー',
+    'Hide parts of the Windows taskbar while the wheel is open, on the screen the wheel is on. Everything comes back when it closes.':
+      'ホイールが開いているあいだ、ホイールのある画面で Windows タスクバーの一部を隠します。閉じればすべて元に戻ります。',
+    'Hides the pointer and picks by direction - move toward a target and it opens by itself. Escape closes the wheel without opening anything.':
+      'ポインターを隠し、向きで選びます。対象の方へ動かすとそのまま開きます。Escape を押せば何も開かずにホイールを閉じます。',
+    'High':
+      '高',
+    'Hold':
+      '長押し',
+    'Hover color':
+      'ホバー時の色',
+    'Hover time':
+      '待ち時間',
+    'How far your hand must travel before that direction is chosen. High picks on the smallest movement.':
+      'その向きが選ばれるまでに手をどれだけ動かす必要があるか。「高」ならわずかな動きで選ばれます。',
+    'How long a target must stay aimed before it opens. Drag to zero and the direction opens the moment it commits.':
+      '対象を狙ったまま何秒待つと開くか。ゼロまで下げると、向きが決まった瞬間に開きます。',
+    'How much the rest of the screen recedes. At 100% it goes: the desktop is covered edge to edge.':
+      '画面のほかの部分がどれだけ後ろに下がるか。100% では見えなくなり、デスクトップが端まで覆われます。',
+    'Icon size':
+      'アイコンの大きさ',
+    'Import':
+      '読み込む',
+    'Import settings':
+      '設定を読み込む',
+    'Keep every target name visible.':
+      'すべての対象の名前を表示したままにします。',
+    'Keep pinned and open apps':
+      'ピン留めと起動中のアプリを残す',
+    'Keep the Start button':
+      'スタートボタンを残す',
+    'Keep the clock':
+      '時計を残す',
+    'Keep the notification area':
+      '通知領域を残す',
+    'Keyboard':
+      'キーボード',
+    'Keys':
+      'キー',
+    'Language':
+      '言語',
+    'Launch without clicking':
+      'クリックなしで起動',
+    'List':
+      '一覧',
+    'Low':
+      '低',
+    'Main screen':
+      'メイン画面',
+    'Make the bar transparent':
+      'バーを透明にする',
+    'Medium':
+      '中',
+    'Monitor':
+      'ディスプレイ',
+    'Mouse':
+      'マウス',
+    'Mouse trigger':
+      'マウスでの呼び出し',
+    'Never reach the network, not even for a website shortcut icon.':
+      'ネットワークには一切つなぎません。サイトのアイコン取得のためにも。',
+    'Open Rovyl with a mouse button instead of the keyboard.':
+      'キーボードの代わりに、マウスのボタンで Rovyl を開きます。',
+    'Open the wheel over any application.':
+      'どのアプリの上でもホイールを開きます。',
+    'Orbital radius':
+      'ホイールの半径',
+    'Perceived wheel diameter.':
+      'ホイールの見た目の大きさ。',
+    'Performance':
+      'パフォーマンス',
+    'Persistent labels':
+      'ラベルを常に表示',
+    'Picker':
+      '選択画面',
+    'Pointer':
+      'ポインター',
+    'Position':
+      '位置',
+    'Precision mode':
+      '精密モード',
+    'Presence':
+      '存在感',
+    'Press once to open and again to close, or hold it open.':
+      '一度押して開き、もう一度押して閉じる。あるいは押している間だけ開く。',
+    'Prevent accidental openings during games and videos.':
+      'ゲームや動画の最中に誤って開くのを防ぎます。',
+    'Prioritize immediate response and reduce visual effects.':
+      '即応性を最優先し、視覚効果を控えめにします。',
+    'Protection':
+      '保護',
+    'Quiet the taskbar':
+      'タスクバーを静かにする',
+    'Restore':
+      '戻す',
+    'Restore defaults':
+      '初期設定に戻す',
+    'Rovyl is ready as soon as you sign in to Windows.':
+      'Windows にサインインした時点で Rovyl が使えるようになります。',
+    'Rovyl surfaces':
+      'Rovyl の画面',
+    'Save a portable copy of your configuration.':
+      '設定の持ち運べる控えを保存します。',
+    'Scope':
+      '適用範囲',
+    'Shortcut behavior':
+      'ショートカットの挙動',
+    'Side buttons are usually free; left and right stay with Windows.':
+      'サイドボタンは空いていることが多く、左右ボタンは Windows 用に残ります。',
+    'Start and Task View stay on the bar.':
+      'スタートとタスクビューがバーに残ります。',
+    'Start with Windows':
+      'Windows と同時に起動',
+    'Startup':
+      'スタートアップ',
+    'Strict offline mode':
+      '厳格オフライン',
+    'Target spacing':
+      '対象どうしの間隔',
+    'Targeting':
+      '狙い方',
+    'The app buttons, and anything else docked beside them.':
+      'アプリのボタンと、その隣に並んでいるものすべて。',
+    'The bar itself goes, and whatever you kept above still shows. Windows does not report how the bar was painted before, so its background is restored to the standard look - which can differ slightly from a custom theme.':
+      'バー自体は消え、上で残すことにしたものは表示されたままになります。Windows は元のバーの塗り方を報告しないため、背景は標準の見た目に戻ります。カスタムテーマとは少し違って見えることがあります。',
+    'The language of this panel and the wheel.':
+      'このパネルとホイールの表示言語。',
+    'The time and date at the end of the bar.':
+      'バーの端にある時刻と日付。',
+    'Theme':
+      'テーマ',
+    'Toggle':
+      'トグル',
+    'Tray icons and the chevron that holds the rest.':
+      'トレイのアイコンと、残りをしまっている山括弧。',
+    'Trigger button':
+      '呼び出しボタン',
+    'Use the visual wheel picker or number keys.':
+      'ホイール上の選択画面か、数字キーで切り替えます。',
+    'Visual weight of each target.':
+      '一つひとつの対象の見た目の重さ。',
+    'Wheel':
+      'ホイール',
+    'White':
+      'ホワイト',
+    'Workspace switching':
+      'ワークスペースの切り替え',
+    'Workspaces':
+      'ワークスペース',
+  };
+
+  const isJapanese = document.documentElement.lang === 'ja';
+  const tr = (value) => (isJapanese && value && JA[value]) || value;
+
+  /* The eight the app ships, in the app's order, each under its own name for itself.
      Someone stranded in a UI they cannot read is looking for the row that LOOKS like
      their language, and "Russian" does not look like Русский. The English name rides
      along as support, as it does in `src/i18n/languages.ts`. */
@@ -45,6 +271,7 @@
     ['en', 'English', 'English'],
     ['es', 'Español', 'Spanish'],
     ['zh', '简体中文', 'Chinese (Simplified)'],
+    ['ja', '日本語', 'Japanese'],
     ['pt', 'Português', 'Portuguese'],
     ['ru', 'Русский', 'Russian'],
     ['de', 'Deutsch', 'German'],
@@ -155,7 +382,7 @@
   function rowsFor(id) {
     if (id === 'general') return [
       /* A select, not the segmented control this was while it held two languages:
-         seven buttons are wider than the control column and would wrap into a block
+         eight buttons are wider than the control column and would wrap into a block
          of chips no eye can scan. The group name stays the English "Language" on
          purpose - it is the one string in this panel that has to stay findable by
          someone who cannot read the rest of it. */
@@ -317,7 +544,7 @@
       button.type = 'button';
       button.setAttribute('role', 'switch');
       button.setAttribute('aria-checked', String(isOn));
-      button.setAttribute('aria-label', row.title);
+      button.setAttribute('aria-label', tr(row.title));
       button.addEventListener('click', () => set(row.key, isOn ? offValue : onValue));
       return button;
     }
@@ -325,9 +552,9 @@
     if (row.kind === 'seg') {
       const wrap = el('div', 'seg');
       wrap.setAttribute('role', 'group');
-      wrap.setAttribute('aria-label', row.title);
+      wrap.setAttribute('aria-label', tr(row.title));
       for (const [value, label] of row.choices) {
-        const option = el('button', S[row.key] === value ? 'is-on' : '', label);
+        const option = el('button', S[row.key] === value ? 'is-on' : '', tr(label));
         option.type = 'button';
         option.addEventListener('click', () => set(row.key, value));
         wrap.append(option);
@@ -342,7 +569,7 @@
       const input = el('input');
       input.type = 'color';
       input.value = S[row.key];
-      input.setAttribute('aria-label', row.title);
+      input.setAttribute('aria-label', tr(row.title));
       input.addEventListener('input', () => set(row.key, input.value));
       wrap.append(input, el('b', '', S[row.key].toUpperCase()));
       return wrap;
@@ -354,7 +581,7 @@
     if (row.kind === 'open') {
       const button = el('button', 'btn is-value');
       button.type = 'button';
-      button.setAttribute('aria-label', row.title);
+      button.setAttribute('aria-label', tr(row.title));
       button.append(el('b', '', row.value), glyph('i-chevron'));
       button.addEventListener('click', () => flash(button));
       return button;
@@ -443,7 +670,7 @@
     trigger.type = 'button';
     trigger.setAttribute('aria-haspopup', 'listbox');
     trigger.setAttribute('aria-expanded', 'false');
-    trigger.setAttribute('aria-label', row.title);
+    trigger.setAttribute('aria-label', tr(row.title));
     trigger.append(
       el('span', '', chosen[2] && chosen[2] !== chosen[1] ? chosen[1] + ' \u00b7 ' + chosen[2] : chosen[1]),
       glyph('i-chevron'),
@@ -465,7 +692,7 @@
     list.id = row.key + '-listbox';
     list.setAttribute('role', 'listbox');
     list.tabIndex = -1;
-    list.setAttribute('aria-label', row.title);
+    list.setAttribute('aria-label', tr(row.title));
 
     const paint = () => {
       options.forEach((node, i) => {
@@ -607,7 +834,7 @@
 
     const button = el('button', 'win-revert');
     button.type = 'button';
-    button.setAttribute('aria-label', `Reset ${row.title} to default`);
+    button.setAttribute('aria-label', `Reset ${tr(row.title)} to default`);
     button.title = 'Reset to default';
     button.append(glyph('i-revert'));
     button.addEventListener('click', (event) => {
@@ -621,8 +848,8 @@
   function rangeRow(row) {
     const line = el('div', 'win-row is-slider');
     const copy = el('span', 'win-copy');
-    copy.append(el('b', '', row.title));
-    if (row.desc) copy.append(el('small', '', row.desc));
+    copy.append(el('b', '', tr(row.title)));
+    if (row.desc) copy.append(el('small', '', tr(row.desc)));
 
     const readout = el('span', 'readout', row.format(S[row.key]));
     const control = el('span', 'win-control');
@@ -635,7 +862,7 @@
     input.max = row.max;
     input.step = row.step;
     input.value = S[row.key];
-    input.setAttribute('aria-label', row.title);
+    input.setAttribute('aria-label', tr(row.title));
     /* `input`, not `change`: the readout and the preview have to follow the
        thumb, which is the whole reason the preview exists. */
     input.addEventListener('input', () => {
@@ -853,7 +1080,7 @@
     nav.replaceChildren();
     for (const section of SECTIONS) {
       const item = el('li');
-      const button = el('button', section.id === S.section ? 'is-active' : '', section.label);
+      const button = el('button', section.id === S.section ? 'is-active' : '', tr(section.label));
       button.type = 'button';
       button.prepend(glyph(section.icon));
       button.addEventListener('click', () => {
@@ -870,8 +1097,8 @@
     main.replaceChildren();
 
     const head = el('div', 'win-head');
-    head.append(el('h3', '', meta.label));
-    head.append(el('p', '', meta.caption));
+    head.append(el('h3', '', tr(meta.label)));
+    head.append(el('p', '', tr(meta.caption)));
     main.append(head);
 
     if (S.section === 'spaces') {
@@ -891,7 +1118,7 @@
       }
       if (row.group !== group) {
         group = row.group;
-        main.append(el('p', 'win-group', group));
+        main.append(el('p', 'win-group', tr(group)));
         rows = el('div', 'win-rows');
         main.append(rows);
       }
@@ -901,8 +1128,8 @@
       }
       const line = el('div', `win-row${row.kind === 'open' ? ' is-openable' : ''}`);
       const copy = el('span', 'win-copy');
-      copy.append(el('b', '', row.title));
-      if (row.desc) copy.append(el('small', '', row.desc));
+      copy.append(el('b', '', tr(row.title)));
+      if (row.desc) copy.append(el('small', '', tr(row.desc)));
       line.append(copy);
 
       const control_ = el('span', 'win-control');
