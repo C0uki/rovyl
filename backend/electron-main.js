@@ -56,6 +56,7 @@ const { exec, spawn, execFile, execFileSync } = require("child_process");
 const os = require("os");
 const fs = require("fs");
 const win32Launch = require("./win32-launch");
+const mainI18n = require("./i18n.cjs");
 const { buildTrayMenuTemplate } = require("./tray-menu.cjs");
 const { normalizeFullPersistenceBlob } = require("./persistence-normalize.cjs");
 const {
@@ -3693,6 +3694,8 @@ app.whenReady().then(async () => {
   // 1. Initialize Settings Management First (to avoid race conditions with renderer)
   const settingsPath = path.join(app.getPath("userData"), "settings.json");
   let currentSettings = {
+    /** Not a behaviour, but the tray and the native dialogs are drawn here and have to speak it. */
+    language: "en",
     globalShortcut: "Alt+Z",
     shortcutTriggerMode: "toggle",
     enableKeyboardTrigger: true,
@@ -3726,6 +3729,8 @@ app.whenReady().then(async () => {
       if (fs.existsSync(settingsPath)) {
         const data = fs.readFileSync(settingsPath, "utf-8");
         currentSettings = { ...currentSettings, ...JSON.parse(data) };
+        /** Before the tray is built, and before the config read that usually supersedes it. */
+        currentSettings.language = mainI18n.setLanguage(currentSettings.language);
       }
     } catch (e) {
       console.error("Failed to load settings:", e);
@@ -3757,6 +3762,17 @@ app.whenReady().then(async () => {
     if (typeof ui.openAtLogin === "boolean") {
       currentSettings.openAtLogin = ui.openAtLogin;
     }
+    /**
+     * The one line that makes the tray and the dialogs follow the app.
+     *
+     * It covers both arrival paths because both already funnel through here: the cold start reads
+     * `config-v2.json` and calls this before the tray exists, and every save calls it again. There
+     * is nothing else to wire — `popUpTrayMenu` rebuilds the menu on each right-click, so the next
+     * one is already in the new language.
+     */
+    if (typeof ui.language === "string") {
+      currentSettings.language = mainI18n.setLanguage(ui.language);
+    }
     if (Array.isArray(ui.workspaces)) {
       currentSettings.workspaces = ui.workspaces;
     }
@@ -3784,6 +3800,8 @@ app.whenReady().then(async () => {
           ? currentSettings.mouseTriggerButton
           : "middle",
         openAtLogin: !!currentSettings.openAtLogin,
+        /** So the tray still speaks the right language if config-v2.json is ever quarantined. */
+        language: currentSettings.language || "en",
       };
       fs.writeFileSync(settingsPath, JSON.stringify(slim, null, 2));
     } catch (e) {
@@ -4453,9 +4471,9 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("export-config", async () => {
     try {
-      if (!mainWindow || mainWindow.isDestroyed()) return { success: false, error: "Window is unavailable" };
+      if (!mainWindow || mainWindow.isDestroyed()) return { success: false, error: mainI18n.t("windowUnavailable") };
       const result = await dialog.showSaveDialog(mainWindow, {
-        title: "Export Rovyl Backup",
+        title: mainI18n.t("dialogExportTitle"),
         defaultPath: path.join(app.getPath("downloads"), "rovyl-backup.json"),
         filters: [{ name: "JSON", extensions: ["json"] }],
       });
@@ -4523,9 +4541,9 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("import-config", async () => {
     try {
-      if (!mainWindow || mainWindow.isDestroyed()) return { success: false, error: "Window is unavailable" };
+      if (!mainWindow || mainWindow.isDestroyed()) return { success: false, error: mainI18n.t("windowUnavailable") };
       const result = await dialog.showOpenDialog(mainWindow, {
-        title: "Import Rovyl Backup",
+        title: mainI18n.t("dialogImportTitle"),
         filters: [{ name: "JSON", extensions: ["json"] }],
         properties: ["openFile"],
       });
@@ -4535,7 +4553,7 @@ app.whenReady().then(async () => {
       const data = JSON.parse(fs.readFileSync(result.filePaths[0], "utf-8"));
       
       if (!data.config && !data.settings) {
-        throw new Error("Invalid backup file: no configuration data found.");
+        throw new Error(mainI18n.t("backupNoConfig"));
       }
 
       const configPath = path.join(app.getPath("userData"), "config-v2.json");
@@ -4551,7 +4569,7 @@ app.whenReady().then(async () => {
          */
         const normalized = normalizeFullPersistenceBlob(data.config);
         if (!normalized) {
-          throw new Error("Invalid backup file: workspace structure is missing or empty.");
+          throw new Error(mainI18n.t("backupNoWorkspaces"));
         }
         // Make sure the workspaces mirror exists at the root level (the normalizer's fallback)
         if (!Array.isArray(normalized.workspaces) && Array.isArray(normalized.config?.workspaces)) {
@@ -5020,6 +5038,8 @@ app.whenReady().then(async () => {
           update: menuIcon("tray-update"),
           power: menuIcon("tray-power"),
         },
+        /** The tray follows `config.language`; without this it stays on its English default. */
+        t: mainI18n.t,
         actions: {
           openWheel: () => { void openWheelFromTray(); },
           switchWorkspace: (index) => { void switchWorkspaceFromTray(index); },
@@ -5075,7 +5095,7 @@ app.whenReady().then(async () => {
   const refreshTrayMenu = () => {
     if (!tray || tray.isDestroyed()) return;
     try {
-      tray.setToolTip(triggersArePaused() ? "Rovyl — trigger paused" : "Rovyl");
+      tray.setToolTip(triggersArePaused() ? mainI18n.t("trayTooltipPaused") : "Rovyl");
     } catch (e) {
       diagLog(`[Tray] refresh: ${e.message}`);
     }
@@ -5484,11 +5504,11 @@ app.whenReady().then(async () => {
   ipcMain.handle("open-external-url", async (event, url) => {
     try {
       if (typeof url !== "string") {
-        return { ok: false, error: "Invalid URL" };
+        return { ok: false, error: mainI18n.t("invalidUrl") };
       }
       const trimmed = url.trim();
       if (!/^https?:\/\//i.test(trimmed)) {
-        return { ok: false, error: "Only http(s) URLs are allowed" };
+        return { ok: false, error: mainI18n.t("onlyHttpUrls") };
       }
       await shell.openExternal(trimmed);
       return { ok: true };
@@ -5915,7 +5935,7 @@ app.whenReady().then(async () => {
   function sendZenithAuthSuccessHtml(res) {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(`<!DOCTYPE html>
-<html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Rovyl — signed in</title>
+<html lang="${mainI18n.getLanguage()}" dir="${mainI18n.getLanguage() === "ar" ? "rtl" : "ltr"}"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>${mainI18n.t("signedInTitle")}</title>
 <style>
   *{box-sizing:border-box}
   body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0a0a0a;color:#e8e8e8;-webkit-font-smoothing:antialiased}
@@ -5938,9 +5958,9 @@ app.whenReady().then(async () => {
     <div class="card-inner">
       <div class="strip" aria-hidden="true"></div>
       <div class="icon-wrap" aria-hidden="true"><div class="icon-in"><svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div></div>
-      <h1>Signed in to Rovyl</h1>
-      <p>This page finished linking your account. Return to the Rovyl window &mdash; it should already be signed in.</p>
-      <p class="sub">You can close this tab.</p>
+      <h1>${mainI18n.t("signedInHeading")}</h1>
+      <p>${mainI18n.t("signedInBody")}</p>
+      <p class="sub">${mainI18n.t("signedInClose")}</p>
     </div>
   </div>
 </body></html>`);
@@ -5977,7 +5997,7 @@ app.whenReady().then(async () => {
         "Google sign-in needs an OAuth client ID. Add GOOGLE_WEB_CLIENT_ID (same as the website / VITE_GOOGLE_CLIENT_ID) or GOOGLE_CLIENT_ID to .env.local in:\n\n" +
         (userDataHint || "AppData") +
         "\n\nThen restart Rovyl.";
-      dialog.showErrorBox("Rovyl — Google sign-in", msg);
+      dialog.showErrorBox(mainI18n.t("errSignInTitle"), msg);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send("google-auth-error", {
           code: "MISSING_OAUTH_CONFIG",
@@ -6035,7 +6055,7 @@ app.whenReady().then(async () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send("google-auth-error", { code: e.code || "LICENSE_DENIED", message: e.message });
             }
-            dialog.showErrorBox("Rovyl — license required", e.message);
+            dialog.showErrorBox(mainI18n.t("errLicenseTitle"), e.message);
             res.writeHead(e.code === "PURCHASE_REQUIRED" ? 403 : 400, { "Content-Type": "text/plain; charset=utf-8" });
             res.end(e.code === "PURCHASE_REQUIRED" ? "No Rovyl purchase was found for this Google account." : "Could not verify your Rovyl license.");
           });
@@ -6107,7 +6127,7 @@ app.whenReady().then(async () => {
                               sendZenithAuthSuccessHtml(res);
                             } catch (e) {
                               diagLog(`[Auth] Legacy license failed (${e.code || "LICENSE_DENIED"}): ${e.message}`);
-                              dialog.showErrorBox("Rovyl — license required", e.message);
+                              dialog.showErrorBox(mainI18n.t("errLicenseTitle"), e.message);
                               res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
                               res.end("No active Rovyl license was found for this account.");
                             }
@@ -6143,9 +6163,9 @@ app.whenReady().then(async () => {
       diagLog(`[Auth] HTTP server error: ${err.code || ""} ${err.message}`);
       const detail =
         err.code === "EADDRINUSE"
-          ? "Port 3892 is already in use. Close another Rovyl instance or any app using that port, then try again."
+          ? mainI18n.t("errPortInUse")
           : err.message;
-      dialog.showErrorBox("Rovyl — Google sign-in", detail);
+      dialog.showErrorBox(mainI18n.t("errSignInTitle"), detail);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send("google-auth-error", {
           code: err.code,
@@ -8694,10 +8714,10 @@ ipcMain.handle("select-file", async (_event, options = {}) => {
     const result = await dialog.showOpenDialog(targetWin, {
       properties: ["openFile"],
       filters: anyFile
-        ? [{ name: "All Files", extensions: ["*"] }]
+        ? [{ name: mainI18n.t("filterAllFiles"), extensions: ["*"] }]
         : [
-            { name: "Executables", extensions: ["exe", "lnk", "bat", "cmd"] },
-            { name: "All Files", extensions: ["*"] },
+            { name: mainI18n.t("filterExecutables"), extensions: ["exe", "lnk", "bat", "cmd"] },
+            { name: mainI18n.t("filterAllFiles"), extensions: ["*"] },
           ],
     });
     if (!result.canceled && result.filePaths.length > 0) {
@@ -8735,8 +8755,8 @@ ipcMain.handle("select-image", async () => {
     const result = await dialog.showOpenDialog(targetWin, {
       properties: ["openFile"],
       filters: [
-        { name: "Images", extensions: ["png", "jpg", "jpeg", "ico", "svg"] },
-        { name: "All Files", extensions: ["*"] },
+        { name: mainI18n.t("filterImages"), extensions: ["png", "jpg", "jpeg", "ico", "svg"] },
+        { name: mainI18n.t("filterAllFiles"), extensions: ["*"] },
       ],
     });
     if (result.canceled || result.filePaths.length === 0) return null;

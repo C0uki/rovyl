@@ -46,6 +46,7 @@
     "test:back-key": "node scripts/back-key-smoke.mjs",
     "test:i18n": "node scripts/i18n-smoke.mjs",
     "test:i18n-packs": "node scripts/i18n-packs-smoke.mjs",
+    "test:backend-i18n": "node scripts/backend-i18n-smoke.mjs",
     "test:select-menu": "node scripts/select-menu-smoke.mjs",
     "test:window-split": "node scripts/window-split-smoke.mjs",
     "test:trigger-gesture": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/trigger-gesture-smoke.ps1",
