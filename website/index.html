@@ -197,28 +197,31 @@
     <p>Speed, or precision.</p>
   </div>
   <div class="aim-pair reveal">
-    <figure class="aim-card">
+    <figure class="aim-card" data-aim="direction">
       <svg viewBox="0 0 160 124" class="art" aria-hidden="true">
-        <path class="m-cone" d="M80 62 L152 24 A81 81 0 0 1 152 100 Z"/>
+        <clipPath id="aimClip"><rect width="160" height="124"/></clipPath>
+        <g clip-path="url(#aimClip)"><path class="m-cone" d="M80 62 L152 24 A81 81 0 0 1 152 100 Z"/></g>
         <line class="m-vec" x1="80" y1="62" x2="136" y2="62"/>
-        <rect class="m-tile is-on" x="118" y="49" width="26" height="26" rx="9"/>
-        <rect class="m-tile" x="67" y="12" width="26" height="26" rx="9"/>
-        <rect class="m-tile" x="67" y="86" width="26" height="26" rx="9"/>
-        <rect class="m-tile" x="16" y="49" width="26" height="26" rx="9"/>
+        <rect class="m-tile" data-slot="0" x="67" y="12" width="26" height="26" rx="9"/>
+        <rect class="m-tile is-on" data-slot="1" x="118" y="49" width="26" height="26" rx="9"/>
+        <rect class="m-tile" data-slot="2" x="67" y="86" width="26" height="26" rx="9"/>
+        <rect class="m-tile" data-slot="3" x="16" y="49" width="26" height="26" rx="9"/>
+        <circle class="m-dead" cx="80" cy="62" r="16"/>
         <circle class="m-ring" cx="80" cy="62" r="7"/>
       </svg>
-      <figcaption>Direction</figcaption>
+      <figcaption>Direction<span class="aim-hint"> · aim, then click</span></figcaption>
     </figure>
-    <figure class="aim-card">
+    <figure class="aim-card" data-aim="pointer">
       <svg viewBox="0 0 160 124" class="art" aria-hidden="true">
-        <rect class="m-tile is-on" x="118" y="49" width="26" height="26" rx="9"/>
-        <rect class="m-tile" x="67" y="12" width="26" height="26" rx="9"/>
-        <rect class="m-tile" x="67" y="86" width="26" height="26" rx="9"/>
-        <rect class="m-tile" x="16" y="49" width="26" height="26" rx="9"/>
+        <rect class="m-tile" data-slot="0" x="67" y="12" width="26" height="26" rx="9"/>
+        <rect class="m-tile is-on" data-slot="1" x="118" y="49" width="26" height="26" rx="9"/>
+        <rect class="m-tile" data-slot="2" x="67" y="86" width="26" height="26" rx="9"/>
+        <rect class="m-tile" data-slot="3" x="16" y="49" width="26" height="26" rx="9"/>
+        <circle class="m-dead" cx="80" cy="62" r="16"/>
         <circle class="m-ring" cx="80" cy="62" r="7"/>
         <g class="m-cursor"><use href="#i-cursor" x="0" y="0" width="20" height="20"/></g>
       </svg>
-      <figcaption>Pointer</figcaption>
+      <figcaption>Pointer<span class="aim-hint"> · hover an icon, then click</span></figcaption>
     </figure>
   </div>
 </section>

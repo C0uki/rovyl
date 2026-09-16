@@ -129,7 +129,6 @@
   const PICKER = LOOK.switchMode === 'picker' && SPACES.length > 1;
 
   /* The app's own appearance settings, honoured rather than guessed at. */
-  stage.style.setProperty('--scrim-o', String(LOOK.backdropOpacity ?? 0.6));
   stage.style.setProperty('--hover', LOOK.hoverColor || '#ffffff');
   stage.style.setProperty('--echo', `${ECHO_MS}ms`);
   stage.style.setProperty('--dwell', `${DWELL_MS}ms`);
@@ -317,6 +316,13 @@
     const hubSize = Math.round(tile * 0.84);
 
     stage.style.setProperty('--origin-y', `${-Math.round(LIFT)}px`);
+    if (scrim && window.RovylScrim) {
+      scrim.style.background = RovylScrim.gradient(
+        { x: box.width / 2, y: box.height / 2 - LIFT },
+        LOOK.backdropOpacity ?? RovylScrim.DEFAULT_DIM,
+        RovylScrim.radius(radius, tile, SPACING),
+      );
+    }
     stage.style.setProperty('--tile', `${Math.round(tile)}px`);
     stage.style.setProperty('--hub', `${hubSize}px`);
 
@@ -701,4 +707,112 @@
   /* Under reduced motion the loop still runs - the gesture is the content -
      but the CSS above strips the echo and the transitions down to nothing. */
   reduced.addEventListener('change', resume);
+})();
+
+/* ── Aiming modes, live ───────────────────────────────────────────────────
+   The two cards under "By direction, or by pointer" are the app's two
+   targeting rules (src/components/RadialMenu.tsx), run on a four-tile wheel.
+   Direction: the slice the vector points into is the target, from anywhere.
+   Pointer: the same slice is only a candidate - the pointer has to be on the
+   icon. Inside the dead zone nothing is aimed at in either. At rest the cards
+   stay the pictures they were. */
+(() => {
+  'use strict';
+
+  if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+
+  const CX = 80;
+  const CY = 62;
+  const DEAD = 16;        // the dead zone, matching `.m-dead`
+  const VEC = 56;         // the vector's resting length
+  const HIT = 26 * 0.85;  // the app's pointer hit radius: 0.85 of an icon
+  const CURSOR_TIP = 20 * (4 / 24); // where the arrow's tip sits in its 20px box
+  const SLOTS = 4;
+  /* Tile centres, in slot order: item 0 at twelve o'clock, then clockwise. */
+  const CENTRES = [[80, 25], [131, 62], [80, 99], [29, 62]];
+
+  /* `sectorIndexForDelta` from src/utils/radialSectors.ts. */
+  function sectorFor(dx, dy) {
+    const slice = 360 / SLOTS;
+    let angle = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
+    if (angle < 0) angle += 360;
+    return Math.floor(((angle + slice / 2) % 360) / slice);
+  }
+
+  for (const card of document.querySelectorAll('.aim-card[data-aim]')) {
+    const svg = card.querySelector('svg');
+    const tiles = [...card.querySelectorAll('.m-tile')];
+    const cone = card.querySelector('.m-cone');
+    const vec = card.querySelector('.m-vec');
+    const cursor = card.querySelector('.m-cursor');
+    const byPointer = card.dataset.aim === 'pointer';
+    let active = -1;
+
+    const light = (index) => {
+      active = index;
+      tiles.forEach((tile, i) => tile.classList.toggle('is-on', i === index));
+    };
+
+    function track(event) {
+      const matrix = svg.getScreenCTM();
+      if (!matrix) return;
+      const p = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
+      const dx = p.x - CX;
+      const dy = p.y - CY;
+      const distance = Math.hypot(dx, dy);
+      card.classList.add('is-live');
+
+      if (cursor) {
+        cursor.style.transform = `translate(${p.x - CURSOR_TIP}px, ${p.y - CURSOR_TIP}px)`;
+      }
+
+      if (distance < DEAD) {
+        card.classList.add('is-idle');
+        light(-1);
+        return;
+      }
+      card.classList.remove('is-idle');
+
+      const index = sectorFor(dx, dy);
+      if (byPointer) {
+        const [tx, ty] = CENTRES[index];
+        light(Math.hypot(p.x - tx, p.y - ty) <= HIT ? index : -1);
+        return;
+      }
+
+      light(index);
+      if (cone) cone.style.transform = `rotate(${index * (360 / SLOTS) - 90}deg)`;
+      if (vec) {
+        const reach = Math.min(distance, VEC) / distance;
+        vec.setAttribute('x2', (CX + dx * reach).toFixed(1));
+        vec.setAttribute('y2', (CY + dy * reach).toFixed(1));
+      }
+    }
+
+    function rest() {
+      card.classList.remove('is-live', 'is-idle');
+      light(1);
+      if (cursor) cursor.style.transform = '';
+      if (cone) cone.style.transform = '';
+      if (vec) { vec.setAttribute('x2', '136'); vec.setAttribute('y2', '62'); }
+    }
+
+    /* A click is the release: the target launches, or - with nothing lit -
+       the gesture cancels and nothing happens, exactly as in the app. */
+    function release(event) {
+      track(event);
+      const tile = tiles[active];
+      if (!tile) return;
+      tile.classList.remove('is-fired');
+      void tile.getBoundingClientRect();
+      tile.classList.add('is-fired');
+    }
+
+    card.addEventListener('pointermove', track);
+    card.addEventListener('pointerdown', release);
+    card.addEventListener('pointerleave', rest);
+    for (const tile of tiles) {
+      tile.addEventListener('animationend', () => tile.classList.remove('is-fired'));
+    }
+  }
 })();

@@ -76,7 +76,7 @@
     radialHoverColor: LOOK.hoverColor || '#FFFFFF',
     radialSelectionMode: 'angle',
     alwaysShowAppLabels: false,
-    backdropOpacity: LOOK.backdropOpacity ?? 0.6,
+    backdropOpacity: LOOK.backdropOpacity ?? 0.9,
     statusDock: false,
     statusDockPosition: 'bottom-right',
     statusDockIconSize: 18,
@@ -125,7 +125,7 @@
     radialHoverColor: '#FFFFFF',
     radialSelectionMode: 'angle',
     alwaysShowAppLabels: false,
-    backdropOpacity: 0.6,
+    backdropOpacity: 0.9,
     statusDock: false,
     statusDockPosition: 'bottom-right',
     statusDockIconSize: 18,
@@ -691,7 +691,6 @@
   function paintPreview() {
     if (!previewLayer) return;
     const { scrim, layer } = previewLayer;
-    scrim.style.background = `rgba(0, 0, 0, ${S.backdropOpacity})`;
 
     const items = previewItems();
     const count = items.length || 6;
@@ -706,6 +705,15 @@
 
     layer.replaceChildren();
     layer.style.transform = `scale(${scale})`;
+    /* Drawn on the stage, not inside the scaled layer, with the radius scaled to
+       match - a gradient inside `scale()` would shrink its own falloff. */
+    scrim.style.background = window.RovylScrim
+      ? RovylScrim.gradient(
+        { x: '50%', y: '50%' },
+        S.backdropOpacity,
+        Math.max(radius * scale, 1),
+      )
+      : `rgba(0, 0, 0, ${S.backdropOpacity})`;
 
     const hub = el('div', 'wheel-hub');
     hub.style.width = `${Math.round(S.iconSize * 0.84)}px`;

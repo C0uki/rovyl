@@ -250,10 +250,10 @@ a { color: inherit; text-decoration: none; }
       #3a0c03 58%, #180402 72%, #0a0303 84%, #070707 100%);
 }
 
-/* The app's `backdropOpacity` default, 0.6, as a flat black wash. */
+/* The app's background dimming. Its gradient is the app's own, centred on the
+   hub and sized to the wheel - site.js paints it (see RovylScrim in scrim.js). */
 .scrim {
   position: absolute; inset: 0;
-  background: rgb(0 0 0 / var(--scrim-o, .6));
   opacity: 0;
   transition: opacity 200ms cubic-bezier(.16, 1, .3, 1);
 }
@@ -740,6 +740,35 @@ a { color: inherit; text-decoration: none; }
 @keyframes cursor-nudge {
   0%, 100% { transform: translate(96px, 40px); }
   45%, 70% { transform: translate(124px, 56px); }
+}
+
+/* Live: the card hands the picture to the pointer. Direction lights the slice
+   the vector points into; Pointer lights only the tile under the cursor. The
+   ring round the hub is the dead zone - releasing there cancels. */
+.aim-hint { display: none; color: var(--zn-text-3); }
+.m-dead { fill: none; stroke: rgba(255, 255, 255, .14); stroke-dasharray: 2 4; opacity: 0; transition: opacity .18s var(--zn-ease); }
+.m-cone, .m-vec { transform-origin: 80px 62px; }
+.m-tile { transform-box: fill-box; transform-origin: center; transition: fill .12s var(--zn-ease), stroke .12s var(--zn-ease), opacity .18s var(--zn-ease); }
+@media (hover: hover) and (pointer: fine) {
+  .aim-card { cursor: crosshair; transition: border-color .18s var(--zn-ease), background .18s var(--zn-ease); }
+  .aim-card:hover { border-color: var(--zn-line-strong); background: var(--zn-raised); }
+  .aim-card[data-aim="pointer"] { cursor: none; }
+  .aim-hint { display: inline; }
+}
+.aim-card.is-live .m-dead { opacity: 1; }
+.aim-card.is-live .m-cursor { animation: none; }
+.aim-card.is-live .m-cone { transition: transform .16s var(--zn-ease), opacity .16s var(--zn-ease); }
+.aim-card.is-live.is-idle .m-cone { opacity: 0; }
+.aim-card.is-live.is-idle .m-vec { opacity: .35; }
+.m-tile.is-fired { animation: aim-fire .42s cubic-bezier(.2, .7, .3, 1); }
+@keyframes aim-fire {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.22); }
+  100% { transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .m-tile.is-fired { animation: none; }
+  .aim-card.is-live .m-cone { transition: none; }
 }
 
 /* ── Settings window ──────────────────────────────────────────────────────── */
