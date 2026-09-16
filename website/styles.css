@@ -735,11 +735,38 @@ a { color: inherit; text-decoration: none; }
 .m-vec { stroke: rgba(255, 255, 255, .5); stroke-dasharray: 4 5; }
 .m-tile { fill: rgba(255, 255, 255, .05); stroke: rgba(255, 255, 255, .2); }
 .m-tile.is-on { fill: rgba(255, 255, 255, .92); stroke: #fff; }
-.m-cursor { fill: rgba(255, 255, 255, .9); stroke: none; animation: cursor-nudge 3.4s var(--zn-ease) infinite; }
+/* Pointer, at rest: the arrow tours the wheel - right, top, left, bottom - and
+   only the tile it is actually on lights, each time it lands. One 6.4s cycle,
+   a quarter per tile: travel for the first 8%, sit for the rest. The tile's
+   delay is when the arrow arrives there. Under reduced motion it stays parked
+   on the right-hand tile, which the markup already lights. */
+.m-cursor {
+  fill: rgba(255, 255, 255, .9); stroke: none;
+  transform: translate(127.7px, 58.7px);
+  animation: cursor-tour 6.4s var(--zn-ease) infinite;
+}
 .m-cursor use { fill: rgba(255, 255, 255, .9); stroke: rgba(0, 0, 0, .5); stroke-width: 1.2; }
-@keyframes cursor-nudge {
-  0%, 100% { transform: translate(96px, 40px); }
-  45%, 70% { transform: translate(124px, 56px); }
+@keyframes cursor-tour {
+  0%        { transform: translate(76.7px, 95.7px); }
+  8%, 25%   { transform: translate(127.7px, 58.7px); }
+  33%, 50%  { transform: translate(76.7px, 21.7px); }
+  58%, 75%  { transform: translate(25.7px, 58.7px); }
+  83%, 100% { transform: translate(76.7px, 95.7px); }
+}
+.aim-card[data-aim="pointer"] .m-tile {
+  animation: pointer-lit 6.4s linear infinite both;
+}
+.aim-card[data-aim="pointer"] .m-tile[data-slot="1"] { animation-delay: .5s; }
+.aim-card[data-aim="pointer"] .m-tile[data-slot="0"] { animation-delay: 2.1s; }
+.aim-card[data-aim="pointer"] .m-tile[data-slot="3"] { animation-delay: 3.7s; }
+.aim-card[data-aim="pointer"] .m-tile[data-slot="2"] { animation-delay: 5.3s; }
+@keyframes pointer-lit {
+  0%        { fill: rgba(255, 255, 255, .05); stroke: rgba(255, 255, 255, .2); transform: scale(1); }
+  2%        { fill: rgba(255, 255, 255, .92); stroke: #fff; transform: scale(1); }
+  6%        { transform: scale(1.14); }
+  10%       { transform: scale(1); }
+  15%       { fill: rgba(255, 255, 255, .92); stroke: #fff; }
+  18%, 100% { fill: rgba(255, 255, 255, .05); stroke: rgba(255, 255, 255, .2); transform: scale(1); }
 }
 
 /* Live: the card hands the picture to the pointer. Direction lights the slice
@@ -756,18 +783,19 @@ a { color: inherit; text-decoration: none; }
   .aim-hint { display: inline; }
 }
 .aim-card.is-live .m-dead { opacity: 1; }
-.aim-card.is-live .m-cursor { animation: none; }
+.aim-card.is-live .m-cursor,
+.aim-card.is-live .m-tile { animation: none; }
 .aim-card.is-live .m-cone { transition: transform .16s var(--zn-ease), opacity .16s var(--zn-ease); }
 .aim-card.is-live.is-idle .m-cone { opacity: 0; }
 .aim-card.is-live.is-idle .m-vec { opacity: .35; }
-.m-tile.is-fired { animation: aim-fire .42s cubic-bezier(.2, .7, .3, 1); }
+.aim-card.is-live .m-tile.is-fired { animation: aim-fire .42s cubic-bezier(.2, .7, .3, 1); }
 @keyframes aim-fire {
   0% { transform: scale(1); }
   35% { transform: scale(1.22); }
   100% { transform: scale(1); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .m-tile.is-fired { animation: none; }
+  .aim-card.is-live .m-tile.is-fired { animation: none; }
   .aim-card.is-live .m-cone { transition: none; }
 }
 
