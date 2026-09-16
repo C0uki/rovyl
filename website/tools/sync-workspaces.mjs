@@ -108,7 +108,9 @@ const look = {
   menuRadius: appearance.menuRadius ?? 140,
   iconSize: appearance.iconSize ?? 64,
   appSpacing: appearance.appSpacing ?? 10,
-  backdropOpacity: appearance.backdropOpacity ?? 0.6,
+  backdropOpacity: appearance.backdropOpacity ?? 0.9,
+  /* Targeting: 'area' draws the wedges, so the page has to draw them too. */
+  selectionMode: appearance.radialSelectionMode ?? 'angle',
   showLabels: appearance.showLabels !== false,
   globalShortcut: appearance.globalShortcut ?? 'Alt+Z',
   activationThreshold: appearance.activationThreshold ?? 60,

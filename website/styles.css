@@ -259,6 +259,18 @@ a { color: inherit; text-decoration: none; }
 }
 .scrim.is-on { opacity: 1; }
 
+/* Area targeting: the plane cut into one wedge per slice, the aimed one lit.
+   Under the hub and the tiles - it is the ground the wheel stands on. */
+.sectors {
+  position: absolute; left: 0; top: 0;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 175ms ease-out;
+}
+.sectors.is-on { opacity: 1; }
+.sectors .sector { transition: opacity 130ms ease-out; }
+
 /* `--origin-y` lifts the hub off the stage's centre so that the wheel PLUS what
    hangs under it - the aimed slice's label, then the workspace pill - is what
    ends up centred. See `measure()` in site.js. */
@@ -592,8 +604,18 @@ a { color: inherit; text-decoration: none; }
   70%, 100% { transform: scale(1.9); opacity: 0; }
 }
 
-/* Aim - the vector sweeps, each tile lights as it passes. */
-.a-ring { stroke: rgba(255, 255, 255, .1); stroke-dasharray: 3 6; }
+/* Aim - the vector sweeps, and the wedge it points into lights with its tile:
+   the app's area targeting, a beam running out along the wedge. */
+.art .a-wedge { fill: url(#aimBeam); stroke: none; opacity: 0; animation: aim-wedge 5.6s steps(1, end) infinite; }
+.art .a-seam { stroke: rgba(255, 255, 255, .14); stroke-width: 1; }
+.art .a-w1 { animation-delay: -.45s; }
+.art .a-w2 { animation-delay: -1.57s; }
+.art .a-w3 { animation-delay: -2.69s; }
+.art .a-w4 { animation-delay: -3.81s; }
+@keyframes aim-wedge {
+  0%, 14%  { opacity: 1; }
+  15%, 100% { opacity: 0; }
+}
 .a-core { fill: rgba(255, 255, 255, .9); stroke: none; }
 .a-vec { stroke: rgba(255, 255, 255, .75); }
 .a-sweep { transform-origin: 60px 60px; animation: aim-sweep 5.6s cubic-bezier(.6, 0, .4, 1) infinite; }
@@ -1352,7 +1374,7 @@ a { color: inherit; text-decoration: none; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   .reveal { opacity: 1; transform: none; transition: none; }
-  .slice, .hub, .pill, .scrim { transition-duration: .01ms !important; }
+  .slice, .hub, .pill, .scrim, .sectors, .sectors .sector { transition-duration: .01ms !important; }
   .art [class^="a-"], .art [class^="m-"],
   .slice.is-fired .tile, .slice.is-fired .wave,
   .slice.is-dwelling .dwell path { animation: none !important; }

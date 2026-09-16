@@ -102,6 +102,7 @@
     <div class="desk" aria-hidden="true"></div>
     <div class="scrim" id="scrim" aria-hidden="true"></div>
     <div class="wheel" id="wheel" aria-hidden="true">
+      <svg class="sectors" id="sectors" aria-hidden="true"></svg>
       <div class="hub" id="hub">
         <span class="hub-mark" aria-hidden="true"></span>
         <svg class="ico hub-back" aria-hidden="true"><use href="#i-back"/></svg>
@@ -133,7 +134,18 @@
     <li class="beat reveal">
       <div class="beat-art" aria-hidden="true">
         <svg viewBox="0 0 120 120" class="art">
-          <circle class="a-ring" cx="60" cy="60" r="32"/>
+          <defs>
+            <linearGradient id="aimBeam" gradientUnits="userSpaceOnUse" x1="60" y1="60" x2="60" y2="2">
+              <stop offset="0" stop-color="#fff" stop-opacity=".42"/>
+              <stop offset=".5" stop-color="#fff" stop-opacity=".3"/>
+              <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path class="a-wedge a-w1" d="M52.22 52.22 L18.99 18.99 A58 58 0 0 1 101.01 18.99 L67.78 52.22 A11 11 0 0 0 52.22 52.22 Z"/>
+          <path class="a-wedge a-w2" d="M52.22 52.22 L18.99 18.99 A58 58 0 0 1 101.01 18.99 L67.78 52.22 A11 11 0 0 0 52.22 52.22 Z" transform="rotate(90 60 60)"/>
+          <path class="a-wedge a-w3" d="M52.22 52.22 L18.99 18.99 A58 58 0 0 1 101.01 18.99 L67.78 52.22 A11 11 0 0 0 52.22 52.22 Z" transform="rotate(180 60 60)"/>
+          <path class="a-wedge a-w4" d="M52.22 52.22 L18.99 18.99 A58 58 0 0 1 101.01 18.99 L67.78 52.22 A11 11 0 0 0 52.22 52.22 Z" transform="rotate(270 60 60)"/>
+          <path class="a-seam" d="M52.22 52.22 L37.37 37.37 M67.78 52.22 L82.63 37.37 M67.78 67.78 L82.63 82.63 M52.22 67.78 L37.37 82.63"/>
           <rect class="a-tile a-t1" x="47" y="2"  width="26" height="26" rx="9"/>
           <rect class="a-tile a-t2" x="92" y="47" width="26" height="26" rx="9"/>
           <rect class="a-tile a-t3" x="47" y="92" width="26" height="26" rx="9"/>
@@ -143,7 +155,7 @@
         </svg>
       </div>
       <h3>Aim</h3>
-      <p>Any direction lights a slice.</p>
+      <p>Any direction lights its wedge.</p>
     </li>
     <li class="beat reveal">
       <div class="beat-art" aria-hidden="true">
@@ -284,6 +296,7 @@
 
 <script src="workspaces.js"></script>
 <script src="scrim.js"></script>
+<script src="sectors.js"></script>
 <script src="settings.js"></script>
 <script src="site.js"></script>
 </body>

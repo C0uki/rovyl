@@ -112,6 +112,7 @@
   const stage = document.getElementById('stage');
   const wheel = document.getElementById('wheel');
   const scrim = document.getElementById('scrim');
+  const sectors = document.getElementById('sectors');
   const hub = document.getElementById('hub');
   const pill = document.getElementById('pill');
   const pillName = document.getElementById('pillName');
@@ -127,6 +128,8 @@
      running, so the demo uses the shipped number rather than a made-up one. */
   const HANDS_FREE_MS = 400;
   const PICKER = LOOK.switchMode === 'picker' && SPACES.length > 1;
+  /* The app's `radialSelectionMode: 'area'`: the wedges are drawn. */
+  const AREA = LOOK.selectionMode === 'area' && !!sectors && !!window.RovylSectors;
 
   /* The app's own appearance settings, honoured rather than guessed at. */
   stage.style.setProperty('--hover', LOOK.hoverColor || '#ffffff');
@@ -295,6 +298,10 @@
 
   let radius = 150;
   let tile = 64;
+  let wedges = [];
+
+  /* The activation zone: closer than this and the gesture is a cancel. */
+  const deadZone = () => Math.max(tile * 0.62, 34);
 
   function measure() {
     const box = stage.getBoundingClientRect();
@@ -316,12 +323,35 @@
     const hubSize = Math.round(tile * 0.84);
 
     stage.style.setProperty('--origin-y', `${-Math.round(LIFT)}px`);
+    const cx = box.width / 2;
+    const cy = box.height / 2 - LIFT;
+    const falloff = window.RovylScrim
+      ? RovylScrim.radius(radius, tile, SPACING)
+      : Math.ceil(radius + tile * 0.75 + 18);
     if (scrim && window.RovylScrim) {
       scrim.style.background = RovylScrim.gradient(
-        { x: box.width / 2, y: box.height / 2 - LIFT },
+        { x: cx, y: cy },
         LOOK.backdropOpacity ?? RovylScrim.DEFAULT_DIM,
-        RovylScrim.radius(radius, tile, SPACING),
+        falloff,
       );
+    }
+    /* In the app the wedges reach the nearest edge of the monitor, which on a
+       real screen is two to three times the lit section - that distance is what
+       the fade disappears in. The stage is far smaller than a monitor, so its
+       nearest edge would squeeze the whole fade into a few pixels and read as a
+       hard rim. The wedge keeps the monitor's proportion instead and runs off
+       the frame, as it runs off the screen. */
+    if (AREA) {
+      wedges = RovylSectors.draw(sectors, {
+        count: slices.length,
+        inner: Math.max(deadZone(), hubSize / 2 + 8),
+        outer: Math.max(
+          Math.round(falloff / 0.42),
+          Math.floor(Math.min(cx, cy, box.width - cx, box.height - cy)),
+        ),
+        falloff,
+        color: LOOK.hoverColor || '#FFFFFF',
+      });
     }
     stage.style.setProperty('--tile', `${Math.round(tile)}px`);
     stage.style.setProperty('--hub', `${hubSize}px`);
@@ -372,16 +402,15 @@
       s.setProperty('--tx', `${(Math.cos(rad) * radius).toFixed(2)}px`);
       s.setProperty('--ty', `${(Math.sin(rad) * radius).toFixed(2)}px`);
 
+      /* The app's `getSlicePresence`: a binary highlight. Only the aimed slice
+         steps up; every other one looks the same as the rest, neighbours
+         included, so nothing reads as partly selected. */
       if (active < 0) {
         s.setProperty('--ts', '1');
-        s.setProperty('--to', '1');
+        s.setProperty('--to', '0.96');
       } else {
-        const gap = Math.min(
-          Math.abs(i - active),
-          slices.length - Math.abs(i - active),
-        );
-        s.setProperty('--ts', gap === 0 ? '1.1' : gap === 1 ? '1' : '0.93');
-        s.setProperty('--to', gap === 0 ? '1' : gap === 1 ? '0.95' : '0.78');
+        s.setProperty('--ts', i === active ? '1.06' : '1');
+        s.setProperty('--to', i === active ? '1' : '0.9');
       }
       slice.root.classList.toggle('is-active', i === active);
     });
@@ -389,6 +418,10 @@
     hub.style.setProperty('--hub-s', open ? '1' : '0.2');
     hub.style.setProperty('--hub-o', open ? '1' : '0');
     scrim.classList.toggle('is-on', open);
+    if (AREA) {
+      sectors.classList.toggle('is-on', open && !firing);
+      wedges.forEach((wedge, i) => { wedge.style.opacity = open && i === active ? '1' : '0'; });
+    }
     pill.classList.toggle('is-on', open);
     pill.style.transform = open
       ? 'translate(-50%, var(--pill-y))'
@@ -425,6 +458,7 @@
       slice.root.classList.add(i === index ? 'is-fired' : 'is-faded');
     });
     scrim.classList.remove('is-on');
+    if (AREA) sectors.classList.remove('is-on');
   }
 
   /* ── The unattended loop ────────────────────────────────────────────────
@@ -535,7 +569,8 @@
      than read about: the pointer stops existing, the aim alone lights a
      target, and holding that aim opens it. Nothing is ever clicked. */
 
-  let handsFree = LOOK.handsFree === true;
+  /* Off until the visitor turns it on: the page opens on the plain gesture. */
+  let handsFree = false;
   let dwellTimer = 0;
   /* A level swap puts new slices under a still pointer. Without a settling
      window the first move after it would resolve an aim the user never made -
@@ -630,7 +665,7 @@
 
     /* The activation zone: closer than this and the gesture is a cancel, so
        nothing may be lit. */
-    if (distance < Math.max(tile * 0.62, 34)) {
+    if (distance < deadZone()) {
       setActive(-1);
       return;
     }

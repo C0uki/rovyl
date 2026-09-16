@@ -6,7 +6,8 @@ window.ROVYL = {
     "menuRadius": 140,
     "iconSize": 64,
     "appSpacing": 10,
-    "backdropOpacity": 0.88,
+    "backdropOpacity": 0.9,
+    "selectionMode": "area",
     "showLabels": true,
     "globalShortcut": "Alt+F",
     "activationThreshold": 45,
@@ -19,7 +20,7 @@ window.ROVYL = {
     "switchMode": "picker",
     "activeWorkspace": 0,
     "centerLabel": "Center",
-    "handsFree": true,
+    "handsFree": false,
     "handsFreeSensitivity": "low",
     "handsFreeDwellMs": 400
   },
