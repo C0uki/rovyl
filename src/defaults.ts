@@ -1,6 +1,6 @@
 import { AppItem, UIConfig, Workspace } from "./types";
 import { BACKDROP_DIM_SCALE } from "./utils/radialScrim";
-import { DEFAULT_TASKBAR_OVERLAY } from "./utils/taskbarOverlay";
+import { DEFAULT_SHORTCUT_DOCK, DEFAULT_STATUS_DOCK } from "./utils/screenDocks";
 import { DEFAULT_BACK_KEY } from "./constants/radialBackKey";
 
 export const DEFAULT_APPS: AppItem[] = [
@@ -329,11 +329,12 @@ export const DEFAULT_UI_CONFIG: UIConfig = {
   backdropOpacity: 0.9,
   backdropDimScale: BACKDROP_DIM_SCALE,
   /**
-   * Off, and for the same reason `radialInstantActivate` is off: this one reaches outside the app.
-   * Everything else here changes how Rovyl looks; this changes the user's desktop, and a taskbar
-   * that started disappearing because someone updated is not a setting, it is a fault report.
+   * Both off. They paint things beside the wheel that were never there, and the shortcut dock is
+   * empty until somebody fills it — a strip of nothing appearing in the corner because a person
+   * updated is not a feature arriving, it is a fault report.
    */
-  taskbarOverlay: DEFAULT_TASKBAR_OVERLAY,
+  statusDock: DEFAULT_STATUS_DOCK,
+  shortcutDock: DEFAULT_SHORTCUT_DOCK,
   menuBackgroundStyle: "circle",
   appSpacing: 10, // Default spacing between apps
   activationThreshold: 60,

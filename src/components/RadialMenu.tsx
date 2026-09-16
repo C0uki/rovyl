@@ -1,11 +1,19 @@
 import React, { useCallback, useEffect, useLayoutEffect, useState, useRef } from 'react';
-import { Coordinates, AppItem, UIConfig, Workspace } from '../types';
+import { Coordinates, AppItem, SystemStatus, UIConfig, Workspace } from '../types';
 import { getIcon } from '../iconMap';
 import { CornerUpLeft } from 'lucide-react';
 import { SmartIcon } from './SmartIcon';
 import { RovylLogo } from './RovylLogo';
 import { uiString } from '../strings';
-import { RadialHud, RadialSettingsCorner, hudOccupiedRegion, resolveSettingsCorner } from './RadialHud';
+import {
+  HUD_STATUS_HEIGHT,
+  RadialHud,
+  RadialSettingsCorner,
+  hudOccupiedRegion,
+  resolveSettingsCorner,
+} from './RadialHud';
+import { ScreenDocks, dockStackHeight } from './ScreenDocks';
+import { normalizeShortcutDock, normalizeStatusDock } from '../utils/screenDocks';
 import {
   filterRadialApps,
   getRootRadialApps,
@@ -229,6 +237,14 @@ interface RadialMenuProps {
    * anywhere that has no Settings window to open — withdraws the gear entirely.
    */
   onOpenSettings?: () => void;
+  /**
+   * The machine's live readings, for the system dock.
+   *
+   * Held by `RadialApp` and handed down, never subscribed to here: this component is remounted on
+   * every open (`radialMountKey`), and a reading that lived in it would reset to "unknown" each
+   * time — the dock would paint four blanks for a frame at the start of every gesture.
+   */
+  systemStatus: SystemStatus;
 }
 
 /**
@@ -1214,6 +1230,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
    * confirmed icon on screen through the launch echo before letting App close the window.
    */
   onClose: onCloseNow,
+  systemStatus,
   apps,
   config,
   triggerSource = 'shortcut',
@@ -3340,6 +3357,28 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
   const showSettingsGear =
     config.showSettingsCorner === true && !!onOpenSettings && !directionMode;
 
+  /**
+   * The docks.
+   *
+   * Withdrawn in direction mode for the same reason the gear is: there the pointer is hidden and
+   * parked at the centre, so no hand can reach a corner, and the click that tried would launch the
+   * slice it was aiming across. Icons that cannot be pressed are worse than no icons.
+   */
+  const statusDock = React.useMemo(() => normalizeStatusDock(config.statusDock), [config.statusDock]);
+  const shortcutDock = React.useMemo(
+    () => normalizeShortcutDock(config.shortcutDock),
+    [config.shortcutDock],
+  );
+  const docksVisible = !directionMode;
+
+  /**
+   * How far inboard the gear has to step. Everything in a corner is placed from the same edge, so
+   * without this the gear is drawn on top of whatever is already there.
+   */
+  const gearDodge =
+    (hudOccupiedRegion(config, batteryLevel, weather) === settingsCorner ? HUD_STATUS_HEIGHT : 0) +
+    (docksVisible ? dockStackHeight(settingsCorner, statusDock, shortcutDock) : 0);
+
   return (
     <div
       data-zenith-radial-modal="true"
@@ -3377,14 +3416,39 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
             Not in direction mode: there the pointer is hidden and parked at the centre, so no hand
             can reach a corner, and the click that tried would launch the slice it was aiming
             across. A gear that cannot be pressed is worse than no gear, so it is withdrawn rather
-            than disabled — the same rule the taskbar rows follow in Settings.
+            than disabled — the same rule Settings follows for a dock's placement rows.
           */}
           {showSettingsGear && (
             <RadialSettingsCorner
               isOpen={isOpen && !isExiting && bloom && !echoActive}
               corner={settingsCorner}
-              dodgeStatus={hudOccupiedRegion(config, batteryLevel, weather) === settingsCorner}
+              dodgeBy={gearDodge}
               onOpen={onOpenSettings!}
+            />
+          )}
+
+          {/*
+            The user's own icons and the machine's readouts, in the corners they were placed in.
+            They leave with the wheel — the echo animation leaves only the launched icon on screen.
+          */}
+          {docksVisible && (
+            <ScreenDocks
+              isOpen={isOpen && !isExiting && bloom && !echoActive}
+              status={statusDock}
+              shortcuts={shortcutDock}
+              systemStatus={systemStatus}
+              onLaunch={(item) => onClose(item.id, item)}
+              onOpenPanel={(panel) => {
+                /**
+                 * The wheel comes down FIRST and only then is the panel asked for — the same order
+                 * the corner gear follows. A Windows panel opening behind a wheel that still holds
+                 * the mouse is a window the user cannot reach.
+                 */
+                onClose(null);
+                window.electron?.openSystemPanel?.(panel);
+              }}
+              onVolume={(percent) => window.electron?.setSystemVolume?.(percent)}
+              onMute={() => window.electron?.setSystemMuted?.(!systemStatus.muted)}
             />
           )}
 

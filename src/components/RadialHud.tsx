@@ -222,15 +222,21 @@ export function resolveSettingsCorner(corner: UIConfig['settingsCorner']): Setti
   return corner && SETTINGS_CORNERS.includes(corner) ? corner : 'top-right';
 }
 
+/** One pill's height, which is what the battery/weather strip occupies when it is on screen. */
+export const HUD_STATUS_HEIGHT = 46;
+
 export interface RadialSettingsCornerProps {
   isOpen: boolean;
   corner: SettingsCorner;
   /**
-   * The battery/weather strip is in this same corner. The gear steps inboard by one pill's height
-   * rather than sharing the spot: both are placed from the same edge, so left alone they stack on
-   * top of each other.
+   * How much is already in this corner, in pixels — the battery/weather strip, a dock, or both.
+   *
+   * The gear steps inboard by exactly that rather than sharing the spot: everything here is placed
+   * from the same edge, so left alone they stack on top of each other. A NUMBER and not a flag,
+   * because a dock's height follows the icon size the user chose and a fixed step would clear a
+   * strip of 18px glyphs while sitting squarely on one of 88px tiles.
    */
-  dodgeStatus?: boolean;
+  dodgeBy?: number;
   onOpen: () => void;
 }
 
@@ -246,7 +252,7 @@ export interface RadialSettingsCornerProps {
 export const RadialSettingsCorner: React.FC<RadialSettingsCornerProps> = ({
   isOpen,
   corner,
-  dodgeStatus,
+  dodgeBy = 0,
   onOpen,
 }) => {
   const isBottom = corner.startsWith('bottom');
@@ -263,7 +269,7 @@ export const RadialSettingsCorner: React.FC<RadialSettingsCornerProps> = ({
   };
 
   return (
-    <div className={shellClass} style={{ [isBottom ? 'marginBottom' : 'marginTop']: dodgeStatus ? 46 : 0 }}>
+    <div className={shellClass} style={{ [isBottom ? 'marginBottom' : 'marginTop']: Math.max(0, dodgeBy) }}>
       <button
         type="button"
         className={`zn-radial-pill zn-radial-gear ${isOpen ? '' : 'pointer-events-none'}`}

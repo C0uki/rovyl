@@ -11,19 +11,22 @@ backend/          Electron main, preload, and the PowerShell helpers
   electron-preload.js   the entire renderer-facing API surface
   mouse-blocker.ps1     captures the trigger button and blocks input outside the wheel
   foreground-focus.ps1  steals foreground when Windows refuses focus
-  taskbar-control.ps1   hides parts of the taskbar while the wheel is up, and puts them back
   extract-icon.ps1      the icon pipeline
   game-detection.cjs    fullscreen/game detection for focus protection
   win32-launch.js       command parsing and quoting for launching targets
   persistence-normalize.cjs   disk-blob → renderer shape
-  taskbar-overlay.cjs   the taskbar switches as main needs them (twin of src/utils/taskbarOverlay.ts)
+  system-status.cjs     the helper that reads volume, network and battery for the system dock
 src/              Renderer
   App.tsx               orchestration: state, persistence, IPC wiring, window modes
   components/
     RadialMenu.tsx      the wheel: layout, aiming, gestures, slices
+    ScreenDocks.tsx     the two corner strips drawn beside the open wheel
+    DockShortcuts.tsx   the list that edits the shortcut dock (Settings only)
     LicenseGate.tsx     the locked wheel shown without a license
     PrecisionSettings.tsx  the settings panel
   index.css             design tokens and every non-Tailwind style
+  utils/
+    screenDocks.ts      what a dock is, and whether it costs a window or a process
 scripts/          Build, launch and verification scripts
 nsis/             Installer customisation
 build/            Icon sources and generated assets
@@ -255,98 +258,89 @@ regardless of this setting — because the same process's `SetCursorPos` is fed 
 Note also that `TRIGGER_PASSTHROUGH_SLOP_PX` and `MMB_CLICK_DRAG_PX` are main-authored numbers the
 hook compares against deltas in its own space, so they move with it.
 
-## The taskbar while the wheel is open
+## The corner docks
 
-`taskbarOverlay` hides parts of the Windows taskbar for as long as the wheel is up and puts them
-back when it closes. It is off by default, and every switch under it is off within that, because
-this is the only thing Rovyl does that reaches outside its own window and changes the desktop.
+Two strips drawn beside the open wheel and gone when it closes: the **shortcut dock**, which holds
+icons the user chose, and the **system dock**, which reads the clock, the battery, the network and
+the volume. Both are off by default, and the shortcut dock is empty within that — this is the only
+thing Rovyl paints outside the wheel itself, and a strip appearing in someone's corner because they
+updated is a fault report, not a feature arriving.
 
-`backend/taskbar-control.ps1` is a second long-lived helper, spoken to over stdin exactly like the
-mouse hook: `APPLY <monitor rect> <flags>`, `RESTORE`, `PROBE`, `EXIT`, with `READY` on stdout. It
-is a **separate process from `mouse-blocker.ps1` and must stay one.** That helper drains its command
-queue on the thread serving its `WH_MOUSE_LL` hook, and Windows silently unhooks a low-level hook
-that overruns `LowLevelHooksTimeout`. Enumerating the taskbar and hiding a dozen windows on that
-thread would stall the pump every mouse event in the system passes through, during the gesture.
+They replaced `taskbarOverlay`, which hid parts of the real Windows taskbar while the wheel was up.
+That feature is gone entirely, along with `backend/taskbar-control.ps1`. It was never reliable: on
+Windows 11 22H2 and later the Start button, the clock, the tray and the task buttons are XAML
+visuals inside a single `DesktopWindowContentBridge` with no HWNDs at all, so no outside process can
+touch them without running code inside `explorer.exe`. What worked on Windows 10 worked by
+enumerating undocumented window classes, and the bar's background could never be restored exactly,
+because `GetWindowCompositionAttribute` reports `ACCENT_DISABLED` on a bar that is visibly
+translucent. Drawing our own strip asks nothing of explorer and looks the same on every build.
 
-Five findings shaped the rest, and each is a thing the obvious version gets wrong. All were measured
-on Windows 10 19045 with two monitors.
+### Where a dock is, and what that costs the window
 
-1. **Find the windows by enumerating, never with a `FindWindowEx` chain.** `FindWindowExW` returns
-   NULL for `Start` and for `TrayClockWClass` on this machine while both are plainly present and
-   hideable — `TrayNotifyWnd`, `ReBarWindow32` and `SysPager` are found by the same call. Nearly
-   every published "hide the taskbar clock" snippet uses the chain, so it silently does nothing.
-   `ChildrenOf` walks `EnumChildWindows` and compares `GetClassName`.
-2. **Never `ShowWindow(SW_HIDE)` on `Shell_TrayWnd` itself.** Hiding the bar hands its 40px back to
-   the desktop work area — every maximised window reflows — and `SW_SHOW` does **not** take it
-   back: measured, the work area stayed 1920x1079 after the bar returned. Only children are
-   touched. `scripts/taskbar-overlay-smoke.mjs` fails the build if that ever changes.
-3. **Transparency is `SetWindowCompositionAttribute`, not layered-window alpha.**
-   `WS_EX_LAYERED` + `SetLayeredWindowAttributes` fades the window *and its children together*, so
-   "transparent bar with the clock still on it" is unreachable that way.
-   `ACCENT_ENABLE_TRANSPARENTGRADIENT` affects only the background and leaves whatever stayed
-   visible painting on top.
-4. **The background cannot be restored exactly, and that is why it is opt-in.**
-   `GetWindowCompositionAttribute` reports `ACCENT_DISABLED` even on a bar that is visibly
-   translucent, so explorer's original is not legible. Restoring `ACCENT_DISABLED` leaves the bar
-   flat: the wallpaper tint bleeding through it (green channel 4.5 above the other two) drops to
-   exactly 0. `ACCENT_ENABLE_BLURBEHIND` with a dark tint lands near the original instead, so that
-   is what goes back, and the settings row says so in as many words.
-5. **Do not make explorer re-apply its own accent.** Toggling `EnableTransparency` and broadcasting
-   `ImmersiveColorSet` does restore the look — and it also wedged the taskbar into a 1px-tall strip
-   that neither `ABM_SETPOS` nor `SetWindowPos` would undo. Only restarting explorer fixed it. The
-   registry is never touched; it is read for `EnableTransparency` and nothing else.
+`src/utils/screenDocks.ts` is the whole model: six regions, sizes, gaps, and the predicates that
+decide whether anything happens at all. Three places read it and they must not disagree —
+`RadialApp` (which sizes the overlay window), `RadialMenu` (which draws them) and the settings
+panel (which edits them) — so it lives apart from all three.
 
-The primary and secondary bars are **not the same tree**, which is easy to miss with one monitor:
-the clock is `TrayClockWClass` inside `TrayNotifyWnd` on the primary and a bare `ClockButton` on a
-secondary, and the task buttons are `ReBarWindow32 > MSTaskSwWClass` against a plain `WorkerW`. Code
-written against the primary fails silently on the second monitor. Only the bar on the wheel's
-monitor is touched — `applyTaskbarOverlay(targetDisplay)` — because the scrim dims one screen, and a
-bar on a screen nobody is looking at is not part of the gesture.
+A dock in a corner forces the overlay window to take the whole monitor
+(`docksNeedFullBleed` → `setRadialViewport({ fullBleed })`). The wheel normally opens in a box
+around itself, which is what keeps the DWM off a monitor-sized layered surface; a dock placed in
+that box floats a couple of hundred pixels off the wheel on a diagonal, in the corner of nothing
+the user can see. The corner gear already asked for the same thing for the same reason.
 
-Whole groups are never hidden where a group holds two switches: `TrayNotifyWnd` contains the clock,
-so hiding the container would make "hide the tray icons, keep the clock" impossible. The parts go
-one at a time, and `TrayShowDesktopButtonWClass` is left alone — it is the sliver at the end of the
-bar, not a tray icon.
+Two docks can be asked for the same region, so `ScreenDocks` draws BOTH: a region is one
+`position: fixed` shell and whatever lands in it is stacked inside, readouts closest to the edge.
+Two components would have been two boxes against the same edge, one on top of the other. Anything
+else placed from that edge steps inboard by `dockStackHeight(...)` — a computed number, not a
+measurement, because the gear is positioned before either dock has laid out.
 
-### Windows 11
+Docks are withdrawn entirely in direction mode (`radialInstantActivate: 'dwell'`), where the
+pointer is hidden and parked at the centre. An icon that cannot be pressed is worse than no icon,
+and the click that tried would launch the slice it was aiming across. Every mouse event a dock
+takes is stopped dead, the same as the gear's: the wheel confirms its aim from a `mouseup` on the
+WINDOW, so a click that reached it would launch a dock icon *and* a slice.
 
-On 22H2 and later the Start button, the clock, the tray and the task buttons are XAML visuals
-inside a single `Windows.UI.Composition.DesktopWindowContentBridge`. **They have no HWNDs, so no
-outside process can hide them** — TranslucentTB, Windhawk, StartAllBack and ExplorerPatcher all do
-it by running code inside `explorer.exe`, which is not available to a Store-submitted app.
-`Shell_TrayWnd` itself *does* still exist on every Win11 build; the claim that it was removed is
-false, and the bar is still found. `PROBE` answers `classic` / `mixed` / `xaml` / `none` by counting
-legacy anchors against composition islands, and Settings withdraws the four element switches
-entirely on `xaml` rather than offering controls that would do nothing.
+### The readings
 
-### Putting it back
+`rovyl-helper.exe system-status` is a third long-lived helper, spoken to over stdin exactly like the
+mouse hook: `POLL`, `WATCH <ms>`, `VOL <0-100>`, `MUTE <0|1|2>`, `EXIT`, with `READY` and
+`STATUS <volume> <muted> <network> <signal> <battery> <charging>` on stdout.
+`backend/system-status.cjs` owns the process and `scripts/screen-docks-smoke.mjs` reads both it and
+the `.cs` to pin that field order — nothing type-checks across that boundary, and getting it wrong
+means the battery pill showing the volume.
 
-The restore has to survive more than a close, and each path was tested by causing it:
+Four decisions are worth keeping:
 
-- **Any close** — `clearTaskbarOverlay()` sits on every path that already calls
-  `clearRadialMouseBlocking()`: both `updateWindowSize` branches that end a radial, `hide-window`,
-  the updater restart and `will-quit`. That set is the choke point; adding a sixth close path means
-  adding it there too.
-- **The renderer dies** — nothing downstream closes the wheel, because the renderer owned that. The
-  `render-process-gone` handler is the only place left, and it releases all three global effects.
-- **Rovyl is killed** — the helper holds a `SYNCHRONIZE` handle on its parent and restores the
-  instant it signals. Measured at 17ms from kill to `WAIT_OBJECT_0`. Same mechanism as the mouse
-  hook's, for the same reason: polling `Process.GetProcessById` costs a whole-process-table snapshot.
-- **The helper itself is killed** — `TerminateProcess` runs no `finally`, so neither the parent
-  watch nor stdin EOF helps. Before hiding anything the helper writes the class names it is about
-  to hide to `%TEMP%\rovyl-taskbar-restore.txt` and deletes the file once they are back; the next
-  start replays whatever it finds. It stores class names rather than handles because the replay
-  happens in a new process, and after an explorer restart the handles are dead anyway. Only windows
-  that were *visible when we hid them* are ever recorded, so a replay cannot reveal something the
-  user keeps switched off.
-- **Explorer restarts** — every handle dies and the elements come back shown on their own. The
-  journal replay is then a no-op because the classes it names are already visible.
+1. **The helper follows the SETTING; the polling follows the WHEEL.** `setActive` is driven by
+   `statusDockNeedsHelper`, so a dock switched on keeps a process and the first wheel of the session
+   does not pay to start one. `setWatching` is driven by the open and close paths, so an idle
+   session polls nothing — the helper sits on a `WaitOne(Infinite)`. A clock-only dock needs no
+   helper at all: `Date` answers it.
+2. **Every reading carries its own "unknown", and it is `-1`.** A desktop PC has no battery and a
+   cable has no signal quality. A readout that cannot tell those from "empty" shows a flat battery
+   and no bars to somebody whose machine is fine.
+3. **The last reading survives the helper exiting,** and it survives the wheel closing. It is held
+   in `RadialApp`, not in `RadialMenu`, because that component is remounted on every open
+   (`radialMountKey`) — a reading kept inside it would reset to unknown at the start of every
+   gesture and the dock would paint four blanks until the next poll.
+4. **The volume bar owns itself while the hand is on it.** The reading comes back once a second;
+   without holding the dragged value the bar snaps back to the old one between the drag and the next
+   poll, which is the classic "the slider does nothing". Dragging uses pointer capture, because the
+   pointer leaves a 5px rail within a few pixels of movement.
 
-`src/utils/taskbarOverlay.ts` and `backend/taskbar-overlay.cjs` are the same rules twice, because
-main is CommonJS and cannot import the module the settings panel needs for its types.
-`scripts/taskbar-overlay-smoke.mjs` loads both and asserts they agree across all 64 flag
-combinations, and reads the `.ps1` to pin the field order of the `APPLY` line. Get that order wrong
-and "hide the clock" hides the Start button — the most confusing failure this feature has.
+Clicking a readout opens Windows' own panel, and the renderer names it (`"network"`) rather than
+spelling it (`"ms-availablenetworks:"`) — a renderer that can hand main an arbitrary URI is a
+renderer that can ask the shell to run anything. The wheel comes down first and the panel is asked
+for second, the order the corner gear already follows: a panel opening behind a wheel that still
+holds the mouse is a window nobody can reach.
+
+### Launching from a dock
+
+A dock icon is an ordinary `AppItem` and it launches through the wheel's own path —
+`onClose(item.id, item)`, with the item passed explicitly because it is not in any workspace. One
+launch path means one place where a failure is reported. The failure card offers no "Fix" for a
+dock icon (there is no `rootId`), which is correct: the shortcut it would open is not in the
+workspace Settings would show.
 
 ## Icons
 

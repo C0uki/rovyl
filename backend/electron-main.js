@@ -58,16 +58,12 @@ const fs = require("fs");
 const win32Launch = require("./win32-launch");
 const { buildTrayMenuTemplate } = require("./tray-menu.cjs");
 const { normalizeFullPersistenceBlob } = require("./persistence-normalize.cjs");
-const {
-  normalizeTaskbarOverlay,
-  taskbarOverlayIsActive,
-  taskbarApplyCommand,
-} = require("./taskbar-overlay.cjs");
 const { detectGameExecutable } = require("./game-detection.cjs");
 const { parseForegroundSnapshot, createLineSplitter } = require("./foreground-snapshot.cjs");
 const { isPhysicalRectFullscreen } = require("./fullscreen-bounds.cjs");
 const { titleFromHtmlBuffer } = require("./page-title.cjs");
 const { decidePendingUpdate } = require("./pending-update.cjs");
+const { createSystemStatusService } = require("./system-status.cjs");
 const crypto = require("crypto");
 const { GlobalKeyboardListener } = require("node-global-key-listener");
 const http = require("http");
@@ -1658,9 +1654,8 @@ function setupMainWindow(window) {
     /**
      * Nothing downstream of here closes the wheel: the renderer owned that, and it is gone. Every
      * other global side effect of an open wheel is released on a close path the renderer drives,
-     * so this is the only place left to put the taskbar back.
+     * so this is the only place left to release them.
      */
-    clearTaskbarOverlay();
     clearRadialMouseBlocking();
     releaseRadialCursor();
   });
@@ -1844,7 +1839,8 @@ function collapseOverlayToIdle(anchorScreenPoint) {
   radialOpen = false;
   clearRadialMouseBlocking();
   releaseRadialCursor();
-  clearTaskbarOverlay();
+  /** Nobody is reading the dock with no wheel on screen: the poll stops until the next open. */
+  systemStatus.setWatching(false);
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   try {
     overlayWindow.setIgnoreMouseEvents(true);
@@ -1923,6 +1919,8 @@ async function createOverlayWindow() {
   });
   win.webContents.on("render-process-gone", (_event, details) => {
     diagLog(`[Overlay] Renderer process gone: ${details?.reason}`);
+    /** Whatever was drawing the dock is gone, so nothing is reading the poll it asked for. */
+    systemStatus.setWatching(false);
   });
   win.webContents.on("preload-error", (_event, preloadPath, error) => {
     diagLog(`[Overlay] Preload error at ${preloadPath}: ${error?.message}`);
@@ -2053,11 +2051,11 @@ function showMenuAtCursor(source = "shortcut") {
 
     setRadialMouseBlocking(bounds, targetDisplay.bounds);
     /**
-     * The wheel takes this screen, so the taskbar on THIS screen gets out of the way —
-     * `targetDisplay`, not the primary: with `radialMonitor: 'cursor'` the bar the gesture covers
-     * is the one it is dimming.
+     * The system dock is about to be on screen, so its readouts start following the machine. With
+     * the dock switched off there is no helper and this is a no-op — deliberately: it must never
+     * be the thing that starts a process on the way into a gesture.
      */
-    applyTaskbarOverlay(targetDisplay);
+    systemStatus.setWatching(true);
 
     /**
      * Park the pointer BEFORE `open-menu`: the first sample the renderer uses has to be the centre
@@ -2354,6 +2352,22 @@ let radialTriggerListener = null;
 /** Drag slop: below this the press was a click, not an aim. */
 const TRIGGER_PASSTHROUGH_SLOP_PX = 6;
 
+/**
+ * A path that only Node can read, never a path Windows can execute.
+ *
+ * `fs.existsSync` is asar-aware: it answers TRUE for a file listed inside `app.asar`, because the
+ * archive's index says it is there. `spawn` is not — it hands the path to `CreateProcess`, which
+ * sees a directory that does not exist on disk and fails with ENOENT. So in a packaged build the
+ * first candidate below, `<app.asar>/backend/rovyl-helper.exe`, is found and is unusable, and
+ * every helper started through here dies on the spawn.
+ *
+ * Nothing inside the archive is ever executable. `asarUnpack` is what puts a REAL copy next to it
+ * in `app.asar.unpacked`, and that is the only kind of path worth returning.
+ */
+function isInsideAsarArchive(candidate) {
+  return /\.asar([\\/]|$)/i.test(candidate) && !/\.asar\.unpacked/i.test(candidate);
+}
+
 function getNativeHelperExePath() {
   const candidates = [
     path.join(__dirname, "rovyl-helper.exe"),
@@ -2369,6 +2383,8 @@ function getNativeHelperExePath() {
     candidates.push(path.join(process.resourcesPath, "app.asar.unpacked", "backend", "rovyl-helper.exe"));
   }
   for (const c of candidates) {
+    /** Found-but-unspawnable is worse than not found: it stops the search at a dead path. */
+    if (isInsideAsarArchive(c)) continue;
     try {
       if (fs.existsSync(c)) return c;
     } catch (_) {}
@@ -2677,204 +2693,67 @@ function stopRadialMouseBlocker() {
   }, 250);
 }
 
-/* -- The taskbar while the wheel is open --------------------------------- */
+/* -- The readings behind the system dock --------------------------------- */
 
 /**
- * What the user asked for, normalized. Seeded from disk at boot and rewritten by the renderer.
+ * The dock's readouts, read by a helper that lives for as long as the dock is switched on.
  *
- * It lives in main because main is what enacts it, and it has to be here BEFORE a wheel opens: the
- * global shortcut is registered before React has committed anything, so the first press of a cold
- * session would otherwise find no flags at all.
+ * Whether there IS a dock — and whether it asks for anything a helper has to answer — is decided
+ * by `statusDockNeedsHelper` in the renderer, which says so here on mount. Main deliberately does
+ * NOT seed this from disk the way `radialMonitor` is seeded: the overlay window is created at
+ * startup, so the wheel's renderer has reported long before any wheel opens, and a second copy of
+ * those rules in CommonJS is how two copies of a rule drift.
  */
-let taskbarOverlayFlags = normalizeTaskbarOverlay(null);
-let taskbarControl = null;
-let taskbarControlReady = false;
-/** One slot, last write wins: an APPLY chasing a RESTORE is exactly the state we want to end in. */
-let pendingTaskbarCommand = null;
-/** True between an APPLY and its RESTORE, so a close that changes nothing sends nothing. */
-let taskbarOverlayApplied = false;
-/** 'classic' | 'mixed' | 'xaml' | 'none', once the helper has said. Null until it has. */
-let taskbarCapability = null;
-let taskbarCapabilityWaiters = [];
+const systemStatus = createSystemStatusService({
+  resolveHelperPath: getNativeHelperExePath,
+  log: diagLog,
+  /** Only the wheel's window draws them; Settings has no readouts to update. */
+  onStatus: (status) => sendToOverlay("system-status", status),
+});
 
-function taskbarControlAssetPath() {
-  const p = path.join(__dirname, "taskbar-control.ps1");
-  return isDev ? p : p.replace("app.asar", "app.asar.unpacked");
-}
+ipcMain.on("set-status-dock-active", (_event, active) => {
+  systemStatus.setActive(!!active);
+});
 
-function settleTaskbarCapability(value) {
-  taskbarCapability = value;
-  const waiters = taskbarCapabilityWaiters;
-  taskbarCapabilityWaiters = [];
-  for (const resolve of waiters) {
-    try { resolve(value); } catch (e) { /* ignore */ }
-  }
-}
+ipcMain.handle("get-system-status", () => systemStatus.snapshot());
 
-/**
- * A SECOND helper process, and not a new verb on the mouse hook's one.
- *
- * `mouse-blocker.ps1` drains its command queue on the thread that serves its WH_MOUSE_LL hook, and
- * Windows silently unhooks a low-level hook that overruns LowLevelHooksTimeout. Enumerating the
- * taskbar and hiding a dozen windows there would stall the pump every mouse event in the system
- * passes through -- during the gesture, which is the worst possible moment.
- */
-function ensureTaskbarControl() {
-  if (process.platform !== "win32" || taskbarControl) return;
-  taskbarControlReady = false;
-  let child;
-  try {
-    child = spawn(
-      "powershell",
-      [
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "RemoteSigned",
-        "-File",
-        taskbarControlAssetPath(),
-        String(process.pid),
-      ],
-      { windowsHide: true },
-    );
-  } catch (e) {
-    diagLog(`[Taskbar] spawn failed: ${e.message}`);
-    settleTaskbarCapability("none");
-    return;
-  }
-  taskbarControl = child;
-  child.stdout.on("data", (data) => {
-    const text = data.toString();
-    const caps = text.match(/^CAPS\s+(\w+)\s*$/m);
-    if (caps) settleTaskbarCapability(caps[1]);
-    if (!/^READY\s*$/m.test(text)) return;
-    taskbarControlReady = true;
-    /** Asked once per process: the answer cannot change without explorer being replaced. */
-    if (taskbarCapability === null) writeTaskbarControl("PROBE");
-    if (pendingTaskbarCommand) {
-      const command = pendingTaskbarCommand;
-      pendingTaskbarCommand = null;
-      writeTaskbarControl(command);
-    }
-  });
-  child.stderr.on("data", (data) => {
-    diagLog(`[Taskbar] ${data.toString().trim()}`);
-  });
-  child.on("exit", () => {
-    if (taskbarControl !== child) return;
-    taskbarControl = null;
-    taskbarControlReady = false;
-    pendingTaskbarCommand = null;
-    /**
-     * The helper restores the bar as it goes -- on EXIT, on a broken pipe, and from its parent
-     * watch. So whatever it was holding is already back, and main must not think otherwise.
-     */
-    taskbarOverlayApplied = false;
-    /** Nobody is coming to answer a probe that was still outstanding. */
-    if (taskbarCapability === null) settleTaskbarCapability("none");
-  });
-}
+ipcMain.on("set-system-volume", (_event, percent) => {
+  systemStatus.setVolume(percent);
+});
 
-function writeTaskbarControl(command) {
-  if (!taskbarControl || !taskbarControlReady || !taskbarControl.stdin?.writable) {
-    pendingTaskbarCommand = command;
-    return;
-  }
-  pendingTaskbarCommand = null;
-  try {
-    taskbarControl.stdin.write(`${command}\n`);
-  } catch (e) {
-    diagLog(`[Taskbar] command failed: ${e.message}`);
-  }
-}
-
-function stopTaskbarControl() {
-  pendingTaskbarCommand = null;
-  taskbarOverlayApplied = false;
-  if (!taskbarControl) return;
-  const child = taskbarControl;
-  taskbarControl = null;
-  taskbarControlReady = false;
-  try {
-    /** EXIT, not a kill: the helper puts the taskbar back on its way out of the read loop. */
-    if (child.stdin?.writable) child.stdin.write("EXIT\n");
-  } catch (e) {
-    /* ignore */
-  }
-  setTimeout(() => {
-    try { if (!child.killed) child.kill(); } catch (e) { /* ignore */ }
-  }, 250);
-}
-
-/**
- * The wheel is taking a screen: quiet the taskbar on THAT screen.
- *
- * Costs one line on a pipe to a process that is already up, so it adds nothing measurable to the
- * open handshake -- the helper does its own Win32 work on its own thread. That is the whole reason
- * it is a long-lived process: a `powershell.exe` spawn here would cost more than the gesture does.
- */
-function applyTaskbarOverlay(display) {
-  if (process.platform !== "win32") return;
-  if (!taskbarOverlayIsActive(taskbarOverlayFlags)) return;
-  const bounds = display && display.bounds;
-  if (!bounds) return;
-  ensureTaskbarControl();
-  taskbarOverlayApplied = true;
-  writeTaskbarControl(taskbarApplyCommand(taskbarOverlayFlags, bounds));
-}
-
-/**
- * Give it back. Safe to call from any close path, and every close path calls it.
- *
- * Deliberately does NOT start the helper: with no process there is nothing hidden, and starting one
- * on the way out is how `installUpdateNow` ends up with an orphan holding a file the installer
- * needs -- the same trap `writeRadialCursorCommand` documents.
- */
-function clearTaskbarOverlay() {
-  if (!taskbarOverlayApplied) return;
-  taskbarOverlayApplied = false;
-  if (!taskbarControl) return;
-  writeTaskbarControl("RESTORE");
-}
-
-/**
- * Only a well-formed object writes, so a renderer that sends nothing cannot wipe the disk seed --
- * the same rule `applyRadialMonitorSetting` follows and for the same reason.
- */
-function applyTaskbarOverlaySetting(value) {
-  if (!value || typeof value !== "object") return;
-  taskbarOverlayFlags = normalizeTaskbarOverlay(value);
-  if (taskbarOverlayIsActive(taskbarOverlayFlags)) {
-    /** Up before it is needed: the first wheel of the session must not pay a PowerShell start. */
-    ensureTaskbarControl();
-    return;
-  }
-  /** Switched off while a wheel is up: put the bar back before the process goes. */
-  clearTaskbarOverlay();
-  stopTaskbarControl();
-}
-
-ipcMain.on("set-taskbar-overlay", (_event, config) => {
-  applyTaskbarOverlaySetting(config);
+ipcMain.on("set-system-muted", (_event, muted) => {
+  systemStatus.setMuted(!!muted);
 });
 
 /**
- * What this machine's taskbar allows, for the settings panel.
+ * The Windows panel behind a readout, named rather than spelled.
  *
- * Answering costs a helper process, so one is started even when the feature is off -- and stopped
- * again once the answer is in, because a switch nobody turned on may not leave a process behind.
+ * The renderer sends `"network"`, not `"ms-availablenetworks:"`. A renderer that could hand main an
+ * arbitrary URI to open is a renderer that can ask the shell to run anything, and the four entries
+ * below are the whole of what the dock has any business opening.
  */
-ipcMain.handle("get-taskbar-capability", async () => {
-  if (process.platform !== "win32") return "none";
-  if (taskbarCapability !== null) return taskbarCapability;
-  ensureTaskbarControl();
-  const answer = await new Promise((resolve) => {
-    taskbarCapabilityWaiters.push(resolve);
-    /** A helper that never reports leaves the panel showing the switches, which is the Win10 case. */
-    setTimeout(() => resolve(taskbarCapability === null ? "classic" : taskbarCapability), 4000);
-  });
-  if (!taskbarOverlayIsActive(taskbarOverlayFlags)) stopTaskbarControl();
-  return answer;
+const SYSTEM_PANEL_URIS = {
+  /** The classic volume mixer has no URI; this is the page with the same controls. */
+  volume: "ms-settings:sound",
+  /** The flyout with the list of networks, which is what clicking a Wi-Fi glyph means. */
+  network: "ms-availablenetworks:",
+  battery: "ms-settings:batterysaver",
+  clock: "ms-settings:dateandtime",
+};
+
+ipcMain.on("open-system-panel", (_event, panel) => {
+  const uri = SYSTEM_PANEL_URIS[panel];
+  if (!uri) return;
+  /**
+   * The wheel is up and holding the mouse when this runs. The renderer takes it down first, the
+   * same order the corner gear follows — a panel opening behind a wheel that still has the pointer
+   * is a window the user cannot reach.
+   */
+  try {
+    void shell.openExternal(uri);
+  } catch (e) {
+    diagLog(`[SystemStatus] could not open ${panel}: ${e.message}`);
+  }
 });
 
 /**
@@ -3914,8 +3793,6 @@ app.whenReady().then(async () => {
        */
       applyRadialMonitorSetting(fc.radialMonitor);
       applyRadialPlacementSetting(fc.radialPlacement);
-      /** Same reason as the monitor above: the first wheel of the session has to know. */
-      applyTaskbarOverlaySetting(fc.taskbarOverlay);
       const ui = extractUiConfigFromPersistenceBlob(fc);
       if (ui) {
         // Authoritative UI state lives in config-v2.json — win over stale settings.json (fixes shortcut/sync races).
@@ -3931,7 +3808,6 @@ app.whenReady().then(async () => {
         }
         applyRadialMonitorSetting(ui.radialMonitor);
         applyRadialPlacementSetting(ui.radialPlacement);
-        applyTaskbarOverlaySetting(ui.taskbarOverlay);
         if (ui.shortcutTriggerMode === "click" || ui.shortcutTriggerMode === "hold" || ui.shortcutTriggerMode === "toggle") {
           cachedRadialFlags.shortcutTriggerMode = ui.shortcutTriggerMode;
         }
@@ -4182,7 +4058,6 @@ app.whenReady().then(async () => {
     }
     applyRadialMonitorSetting(payload.radialMonitor);
     applyRadialPlacementSetting(payload.radialPlacement);
-    applyTaskbarOverlaySetting(payload.taskbarOverlay);
     const ui = extractUiConfigFromPersistenceBlob(payload);
     if (ui) {
       applyUiConfigToCurrentSettings(ui);
@@ -4208,7 +4083,6 @@ app.whenReady().then(async () => {
        */
       applyRadialMonitorSetting(ui.radialMonitor);
       applyRadialPlacementSetting(ui.radialPlacement);
-      applyTaskbarOverlaySetting(ui.taskbarOverlay);
       mergeGameModeConfig(ui.gameMode);
     }
     syncMouseHookState();
@@ -8307,9 +8181,7 @@ const installUpdateNow = () => {
   stopMouseHookForShutdown();
   stopRadialMouseBlocker();
   stopForegroundFocusHelper();
-  /** EXIT makes it put the taskbar back on its way out; the kill behind it is the backstop. */
-  clearTaskbarOverlay();
-  stopTaskbarControl();
+  systemStatus.stop();
 
   /**
    * `isForceRunAfter: true` — without this NSIS installs and does NOT relaunch the app, forcing the
@@ -9641,8 +9513,7 @@ app.on("will-quit", () => {
   stopMouseHookForShutdown();
   stopRadialMouseBlocker();
   stopForegroundFocusHelper();
-  clearTaskbarOverlay();
-  stopTaskbarControl();
+  systemStatus.stop();
   saveIconCache({ sync: true });
   globalShortcut.unregisterAll();
   if (keyboardListener) {

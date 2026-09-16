@@ -31,6 +31,16 @@
      Someone stranded in a UI they cannot read is looking for the row that LOOKS like
      their language, and "Russian" does not look like Русский. The English name rides
      along as support, as it does in `src/i18n/languages.ts`. */
+  /* The six places a dock may sit. Same list, same order, in src/utils/screenDocks.ts. */
+  const DOCK_POSITION_CHOICES = [
+    ['top-left', 'Top left'],
+    ['top-center', 'Top center'],
+    ['top-right', 'Top right'],
+    ['bottom-left', 'Bottom left'],
+    ['bottom-center', 'Bottom center'],
+    ['bottom-right', 'Bottom right'],
+  ];
+
   const LANGUAGES = [
     ['en', 'English', 'English'],
     ['es', 'Español', 'Spanish'],
@@ -67,12 +77,19 @@
     radialSelectionMode: 'angle',
     alwaysShowAppLabels: false,
     backdropOpacity: LOOK.backdropOpacity ?? 0.6,
-    taskbarOverlay: false,
-    taskbarStart: false,
-    taskbarApps: false,
-    taskbarTray: false,
-    taskbarClock: false,
-    taskbarTransparent: false,
+    statusDock: false,
+    statusDockPosition: 'bottom-right',
+    statusDockIconSize: 18,
+    statusDockGap: 10,
+    statusDockClock: true,
+    statusDockBattery: true,
+    statusDockNetwork: true,
+    statusDockVolume: true,
+    shortcutDock: false,
+    shortcutDockPosition: 'bottom-left',
+    shortcutDockIconSize: 40,
+    shortcutDockGap: 12,
+    shortcutDockLabels: false,
 
     performanceMode: false,
     strictOfflineMode: false,
@@ -109,7 +126,14 @@
     radialSelectionMode: 'angle',
     alwaysShowAppLabels: false,
     backdropOpacity: 0.6,
-    taskbarOverlay: false,
+    statusDock: false,
+    statusDockPosition: 'bottom-right',
+    statusDockIconSize: 18,
+    statusDockGap: 10,
+    shortcutDock: false,
+    shortcutDockPosition: 'bottom-left',
+    shortcutDockIconSize: 40,
+    shortcutDockGap: 12,
     strictOfflineMode: false,
   };
 
@@ -200,23 +224,37 @@
         desc: 'How much the rest of the screen recedes. At 100% it goes: the desktop is covered edge to edge.',
         kind: 'range', key: 'backdropOpacity', min: 0, max: 1, step: 0.01,
         format: (v) => `${Math.round(v * 100)}%` },
-      { group: 'Presence', title: 'Quiet the taskbar',
-        desc: 'Hide parts of the Windows taskbar while the wheel is open, on the screen the wheel is on. Everything comes back when it closes.',
-        kind: 'bool', key: 'taskbarOverlay' },
-      ...(S.taskbarOverlay ? [
-        { group: 'Presence', title: 'Keep the Start button', desc: 'Start and Task View stay on the bar.',
-          kind: 'bool', key: 'taskbarStart' },
-        { group: 'Presence', title: 'Keep pinned and open apps', desc: 'The app buttons, and anything else docked beside them.',
-          kind: 'bool', key: 'taskbarApps' },
-        { group: 'Presence', title: 'Keep the notification area', desc: 'Tray icons and the chevron that holds the rest.',
-          kind: 'bool', key: 'taskbarTray' },
-        { group: 'Presence', title: 'Keep the clock', desc: 'The time and date at the end of the bar.',
-          kind: 'bool', key: 'taskbarClock' },
-        /* The caveat belongs in the row, not in a release note: this is the only part
-           of Rovyl that changes something about Windows it cannot put back exactly. */
-        { group: 'Presence', title: 'Make the bar transparent',
-          desc: 'The bar itself goes, and whatever you kept above still shows. Windows does not report how the bar was painted before, so its background is restored to the standard look - which can differ slightly from a custom theme.',
-          kind: 'bool', key: 'taskbarTransparent' },
+      { group: 'Shortcut dock', title: 'Shortcut dock',
+        desc: 'A strip of your own icons beside the open wheel. Click one to launch it.',
+        kind: 'bool', key: 'shortcutDock' },
+      ...(S.shortcutDock ? [
+        { group: 'Shortcut dock', title: 'Where it sits', desc: 'The corner or edge the strip is placed against.',
+          kind: 'select', key: 'shortcutDockPosition', choices: DOCK_POSITION_CHOICES },
+        { group: 'Shortcut dock', title: 'Icon size', desc: 'How big each icon is drawn.',
+          kind: 'range', key: 'shortcutDockIconSize', min: 24, max: 88, step: 1, format: (v) => `${v} px` },
+        { group: 'Shortcut dock', title: 'Spacing', desc: 'The gap between neighbouring icons.',
+          kind: 'range', key: 'shortcutDockGap', min: 0, max: 48, step: 1, format: (v) => `${v} px` },
+        { group: 'Shortcut dock', title: 'Names under the icons', desc: 'Off by default: a strip of eight names is a menu.',
+          kind: 'bool', key: 'shortcutDockLabels' },
+      ] : []),
+      { group: 'System dock', title: 'System dock',
+        desc: 'Time, battery, network and volume, read live, beside the open wheel.',
+        kind: 'bool', key: 'statusDock' },
+      ...(S.statusDock ? [
+        { group: 'System dock', title: 'Where it sits', desc: 'The corner or edge the readouts are placed against.',
+          kind: 'select', key: 'statusDockPosition', choices: DOCK_POSITION_CHOICES },
+        { group: 'System dock', title: 'Icon size', desc: 'How big the glyphs and the text are drawn.',
+          kind: 'range', key: 'statusDockIconSize', min: 12, max: 32, step: 1, format: (v) => `${v} px` },
+        { group: 'System dock', title: 'Spacing', desc: 'The gap between neighbouring readouts.',
+          kind: 'range', key: 'statusDockGap', min: 0, max: 48, step: 1, format: (v) => `${v} px` },
+        { group: 'System dock', title: 'Clock', desc: 'The time, and the date under it.',
+          kind: 'bool', key: 'statusDockClock' },
+        { group: 'System dock', title: 'Battery', desc: 'Charge level and whether it is plugged in. Hidden on a machine with no battery.',
+          kind: 'bool', key: 'statusDockBattery' },
+        { group: 'System dock', title: 'Network', desc: 'Wi-Fi signal or a wired connection. Click it for the Windows network panel.',
+          kind: 'bool', key: 'statusDockNetwork' },
+        { group: 'System dock', title: 'Volume', desc: 'Output level, with a slider you can drag. Click the glyph to mute.',
+          kind: 'bool', key: 'statusDockVolume' },
       ] : []),
     ];
 
