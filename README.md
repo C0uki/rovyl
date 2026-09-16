@@ -6,6 +6,8 @@
 
 A radial launcher for Windows. Hold the middle mouse button anywhere, aim, release.
 
+**English** · [日本語](README.ja.md)
+
 [![Download Rovyl for Windows](https://img.shields.io/badge/Download%20for%20Windows-2ea44f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/arshit09/rovyl/releases/latest)
 
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4?style=flat-square)
@@ -154,6 +156,9 @@ so a fork never inherits someone else's OAuth client.
 | `npm run verify:radial-windowing` | Checks the radial handshake invariants |
 | `npm run test:win32-launch` | Command parsing and quoting |
 | `npm run test:persistence-shape` | Persistence blob normalisation |
+| `npm run test:i18n` | Translation tables: key parity and content |
+| `npm run test:i18n-packs` | The wheel's and the fault card's language packs |
+| `npm run test:backend-i18n` | The main process's string table |
 
 </details>
 
@@ -163,9 +168,9 @@ Issues and pull requests are welcome. Before changing anything that looks arbitr
 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — most of it exists because something
 broke, and the reason is written down.
 
-Two things worth knowing up front: the code comments are in Portuguese and explain *why*
-rather than *what*, and `npm run build` runs a verification script that enforces the
-window-handshake invariants. If it fails, the handshake was broken, not the test.
+Two things worth knowing up front: the code comments explain *why* rather than *what*,
+and `npm run build` runs a verification script that enforces the window-handshake
+invariants. If it fails, the handshake was broken, not the test.
 
 ## Links
 
