@@ -1414,7 +1414,7 @@ export const translations = {
 
     // Icon picker
     iconPickerSearch: 'アイコンを検索…',
-    iconPickerKeywordsHint: 'ヒント：英単語（work、time、home…）でも、名前だけでなく意味の近いアイコンが出てきます。',
+    iconPickerKeywordsHint: 'ヒント：日本語（仕事、時計、家…）でも英単語でも、名前だけでなく意味の近いアイコンが出てきます。',
     iconPickerNoResults: 'アイコンが見つかりません。',
 
     // Panel chrome, managers and editors
