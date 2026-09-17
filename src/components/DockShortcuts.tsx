@@ -14,6 +14,9 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { AppItem } from '../types';
+import type { TranslationKey } from '../i18n/translations';
+import { useTranslation } from '../i18n/useTranslation';
+import { usePanelLanguage } from '../i18n/panelLanguage';
 import type { ShortcutDockConfig } from '../utils/screenDocks';
 import { getIcon } from '../iconMap';
 import { SmartIcon } from './SmartIcon';
@@ -58,11 +61,11 @@ function targetLabel(item: AppItem): string {
   return item.command;
 }
 
-function kindLabel(item: AppItem): string {
-  if (item.commandType === 'url') return 'Web link';
-  if (item.commandType === 'folder') return 'Folder';
-  if (item.commandType === 'file') return 'File';
-  return 'Application';
+function kindLabel(item: AppItem, t: (key: TranslationKey) => string): string {
+  if (item.commandType === 'url') return t('dockTypeWebLink');
+  if (item.commandType === 'folder') return t('folder');
+  if (item.commandType === 'file') return t('dockTypeFile');
+  return t('application');
 }
 
 /** The glyph an item wears when it has no bitmap and nothing has been picked for it. */
@@ -117,6 +120,7 @@ export function DockShortcutsManager({
   showToast,
   onPickIcon,
 }: DockShortcutsManagerProps) {
+  const { t } = useTranslation(usePanelLanguage());
   const [addMode, setAddMode] = useState<AddMode>(null);
   const { apps: installedApps, loading: loadingApps, error: appsError, reload } =
     useInstalledApps(addMode === 'app');
@@ -323,7 +327,7 @@ export function DockShortcutsManager({
     <div className="zs-workspace-manager">
       <section className="zs-workspace-shortcuts">
         <div className="zs-workspace-section-head">
-          <div><h3>Dock icons</h3></div>
+          <div><h3>{t('dockEditorTitle')}</h3></div>
           <div className="zs-add-actions" aria-label="Add to the dock">
             <button type="button" className={addMode === 'app' ? 'is-active' : ''} onClick={() => setAddMode(addMode === 'app' ? null : 'app')}><Monitor size={14} /> Application</button>
             <button type="button" className={addMode === 'url' ? 'is-active' : ''} onClick={() => setAddMode(addMode === 'url' ? null : 'url')}><Globe2 size={14} /> URL</button>
@@ -376,16 +380,16 @@ export function DockShortcutsManager({
                 ) : appsError ? (
                   <div className="zs-manager-empty">
                     Could not list applications.
-                    <button type="button" className="zs-btn" onClick={() => reload(true)}>Try again</button>
+                    <button type="button" className="zs-btn" onClick={() => reload(true)}>{t('tryAgain')}</button>
                   </div>
                 ) : (
-                  <div className="zs-manager-empty">No applications found. Choose a file instead.</div>
+                  <div className="zs-manager-empty">{t('dockEditorNoApps')}</div>
                 )}
               </div>
               {!loadingApps && installedApps.length > 0 && (
                 <div className="zs-add-panel-foot">
                   <span>{visibleApps.length} / {filteredApps.length} applications</span>
-                  <button type="button" onClick={() => reload(true)}>Reload the list</button>
+                  <button type="button" onClick={() => reload(true)}>{t('dockEditorReload')}</button>
                 </div>
               )}
             </div>
@@ -395,7 +399,7 @@ export function DockShortcutsManager({
             <div className="zs-add-panel">
               <div className="zs-add-form">
                 <label className="zs-field">
-                  <span>Address</span>
+                  <span>{t('address')}</span>
                   <input
                     autoFocus
                     value={url}
@@ -405,7 +409,7 @@ export function DockShortcutsManager({
                   />
                 </label>
                 <label className="zs-field">
-                  <span>Name</span>
+                  <span>{t('name')}</span>
                   <input
                     value={urlLabel}
                     onChange={(event) => setUrlLabel(event.target.value)}
@@ -426,13 +430,13 @@ export function DockShortcutsManager({
                 <button type="button" className="zs-folder-picker" onClick={() => void chooseFolder()}>
                   <FolderOpen size={20} />
                   <div>
-                    <b>{folderPath ? folderPath.split(/[/\\]/).filter(Boolean).pop() : 'Select a folder'}</b>
-                    <small>{folderPath || 'Opens File Explorer'}</small>
+                    <b>{folderPath ? folderPath.split(/[/\\]/).filter(Boolean).pop() : t('dockEditorSelectFolder')}</b>
+                    <small>{folderPath || t('dockEditorOpensExplorer')}</small>
                   </div>
                   <ChevronRight size={15} />
                 </button>
                 <label className="zs-field">
-                  <span>Name</span>
+                  <span>{t('name')}</span>
                   <input value={folderLabel} onChange={(event) => setFolderLabel(event.target.value)} placeholder="Name shown in the dock" />
                 </label>
                 <button type="button" className="zs-btn is-primary" disabled={!folderPath} onClick={addFolder}>
@@ -448,13 +452,13 @@ export function DockShortcutsManager({
                 <button type="button" className="zs-folder-picker" onClick={() => void chooseDocumentFile()}>
                   <FileGlyph size={20} />
                   <div>
-                    <b>{filePath ? filePath.split(/[/\\]/).filter(Boolean).pop() : 'Select a file'}</b>
-                    <small>{filePath || 'Opens with whatever Windows uses for that file type'}</small>
+                    <b>{filePath ? filePath.split(/[/\\]/).filter(Boolean).pop() : t('dockEditorSelectFile')}</b>
+                    <small>{filePath || t('dockEditorOpensWith')}</small>
                   </div>
                   <ChevronRight size={15} />
                 </button>
                 <label className="zs-field">
-                  <span>Name</span>
+                  <span>{t('name')}</span>
                   <input value={fileLabel} onChange={(event) => setFileLabel(event.target.value)} placeholder="Name shown in the dock" />
                 </label>
                 <button type="button" className="zs-btn is-primary" disabled={!filePath || busy} onClick={() => void addFile()}>
@@ -526,7 +530,7 @@ export function DockShortcutsManager({
                       aria-label={`Name of ${item.label}`}
                       onChange={(event) => rename(item.id, event.target.value)}
                     />
-                    <small title={targetLabel(item)}>{kindLabel(item)} · {targetLabel(item)}</small>
+                    <small title={targetLabel(item)}>{kindLabel(item, t)} · {targetLabel(item)}</small>
                   </div>
                   {/* One cell, so the row keeps the four-column grid the workspace list uses. */}
                   <div className="zs-item-actions">
