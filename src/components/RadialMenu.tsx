@@ -3787,6 +3787,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
               status={statusDock}
               shortcuts={shortcutDock}
               systemStatus={systemStatus}
+              strings={strings}
               onLaunch={(item) => onClose(item.id, item)}
               onShortcutHover={sounds.hover ? playDockHover : undefined}
               onOpenPanel={(panel) => {
