@@ -12,7 +12,7 @@ Windows のためのラジアルランチャー。どこでもマウスの中ボ
 
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078d4?style=flat-square)
 ![Electron](https://img.shields.io/badge/Electron-28-47848f?style=flat-square&logo=electron&logoColor=white)
-![React](https://img.shields.io/badge/React-19-149eca?style=flat-square&logo=react&logoColor=white)
+![React](https://img.shields.io/badge/React-18-149eca?style=flat-square&logo=react&logoColor=white)
 
 <img src="docs/media/banner.png" alt="" width="720">
 
@@ -70,14 +70,14 @@ Rovyl は別の賭けに出ています。**あなたは自分のものがどこ
 
 **長押し**
 
-Windows のどこでも、マウスの中ボタンを押したままにします。ホイールが画面の中央に現れ、どの向きへひと振りしてもすべてのショートカットに届きます。モニターが 2 枚あるなら、「呼び出し」→ **ディスプレイ** で **メイン画面** と **ポインターを追う** を選べます。
+Windows のどこでも、マウスの中ボタンを押したままにします。画面が暗転してホイールが現れ、どの向きへひと振りしてもすべてのショートカットに届きます。既定では中央に開きますが、「外観」→ **開く位置** でポインターの下に出すこともできます。モニターが 2 枚あるなら、「呼び出し」→ **ディスプレイ** で **メイン画面** と **ポインターを追う** を選べます。
 
 </td>
 <td width="50%" valign="top">
 
 **狙う**
 
-欲しいショートカットの方へ動かします。方向モードでは、画面のどこからでも指した扇形が光ります。ポインターモードでは、カーソルの下のアイコンだけが光ります。
+欲しいショートカットの方へ動かします。方向モードでは、画面のどこからでも指した扇形が光ります。面積モードも同じように振る舞い、各項目の取り分を描き分けます。ポインターモードでは、カーソルの下のアイコンだけが光ります。キーボード起動を有効にすれば、数字キーで扇形を直接選べます。
 
 </td>
 </tr>
@@ -93,7 +93,7 @@ Windows のどこでも、マウスの中ボタンを押したままにします
 
 **切り替える**
 
-ホイールが開いているあいだ、数字キーでワークスペースを移動できます。中央の選択画面からでも切り替えられます。
+既定では、ホイールは最初にワークスペースの選択画面を開きます。数字キーの方が好みなら、「一般」→ **ワークスペースの切り替え** → **キー**。ホイールが開いているあいだ、1〜9 で移動できます。
 
 </td>
 </tr>
@@ -103,7 +103,7 @@ Windows のどこでも、マウスの中ボタンを押したままにします
 
 <div align="center">
 <img src="docs/media/workspaces.png" alt="それぞれのホイールをプレビューするワークスペースのカード" width="440">
-<img src="docs/media/settings.png" alt="呼び出しの設定" width="440">
+<img src="docs/media/settings.png" alt="ホイールをその場でプレビューする外観の設定" width="440">
 </div>
 
 ## ビルド
@@ -117,7 +117,7 @@ npm install
 npm start
 ```
 
-`npm start` は Vite を立ち上げ、その準備ができてから Electron を起動します。別々に動かすなら `npm run dev` と `npm run electron` を使ってください。
+`npm start` は `dist/` が無ければ一度ビルドし、本番用のレンダラーを Electron で動かします。開発サーバーは挟みません。ホットリロードが要るなら `npm run start:dev` が Vite を立ち上げ、その準備ができてから Electron を起動します。別々に動かすなら `npm run dev` と `npm run electron`。実際にインストールされた状態でしか存在しないもの（たとえば更新機能）を触るには `npm run start:packaged` を使ってください。インストーラーを作らずにパッケージ化して起動します。
 
 Google サインインには自分の資格情報が必要です。`.env.example` を `.env.local` にコピーし、自分の Google Cloud プロジェクトのクライアント ID を入れてください。既定値は意図的に置いていません。フォークが他人の OAuth クライアントを受け継がないようにするためです。
 
@@ -128,18 +128,25 @@ Google サインインには自分の資格情報が必要です。`.env.example
 
 | コマンド | 何をするか |
 | --- | --- |
-| `npm start` | 開発サーバー ＋ Electron |
+| `npm start` | 本番ビルドを Electron で。必要なら先にビルドします |
+| `npm run start:dev` | Vite 開発サーバー ＋ Electron |
+| `npm run start:packaged` | インストーラー無しでパッケージ化し、`%LOCALAPPDATA%` に置いて起動 |
 | `npm run dev` | Vite のみ |
 | `npm run electron` | Electron のみ。ポート 5173 を待ちます |
-| `npm run build` | `tsc` → Vite ビルド → ラジアルの検証 → アイコン生成 |
+| `npm run build` | ネイティブヘルパー → `tsc` → Vite ビルド → ラジアルとレンダラー予算の検査 → アイコンとストア用素材 |
 | `npm run dist` | `build` ＋ electron-builder。インストーラーは `build-out/` |
 | `npm run dist:store` | `build` ＋ electron-builder。ストア向けの MSIX パッケージ |
-| `npm run verify:radial-windowing` | ラジアルのハンドシェイク不変条件を確認します |
+| `npm run release` | リリースを切ります（`release:check` で空打ち） |
+| `npm run verify:radial-windowing` | ホイールと設定のウィンドウ分割の不変条件を確認します |
+| `npm run verify:renderer-budget` | ホイールのバンドルを予算内に保ちます |
+| `npm run test:window-split` | 使い捨てのプロファイルで実物を起動し、ホイールを開きます |
 | `npm run test:win32-launch` | コマンドの解析と引用符の扱い |
 | `npm run test:persistence-shape` | 永続化データの正規化 |
 | `npm run test:i18n` | 翻訳テーブルのキー整合と内容 |
 | `npm run test:i18n-packs` | ホイールとエラーカードの言語パック |
 | `npm run test:backend-i18n` | メインプロセス側の文言テーブル |
+
+`package.json` にあるその他の `test:*` は、機能ごとの的を絞ったスモークテストです。
 
 </details>
 
@@ -147,7 +154,7 @@ Google サインインには自分の資格情報が必要です。`.env.example
 
 Issue と Pull Request を歓迎します。一見すると恣意的に見えるものを変える前に、**[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** を読んでください。その大半は何かが壊れた結果として存在していて、理由が書き残されています。
 
-先に知っておくとよいことが 2 つあります。コードのコメントは *何を* ではなく *なぜ* を説明していること。そして `npm run build` がウィンドウのハンドシェイク不変条件を強制する検証スクリプトを走らせることです。これが落ちたときは、テストではなくハンドシェイクが壊れています。
+先に知っておくとよいことが 2 つあります。コードのコメントは *何を* ではなく *なぜ* を説明していること。そして `npm run build` が、ホイールのウィンドウ契約とバンドル予算を強制する検証スクリプトを走らせることです。どれかが落ちたときは、テストではなく契約が壊れています。
 
 ## リンク
 
