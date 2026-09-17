@@ -48,7 +48,6 @@ import {
   DOCK_GAP_MAX,
   DOCK_GAP_MIN,
   DOCK_POSITIONS,
-  DOCK_POSITION_LABELS,
   SHORTCUT_DOCK_ICON_MAX,
   SHORTCUT_DOCK_ICON_MIN,
   STATUS_DOCK_ICON_MAX,
@@ -56,6 +55,7 @@ import {
   normalizeShortcutDock,
   normalizeStatusDock,
 } from '../utils/screenDocks';
+import type { DockPosition } from '../utils/screenDocks';
 import { getIcon } from '../iconMap';
 import { resolveWebsiteIconFields } from '../siteFavicon';
 import { hostLabelFromUrl, looksFetchable, normalizeSiteUrl, resolveWebsiteTitle } from '../siteTitle';
@@ -77,6 +77,7 @@ import {
 } from '../constants/radialBackKey';
 import { nextTypeAheadBuffer, selectMenuPlacement, typeAheadIndex } from './selectMenu';
 import { LANGUAGES, normalizeLanguage, translations, useTranslation } from '../i18n/useTranslation';
+import type { TranslationKey } from '../i18n/translations';
 import { PanelLanguageProvider, usePanelLanguage } from '../i18n/panelLanguage';
 
 interface PrecisionSettingsProps {
@@ -219,6 +220,15 @@ interface SettingItem {
  * nobody had reason to open this one again. What the arithmetic actually needs is the sequence, so
  * that is all it holds now.
  */
+const DOCK_POSITION_KEYS: Record<DockPosition, TranslationKey> = {
+  'top-left': 'dockPosTopLeft',
+  'top-center': 'dockPosTopCenter',
+  'top-right': 'dockPosTopRight',
+  'bottom-left': 'dockPosBottomLeft',
+  'bottom-center': 'dockPosBottomCenter',
+  'bottom-right': 'dockPosBottomRight',
+};
+
 const SECTION_ORDER: readonly SectionId[] = ['spaces', 'trigger', 'advanced', 'appearance', 'general'];
 
 export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
@@ -1220,108 +1230,108 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
            * icons: a small button whose label says "default" would delete every one of them. The
            * workspace rows leave it off for exactly the same reason.
            */
-          key: 'shortcutDock', group: 'Shortcut dock',
-          title: 'Shortcut dock',
+          key: 'shortcutDock', group: t('dockGroupShortcut'),
+          title: t('dockGroupShortcut'),
           description: shortcutDock.items.length
-            ? 'A strip of your own icons beside the open wheel. Click one to launch it.'
-            : 'A strip of your own icons beside the open wheel — Chrome, Steam, a project folder, anything. Nothing is drawn until you add some.',
+            ? t('dockShortcutDesc')
+            : t('dockShortcutDescEmpty'),
           keywords: 'dock strip icons taskbar corner launcher pinned chrome steam discord',
           kind: 'bool', enabled: shortcutDock.enabled,
           onToggle: () => updateShortcutDock({ enabled: !shortcutDock.enabled }),
         },
         ...(shortcutDock.enabled ? ([
           {
-            key: 'shortcutDock-items', group: 'Shortcut dock', title: 'Icons',
+            key: 'shortcutDock-items', group: t('dockGroupShortcut'), title: t('dockIconsRow'),
             description: shortcutDock.items.length === 1
-              ? '1 icon in the dock.'
-              : `${shortcutDock.items.length} icons in the dock.`,
+              ? t('dockIconsOne')
+              : tf('dockIconsMany', { count: shortcutDock.items.length }),
             kind: 'open' as const,
-            value: shortcutDock.items.length ? 'Edit' : 'Add icons',
+            value: shortcutDock.items.length ? t('dockIconsEdit') : t('dockIconsAdd'),
             onOpen: () => setEditor({ kind: 'dockShortcuts' as const }),
           },
           {
-            key: 'shortcutDock-position', group: 'Shortcut dock', title: 'Where it sits',
-            description: 'The corner or edge the strip is placed against. The wheel opens over the whole screen while a dock is on, so the corner is a real one.',
+            key: 'shortcutDock-position', group: t('dockGroupShortcut'), title: t('dockWhereItSits'),
+            description: t('dockShortcutPosDesc'),
             /** A select, not a segmented control: six region names is far wider than the column. */
             kind: 'select' as const,
             current: shortcutDock.position,
             choices: DOCK_POSITIONS.map((position) => ({
               value: position,
-              label: DOCK_POSITION_LABELS[position],
+              label: t(DOCK_POSITION_KEYS[position]),
             })),
             onChange: (value: number | string) =>
               updateShortcutDock({ position: value as typeof shortcutDock.position }),
           },
-          range('shortcutDock-size', 'Shortcut dock', 'Icon size',
-            'How big each icon is drawn.',
+          range('shortcutDock-size', t('dockGroupShortcut'), t('iconSizeRow'),
+            t('dockShortcutSizeDesc'),
             shortcutDock.iconSize, SHORTCUT_DOCK_ICON_MIN, SHORTCUT_DOCK_ICON_MAX,
             (value) => updateShortcutDock({ iconSize: Math.round(value) }),
             (value) => `${Math.round(value)} px`),
-          range('shortcutDock-gap', 'Shortcut dock', 'Spacing',
-            'The gap between neighbouring icons.',
+          range('shortcutDock-gap', t('dockGroupShortcut'), t('dockSpacingRow'),
+            t('dockShortcutGapDesc'),
             shortcutDock.gap, DOCK_GAP_MIN, DOCK_GAP_MAX,
             (value) => updateShortcutDock({ gap: Math.round(value) }),
             (value) => `${Math.round(value)} px`),
           {
-            key: 'shortcutDock-labels', group: 'Shortcut dock', title: 'Names under the icons',
-            description: 'Off by default: a strip of eight names is a menu, and the wheel is already that.',
+            key: 'shortcutDock-labels', group: t('dockGroupShortcut'), title: t('dockLabelsRow'),
+            description: t('dockLabelsDesc'),
             kind: 'bool' as const, enabled: shortcutDock.showLabels,
             onToggle: () => updateShortcutDock({ showLabels: !shortcutDock.showLabels }),
           },
         ]) : []),
         {
-          key: 'statusDock', configKey: 'statusDock', group: 'System dock',
-          title: 'System dock',
-          description: 'Time, battery, network and volume, read live, beside the open wheel. The volume slider and the mute button work from here.',
+          key: 'statusDock', configKey: 'statusDock', group: t('dockGroupSystem'),
+          title: t('dockGroupSystem'),
+          description: t('dockSystemDesc'),
           keywords: 'clock time battery network wifi volume sound tray indicators status corner',
           kind: 'bool', enabled: statusDock.enabled,
           onToggle: () => updateStatusDock({ enabled: !statusDock.enabled }),
         },
         ...(statusDock.enabled ? ([
           {
-            key: 'statusDock-position', group: 'System dock', title: 'Where it sits',
-            description: 'The corner or edge the readouts are placed against.',
+            key: 'statusDock-position', group: t('dockGroupSystem'), title: t('dockWhereItSits'),
+            description: t('dockSystemPosDesc'),
             kind: 'select' as const,
             current: statusDock.position,
             choices: DOCK_POSITIONS.map((position) => ({
               value: position,
-              label: DOCK_POSITION_LABELS[position],
+              label: t(DOCK_POSITION_KEYS[position]),
             })),
             onChange: (value: number | string) =>
               updateStatusDock({ position: value as typeof statusDock.position }),
           },
-          range('statusDock-size', 'System dock', 'Icon size',
-            'How big the glyphs are drawn. The readouts beside them are set to match.',
+          range('statusDock-size', t('dockGroupSystem'), t('iconSizeRow'),
+            t('dockSystemSizeDesc'),
             statusDock.iconSize, STATUS_DOCK_ICON_MIN, STATUS_DOCK_ICON_MAX,
             (value) => updateStatusDock({ iconSize: Math.round(value) }),
             (value) => `${Math.round(value)} px`),
-          range('statusDock-gap', 'System dock', 'Spacing',
-            'The gap between neighbouring readouts.',
+          range('statusDock-gap', t('dockGroupSystem'), t('dockSpacingRow'),
+            t('dockSystemGapDesc'),
             statusDock.gap, DOCK_GAP_MIN, DOCK_GAP_MAX,
             (value) => updateStatusDock({ gap: Math.round(value) }),
             (value) => `${Math.round(value)} px`),
           {
-            key: 'statusDock-volume', group: 'System dock', title: 'Volume',
-            description: 'Output level, with a slider you can drag. Click the glyph to mute.',
+            key: 'statusDock-volume', group: t('dockGroupSystem'), title: t('dockVolumeRow'),
+            description: t('dockVolumeDesc'),
             kind: 'bool' as const, enabled: statusDock.showVolume,
             onToggle: () => updateStatusDock({ showVolume: !statusDock.showVolume }),
           },
           {
-            key: 'statusDock-network', group: 'System dock', title: 'Network',
-            description: 'Wi-Fi signal, or a wired connection. Click it for the Windows network panel.',
+            key: 'statusDock-network', group: t('dockGroupSystem'), title: t('dockNetworkRow'),
+            description: t('dockNetworkDesc'),
             kind: 'bool' as const, enabled: statusDock.showNetwork,
             onToggle: () => updateStatusDock({ showNetwork: !statusDock.showNetwork }),
           },
           {
-            key: 'statusDock-battery', group: 'System dock', title: 'Battery',
+            key: 'statusDock-battery', group: t('dockGroupSystem'), title: t('battery'),
             /** Said up front, because the row is otherwise a switch that visibly does nothing. */
-            description: 'Charge level, and whether it is on the charger. Nothing is drawn on a machine with no battery.',
+            description: t('dockBatteryDesc'),
             kind: 'bool' as const, enabled: statusDock.showBattery,
             onToggle: () => updateStatusDock({ showBattery: !statusDock.showBattery }),
           },
           {
-            key: 'statusDock-clock', group: 'System dock', title: 'Clock',
-            description: 'The time, with the date under it.',
+            key: 'statusDock-clock', group: t('dockGroupSystem'), title: t('clock'),
+            description: t('dockClockDesc'),
             kind: 'bool' as const, enabled: statusDock.showClock,
             onToggle: () => updateStatusDock({ showClock: !statusDock.showClock }),
           },
