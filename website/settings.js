@@ -248,15 +248,99 @@
       'ワークスペースの切り替え',
     'Workspaces':
       'ワークスペース',
+    'A strip of your own icons beside the open wheel. Click one to launch it.':
+      '開いたホイールの脇に並ぶ、自分のアイコンの帯。クリックで起動します。',
+    'Aim by direction: the slice you point toward highlights from anywhere on screen.':
+      '向きで狙います。画面のどこからでも、指した扇形が光ります。',
+    'Back':
+      '戻る',
+    'Battery':
+      'バッテリー',
+    'Bottom center':
+      '下中央',
+    'Bottom left':
+      '左下',
+    'Bottom right':
+      '右下',
+    'Cancel':
+      '取り消し',
+    'Charge level and whether it is plugged in. Hidden on a machine with no battery.':
+      '充電残量と、電源につながっているかどうか。バッテリーのない機械では出ません。',
+    'Clock':
+      '時計',
+    'Current':
+      '現在',
+    'Erase everything':
+      'すべて消去',
+    'Every workspace, shortcut, icon and preference on this PC is deleted and Rovyl restarts. This cannot be undone - use Export settings first if you want a copy.':
+      'この PC のワークスペース・ショートカット・アイコン・設定がすべて削除され、Rovyl が再起動します。取り消せません。控えが要るなら、先に設定の書き出しを。',
+    'Forward':
+      '進む',
+    'How big each icon is drawn.':
+      'アイコン1つの大きさ。',
+    'How big the glyphs and the text are drawn.':
+      '記号と文字の大きさ。',
+    'Instant':
+      '即時',
+    'Launch without clicking is on, so the wheel always aims by direction - each item owns an equal slice of the screen.':
+      'クリックなしの起動が有効なので、ホイールは常に向きで狙います。項目それぞれが画面を等分した扇形を持ちます。',
+    'Names under the icons':
+      'アイコンの下に名前',
+    'Network':
+      'ネットワーク',
+    'New workspace':
+      '新しいワークスペース',
+    'Off by default: a strip of eight names is a menu.':
+      '既定はオフ。名前が8つ並べばそれはメニューです。',
+    'Only the icon under the pointer highlights. Release away from every icon to cancel.':
+      'ポインターの下のアイコンだけが光ります。どのアイコンからも離れた場所で離せば取り消しです。',
+    'Output level, with a slider you can drag. Click the glyph to mute.':
+      '出力レベル。スライダーで動かせます。記号をクリックでミュート。',
+    'Paused':
+      '一時停止中',
+    'Reset to default':
+      '既定に戻す',
+    'Shortcut dock':
+      'ショートカットドック',
+    'Spacing':
+      '間隔',
+    'System dock':
+      'システムドック',
+    'The corner or edge the readouts are placed against.':
+      '表示を寄せる角または辺。',
+    'The corner or edge the strip is placed against.':
+      '帯を寄せる角または辺。',
+    'The gap between neighbouring icons.':
+      '隣り合うアイコンのあいだの空き。',
+    'The gap between neighbouring readouts.':
+      '隣り合う表示のあいだの空き。',
+    'The time, and the date under it.':
+      '時刻と、その下に日付。',
+    'The wheel always opens on the main screen, wherever the pointer happens to be.':
+      'ポインターがどこにあっても、ホイールは常にメイン画面に開きます。',
+    'The wheel opens on the screen the pointer is already on, so what you launch lands where you are working.':
+      'ポインターのある画面にホイールが開くので、起動したものは作業している場所に出ます。',
+    'Time, battery, network and volume, read live, beside the open wheel.':
+      '時刻・バッテリー・ネットワーク・音量を、開いたホイールの脇に実時間で。',
+    'Top center':
+      '上中央',
+    'Top left':
+      '左上',
+    'Top right':
+      '右上',
+    'Volume':
+      '音量',
+    'Where it sits':
+      '置く場所',
+    'Wi-Fi signal or a wired connection. Click it for the Windows network panel.':
+      'Wi-Fi の電波、または有線接続。クリックすると Windows のネットワークパネルが開きます。',
+    'Your Main workspace, at the size these settings give it.':
+      'メインのワークスペースを、この設定どおりの大きさで。',
   };
 
   const isJapanese = document.documentElement.lang === 'ja';
   const tr = (value) => (isJapanese && value && JA[value]) || value;
 
-  /* The eight the app ships, in the app's order, each under its own name for itself.
-     Someone stranded in a UI they cannot read is looking for the row that LOOKS like
-     their language, and "Russian" does not look like Русский. The English name rides
-     along as support, as it does in `src/i18n/languages.ts`. */
   /* The six places a dock may sit. Same list, same order, in src/utils/screenDocks.ts. */
   const DOCK_POSITION_CHOICES = [
     ['top-left', 'Top left'],
@@ -267,6 +351,10 @@
     ['bottom-right', 'Bottom right'],
   ];
 
+  /* The eight the app ships, in the app's order, each under its own name for itself.
+     Someone stranded in a UI they cannot read is looking for the row that LOOKS like
+     their language, and "Russian" does not look like Русский. The English name rides
+     along as support, as it does in `src/i18n/languages.ts`. */
   const LANGUAGES = [
     ['en', 'English', 'English'],
     ['es', 'Español', 'Spanish'],
