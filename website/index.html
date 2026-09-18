@@ -38,6 +38,8 @@
   <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 17 6-6-6-6M12 19h8"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/></symbol>
   <symbol id="i-maximize" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
   <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
   <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
@@ -106,6 +108,7 @@
     <div class="desk" aria-hidden="true"></div>
     <div class="scrim" id="scrim" aria-hidden="true"></div>
     <div class="wheel" id="wheel" aria-hidden="true">
+      <svg class="sectors" id="sectors" aria-hidden="true"></svg>
       <div class="hub" id="hub">
         <span class="hub-mark" aria-hidden="true"></span>
         <svg class="ico hub-back" aria-hidden="true"><use href="#i-back"/></svg>
@@ -137,7 +140,18 @@
     <li class="beat reveal">
       <div class="beat-art" aria-hidden="true">
         <svg viewBox="0 0 120 120" class="art">
-          <circle class="a-ring" cx="60" cy="60" r="32"/>
+          <defs>
+            <linearGradient id="aimBeam" gradientUnits="userSpaceOnUse" x1="60" y1="60" x2="60" y2="2">
+              <stop offset="0" stop-color="#fff" stop-opacity=".42"/>
+              <stop offset=".5" stop-color="#fff" stop-opacity=".3"/>
+              <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path class="a-wedge a-w1" d="M52.22 52.22 L18.99 18.99 A58 58 0 0 1 101.01 18.99 L67.78 52.22 A11 11 0 0 0 52.22 52.22 Z"/>
+          <path class="a-wedge a-w2" d="M52.22 52.22 L18.99 18.99 A58 58 0 0 1 101.01 18.99 L67.78 52.22 A11 11 0 0 0 52.22 52.22 Z" transform="rotate(90 60 60)"/>
+          <path class="a-wedge a-w3" d="M52.22 52.22 L18.99 18.99 A58 58 0 0 1 101.01 18.99 L67.78 52.22 A11 11 0 0 0 52.22 52.22 Z" transform="rotate(180 60 60)"/>
+          <path class="a-wedge a-w4" d="M52.22 52.22 L18.99 18.99 A58 58 0 0 1 101.01 18.99 L67.78 52.22 A11 11 0 0 0 52.22 52.22 Z" transform="rotate(270 60 60)"/>
+          <path class="a-seam" d="M52.22 52.22 L37.37 37.37 M67.78 52.22 L82.63 37.37 M67.78 67.78 L82.63 82.63 M52.22 67.78 L37.37 82.63"/>
           <rect class="a-tile a-t1" x="47" y="2"  width="26" height="26" rx="9"/>
           <rect class="a-tile a-t2" x="92" y="47" width="26" height="26" rx="9"/>
           <rect class="a-tile a-t3" x="47" y="92" width="26" height="26" rx="9"/>
@@ -147,7 +161,7 @@
         </svg>
       </div>
       <h3>Aim</h3>
-      <p>Any direction lights a slice.</p>
+      <p>Any direction lights its wedge.</p>
     </li>
     <li class="beat reveal">
       <div class="beat-art" aria-hidden="true">
@@ -201,28 +215,31 @@
     <p>Speed, or precision.</p>
   </div>
   <div class="aim-pair reveal">
-    <figure class="aim-card">
+    <figure class="aim-card" data-aim="direction">
       <svg viewBox="0 0 160 124" class="art" aria-hidden="true">
-        <path class="m-cone" d="M80 62 L152 24 A81 81 0 0 1 152 100 Z"/>
+        <clipPath id="aimClip"><rect width="160" height="124"/></clipPath>
+        <g clip-path="url(#aimClip)"><path class="m-cone" d="M80 62 L152 24 A81 81 0 0 1 152 100 Z"/></g>
         <line class="m-vec" x1="80" y1="62" x2="136" y2="62"/>
-        <rect class="m-tile is-on" x="118" y="49" width="26" height="26" rx="9"/>
-        <rect class="m-tile" x="67" y="12" width="26" height="26" rx="9"/>
-        <rect class="m-tile" x="67" y="86" width="26" height="26" rx="9"/>
-        <rect class="m-tile" x="16" y="49" width="26" height="26" rx="9"/>
+        <rect class="m-tile" data-slot="0" x="67" y="12" width="26" height="26" rx="9"/>
+        <rect class="m-tile is-on" data-slot="1" x="118" y="49" width="26" height="26" rx="9"/>
+        <rect class="m-tile" data-slot="2" x="67" y="86" width="26" height="26" rx="9"/>
+        <rect class="m-tile" data-slot="3" x="16" y="49" width="26" height="26" rx="9"/>
+        <circle class="m-dead" cx="80" cy="62" r="16"/>
         <circle class="m-ring" cx="80" cy="62" r="7"/>
       </svg>
-      <figcaption>Direction</figcaption>
+      <figcaption>Direction<span class="aim-hint"> · aim, then click</span></figcaption>
     </figure>
-    <figure class="aim-card">
+    <figure class="aim-card" data-aim="pointer">
       <svg viewBox="0 0 160 124" class="art" aria-hidden="true">
-        <rect class="m-tile is-on" x="118" y="49" width="26" height="26" rx="9"/>
-        <rect class="m-tile" x="67" y="12" width="26" height="26" rx="9"/>
-        <rect class="m-tile" x="67" y="86" width="26" height="26" rx="9"/>
-        <rect class="m-tile" x="16" y="49" width="26" height="26" rx="9"/>
+        <rect class="m-tile" data-slot="0" x="67" y="12" width="26" height="26" rx="9"/>
+        <rect class="m-tile is-on" data-slot="1" x="118" y="49" width="26" height="26" rx="9"/>
+        <rect class="m-tile" data-slot="2" x="67" y="86" width="26" height="26" rx="9"/>
+        <rect class="m-tile" data-slot="3" x="16" y="49" width="26" height="26" rx="9"/>
+        <circle class="m-dead" cx="80" cy="62" r="16"/>
         <circle class="m-ring" cx="80" cy="62" r="7"/>
         <g class="m-cursor"><use href="#i-cursor" x="0" y="0" width="20" height="20"/></g>
       </svg>
-      <figcaption>Pointer</figcaption>
+      <figcaption>Pointer<span class="aim-hint"> · hover an icon, then click</span></figcaption>
     </figure>
   </div>
 </section>
@@ -235,14 +252,18 @@
     <div class="win-bar">
       <span class="win-bar-lead"><svg class="ico"><use href="#i-sliders"/></svg></span>
       <span class="win-bar-title">Rovyl</span>
-      <span class="win-bar-ctl"><i></i><i></i><i class="is-close"></i></span>
+      <span class="win-bar-ctl" aria-hidden="true">
+        <i><svg class="ico is-min"><use href="#i-minus"/></svg></i>
+        <i><svg class="ico is-max"><use href="#i-maximize"/></svg></i>
+        <i class="is-close"><svg class="ico"><use href="#i-x"/></svg></i>
+      </span>
     </div>
     <div class="win-body">
       <aside class="win-side">
         <h4>Settings</h4>
         <div class="win-search"><svg class="ico"><use href="#i-search"/></svg>Search</div>
         <ul class="win-nav" id="winNav"></ul>
-        <div class="win-foot"><span class="win-foot-brand"><span class="brand-mark is-sm"></span>Rovyl</span><em id="setVersion">1.12.0</em></div>
+        <div class="win-foot"><span class="win-foot-brand"><span class="brand-mark is-sm"></span>Rovyl</span><em id="setVersion">1.13.0</em></div>
       </aside>
       <div class="win-main" id="winMain"></div>
     </div>
@@ -284,6 +305,8 @@
 </footer>
 
 <script src="workspaces.js"></script>
+<script src="scrim.js"></script>
+<script src="sectors.js"></script>
 <script src="settings.js"></script>
 <script src="site.js"></script>
 </body>

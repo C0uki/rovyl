@@ -112,6 +112,7 @@
   const stage = document.getElementById('stage');
   const wheel = document.getElementById('wheel');
   const scrim = document.getElementById('scrim');
+  const sectors = document.getElementById('sectors');
   const hub = document.getElementById('hub');
   const pill = document.getElementById('pill');
   const pillName = document.getElementById('pillName');
@@ -127,9 +128,10 @@
      running, so the demo uses the shipped number rather than a made-up one. */
   const HANDS_FREE_MS = 400;
   const PICKER = LOOK.switchMode === 'picker' && SPACES.length > 1;
+  /* The app's `radialSelectionMode: 'area'`: the wedges are drawn. */
+  const AREA = LOOK.selectionMode === 'area' && !!sectors && !!window.RovylSectors;
 
   /* The app's own appearance settings, honoured rather than guessed at. */
-  stage.style.setProperty('--scrim-o', String(LOOK.backdropOpacity ?? 0.6));
   stage.style.setProperty('--hover', LOOK.hoverColor || '#ffffff');
   stage.style.setProperty('--echo', `${ECHO_MS}ms`);
   stage.style.setProperty('--dwell', `${DWELL_MS}ms`);
@@ -296,6 +298,10 @@
 
   let radius = 150;
   let tile = 64;
+  let wedges = [];
+
+  /* The activation zone: closer than this and the gesture is a cancel. */
+  const deadZone = () => Math.max(tile * 0.62, 34);
 
   function measure() {
     const box = stage.getBoundingClientRect();
@@ -317,6 +323,36 @@
     const hubSize = Math.round(tile * 0.84);
 
     stage.style.setProperty('--origin-y', `${-Math.round(LIFT)}px`);
+    const cx = box.width / 2;
+    const cy = box.height / 2 - LIFT;
+    const falloff = window.RovylScrim
+      ? RovylScrim.radius(radius, tile, SPACING)
+      : Math.ceil(radius + tile * 0.75 + 18);
+    if (scrim && window.RovylScrim) {
+      scrim.style.background = RovylScrim.gradient(
+        { x: cx, y: cy },
+        LOOK.backdropOpacity ?? RovylScrim.DEFAULT_DIM,
+        falloff,
+      );
+    }
+    /* In the app the wedges reach the nearest edge of the monitor, which on a
+       real screen is two to three times the lit section - that distance is what
+       the fade disappears in. The stage is far smaller than a monitor, so its
+       nearest edge would squeeze the whole fade into a few pixels and read as a
+       hard rim. The wedge keeps the monitor's proportion instead and runs off
+       the frame, as it runs off the screen. */
+    if (AREA) {
+      wedges = RovylSectors.draw(sectors, {
+        count: slices.length,
+        inner: Math.max(deadZone(), hubSize / 2 + 8),
+        outer: Math.max(
+          Math.round(falloff / 0.42),
+          Math.floor(Math.min(cx, cy, box.width - cx, box.height - cy)),
+        ),
+        falloff,
+        color: LOOK.hoverColor || '#FFFFFF',
+      });
+    }
     stage.style.setProperty('--tile', `${Math.round(tile)}px`);
     stage.style.setProperty('--hub', `${hubSize}px`);
 
@@ -366,16 +402,15 @@
       s.setProperty('--tx', `${(Math.cos(rad) * radius).toFixed(2)}px`);
       s.setProperty('--ty', `${(Math.sin(rad) * radius).toFixed(2)}px`);
 
+      /* The app's `getSlicePresence`: a binary highlight. Only the aimed slice
+         steps up; every other one looks the same as the rest, neighbours
+         included, so nothing reads as partly selected. */
       if (active < 0) {
         s.setProperty('--ts', '1');
-        s.setProperty('--to', '1');
+        s.setProperty('--to', '0.96');
       } else {
-        const gap = Math.min(
-          Math.abs(i - active),
-          slices.length - Math.abs(i - active),
-        );
-        s.setProperty('--ts', gap === 0 ? '1.1' : gap === 1 ? '1' : '0.93');
-        s.setProperty('--to', gap === 0 ? '1' : gap === 1 ? '0.95' : '0.78');
+        s.setProperty('--ts', i === active ? '1.06' : '1');
+        s.setProperty('--to', i === active ? '1' : '0.9');
       }
       slice.root.classList.toggle('is-active', i === active);
     });
@@ -383,6 +418,10 @@
     hub.style.setProperty('--hub-s', open ? '1' : '0.2');
     hub.style.setProperty('--hub-o', open ? '1' : '0');
     scrim.classList.toggle('is-on', open);
+    if (AREA) {
+      sectors.classList.toggle('is-on', open && !firing);
+      wedges.forEach((wedge, i) => { wedge.style.opacity = open && i === active ? '1' : '0'; });
+    }
     pill.classList.toggle('is-on', open);
     pill.style.transform = open
       ? 'translate(-50%, var(--pill-y))'
@@ -419,6 +458,7 @@
       slice.root.classList.add(i === index ? 'is-fired' : 'is-faded');
     });
     scrim.classList.remove('is-on');
+    if (AREA) sectors.classList.remove('is-on');
   }
 
   /* ── The unattended loop ────────────────────────────────────────────────
@@ -529,7 +569,8 @@
      than read about: the pointer stops existing, the aim alone lights a
      target, and holding that aim opens it. Nothing is ever clicked. */
 
-  let handsFree = LOOK.handsFree === true;
+  /* Off until the visitor turns it on: the page opens on the plain gesture. */
+  let handsFree = false;
   let dwellTimer = 0;
   /* A level swap puts new slices under a still pointer. Without a settling
      window the first move after it would resolve an aim the user never made -
@@ -624,7 +665,7 @@
 
     /* The activation zone: closer than this and the gesture is a cancel, so
        nothing may be lit. */
-    if (distance < Math.max(tile * 0.62, 34)) {
+    if (distance < deadZone()) {
       setActive(-1);
       return;
     }
@@ -701,4 +742,112 @@
   /* Under reduced motion the loop still runs - the gesture is the content -
      but the CSS above strips the echo and the transitions down to nothing. */
   reduced.addEventListener('change', resume);
+})();
+
+/* ── Aiming modes, live ───────────────────────────────────────────────────
+   The two cards under "By direction, or by pointer" are the app's two
+   targeting rules (src/components/RadialMenu.tsx), run on a four-tile wheel.
+   Direction: the slice the vector points into is the target, from anywhere.
+   Pointer: the same slice is only a candidate - the pointer has to be on the
+   icon. Inside the dead zone nothing is aimed at in either. At rest the cards
+   stay the pictures they were. */
+(() => {
+  'use strict';
+
+  if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+
+  const CX = 80;
+  const CY = 62;
+  const DEAD = 16;        // the dead zone, matching `.m-dead`
+  const VEC = 56;         // the vector's resting length
+  const HIT = 26 * 0.85;  // the app's pointer hit radius: 0.85 of an icon
+  const CURSOR_TIP = 20 * (4 / 24); // where the arrow's tip sits in its 20px box
+  const SLOTS = 4;
+  /* Tile centres, in slot order: item 0 at twelve o'clock, then clockwise. */
+  const CENTRES = [[80, 25], [131, 62], [80, 99], [29, 62]];
+
+  /* `sectorIndexForDelta` from src/utils/radialSectors.ts. */
+  function sectorFor(dx, dy) {
+    const slice = 360 / SLOTS;
+    let angle = Math.atan2(dy, dx) * (180 / Math.PI) + 90;
+    if (angle < 0) angle += 360;
+    return Math.floor(((angle + slice / 2) % 360) / slice);
+  }
+
+  for (const card of document.querySelectorAll('.aim-card[data-aim]')) {
+    const svg = card.querySelector('svg');
+    const tiles = [...card.querySelectorAll('.m-tile')];
+    const cone = card.querySelector('.m-cone');
+    const vec = card.querySelector('.m-vec');
+    const cursor = card.querySelector('.m-cursor');
+    const byPointer = card.dataset.aim === 'pointer';
+    let active = -1;
+
+    const light = (index) => {
+      active = index;
+      tiles.forEach((tile, i) => tile.classList.toggle('is-on', i === index));
+    };
+
+    function track(event) {
+      const matrix = svg.getScreenCTM();
+      if (!matrix) return;
+      const p = new DOMPoint(event.clientX, event.clientY).matrixTransform(matrix.inverse());
+      const dx = p.x - CX;
+      const dy = p.y - CY;
+      const distance = Math.hypot(dx, dy);
+      card.classList.add('is-live');
+
+      if (cursor) {
+        cursor.style.transform = `translate(${p.x - CURSOR_TIP}px, ${p.y - CURSOR_TIP}px)`;
+      }
+
+      if (distance < DEAD) {
+        card.classList.add('is-idle');
+        light(-1);
+        return;
+      }
+      card.classList.remove('is-idle');
+
+      const index = sectorFor(dx, dy);
+      if (byPointer) {
+        const [tx, ty] = CENTRES[index];
+        light(Math.hypot(p.x - tx, p.y - ty) <= HIT ? index : -1);
+        return;
+      }
+
+      light(index);
+      if (cone) cone.style.transform = `rotate(${index * (360 / SLOTS) - 90}deg)`;
+      if (vec) {
+        const reach = Math.min(distance, VEC) / distance;
+        vec.setAttribute('x2', (CX + dx * reach).toFixed(1));
+        vec.setAttribute('y2', (CY + dy * reach).toFixed(1));
+      }
+    }
+
+    function rest() {
+      card.classList.remove('is-live', 'is-idle');
+      light(1);
+      if (cursor) cursor.style.transform = '';
+      if (cone) cone.style.transform = '';
+      if (vec) { vec.setAttribute('x2', '136'); vec.setAttribute('y2', '62'); }
+    }
+
+    /* A click is the release: the target launches, or - with nothing lit -
+       the gesture cancels and nothing happens, exactly as in the app. */
+    function release(event) {
+      track(event);
+      const tile = tiles[active];
+      if (!tile) return;
+      tile.classList.remove('is-fired');
+      void tile.getBoundingClientRect();
+      tile.classList.add('is-fired');
+    }
+
+    card.addEventListener('pointermove', track);
+    card.addEventListener('pointerdown', release);
+    card.addEventListener('pointerleave', rest);
+    for (const tile of tiles) {
+      tile.addEventListener('animationend', () => tile.classList.remove('is-fired'));
+    }
+  }
 })();

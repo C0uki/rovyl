@@ -1124,6 +1124,464 @@ namespace Rovyl.NativeHelper {
         }
     }
 
+    /// <summary>
+    /// The readings behind the system dock: output volume, the network, and the battery.
+    ///
+    /// WHY IT IS A LONG-LIVED PROCESS AND NOT A SPAWN PER READING
+    ///
+    /// The dock is drawn the instant the wheel opens, which is the one moment in Rovyl that has a
+    /// frame budget. Starting a process to answer "what is the volume" costs more than the whole
+    /// open gesture does, and the answer would arrive after the dock had already painted a blank.
+    /// So this stays up for as long as the dock is switched on, and main talks to it over stdin
+    /// exactly as it does to the mouse hook.
+    ///
+    /// WHY IT ONLY POLLS WHILE THE WHEEL IS UP
+    ///
+    /// Nothing here is event-driven -- volume has an IAudioEndpointVolumeCallback, the network has
+    /// NetworkChange, the battery has WM_POWERBROADCAST, and wiring three notification sources
+    /// would buy nothing, because nobody is looking at the readouts unless the wheel is open.
+    /// WATCH &lt;ms&gt; turns the poll on and WATCH 0 turns it off, so an idle session costs a
+    /// sleeping thread. A poll emits STATUS only when something actually moved.
+    ///
+    /// WHY EVERY READING CARRIES ITS OWN "UNKNOWN"
+    ///
+    /// -1, not 0. A desktop PC has no battery and a cable has no signal quality, and a readout that
+    /// cannot tell those from "empty" and "no bars" shows a flat battery and a dead connection to
+    /// someone whose machine is fine.
+    /// </summary>
+    public static class RovylSystemStatus {
+        private const uint SYNCHRONIZE = 0x00100000;
+        private const uint INFINITE = 0xFFFFFFFF;
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr OpenProcess(uint access, bool inheritHandle, int processId);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint WaitForSingleObject(IntPtr handle, uint milliseconds);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool CloseHandle(IntPtr handle);
+
+        /* ---- Core Audio ------------------------------------------------------
+           Declared in vtable order, every slot present. A missing method is not a
+           compile error, it is a silent one-slot shift that calls the neighbour --
+           here, SetMute where GetMasterVolumeLevelScalar was meant. */
+
+        [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+        private class MMDeviceEnumerator { }
+
+        [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"),
+         InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IMMDeviceEnumerator {
+            [PreserveSig] int EnumAudioEndpoints(int dataFlow, int stateMask, out IntPtr devices);
+            [PreserveSig] int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice endpoint);
+            [PreserveSig] int GetDevice([MarshalAs(UnmanagedType.LPWStr)] string id, out IMMDevice device);
+            [PreserveSig] int RegisterEndpointNotificationCallback(IntPtr client);
+            [PreserveSig] int UnregisterEndpointNotificationCallback(IntPtr client);
+        }
+
+        [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"),
+         InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IMMDevice {
+            [PreserveSig] int Activate(ref Guid iid, int clsCtx, IntPtr activationParams,
+                [MarshalAs(UnmanagedType.IUnknown)] out object iface);
+            [PreserveSig] int OpenPropertyStore(int access, out IntPtr store);
+            [PreserveSig] int GetId([MarshalAs(UnmanagedType.LPWStr)] out string id);
+            [PreserveSig] int GetState(out int state);
+        }
+
+        [ComImport, Guid("5CDF2C82-841E-4546-9722-0CF74078229A"),
+         InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        private interface IAudioEndpointVolume {
+            [PreserveSig] int RegisterControlChangeNotify(IntPtr notify);
+            [PreserveSig] int UnregisterControlChangeNotify(IntPtr notify);
+            [PreserveSig] int GetChannelCount(out int count);
+            [PreserveSig] int SetMasterVolumeLevel(float level, ref Guid eventContext);
+            [PreserveSig] int SetMasterVolumeLevelScalar(float level, ref Guid eventContext);
+            [PreserveSig] int GetMasterVolumeLevel(out float level);
+            [PreserveSig] int GetMasterVolumeLevelScalar(out float level);
+            [PreserveSig] int SetChannelVolumeLevel(int channel, float level, ref Guid eventContext);
+            [PreserveSig] int SetChannelVolumeLevelScalar(int channel, float level, ref Guid eventContext);
+            [PreserveSig] int GetChannelVolumeLevel(int channel, out float level);
+            [PreserveSig] int GetChannelVolumeLevelScalar(int channel, out float level);
+            [PreserveSig] int SetMute([MarshalAs(UnmanagedType.Bool)] bool mute, ref Guid eventContext);
+            [PreserveSig] int GetMute([MarshalAs(UnmanagedType.Bool)] out bool mute);
+            [PreserveSig] int GetVolumeStepInfo(out int step, out int stepCount);
+            [PreserveSig] int VolumeStepUp(ref Guid eventContext);
+            [PreserveSig] int VolumeStepDown(ref Guid eventContext);
+            [PreserveSig] int QueryHardwareSupport(out int mask);
+            [PreserveSig] int GetVolumeRange(out float min, out float max, out float increment);
+        }
+
+        private static Guid IID_IAudioEndpointVolume = new Guid("5CDF2C82-841E-4546-9722-0CF74078229A");
+        private static Guid EventContext = Guid.Empty;
+
+        /// <summary>
+        /// The endpoint is re-fetched whenever it is gone, not cached forever: the default output
+        /// device changes under us when headphones are plugged in, and the stale interface then
+        /// reports the volume of something nobody is listening to.
+        /// </summary>
+        private static IAudioEndpointVolume endpoint;
+        private static int endpointFailures;
+
+        private static IAudioEndpointVolume Endpoint() {
+            if (endpoint != null) return endpoint;
+            /* Three consecutive failures is a machine with no audio endpoint at all (a server
+               core, a VM with no device). Retrying every poll would be a COM activation per
+               second, forever, for a readout that will never appear. */
+            if (endpointFailures >= 3) return null;
+            try {
+                var enumerator = (IMMDeviceEnumerator)(new MMDeviceEnumerator());
+                IMMDevice device;
+                /* eRender (0), eMultimedia (1) -- the device the volume key moves. */
+                if (enumerator.GetDefaultAudioEndpoint(0, 1, out device) != 0 || device == null) {
+                    endpointFailures++;
+                    return null;
+                }
+                object raw;
+                /* CLSCTX_INPROC_SERVER */
+                if (device.Activate(ref IID_IAudioEndpointVolume, 1, IntPtr.Zero, out raw) != 0 || raw == null) {
+                    endpointFailures++;
+                    return null;
+                }
+                endpoint = (IAudioEndpointVolume)raw;
+                endpointFailures = 0;
+                return endpoint;
+            } catch {
+                endpointFailures++;
+                return null;
+            }
+        }
+
+        private static void DropEndpoint() {
+            endpoint = null;
+        }
+
+        /* ---- Wi-Fi ----------------------------------------------------------
+           NetworkInterface says a wireless adapter is up; only wlanapi says how
+           well. The layout below is read no further than wlanSignalQuality, so
+           the security attributes that follow it are deliberately not declared. */
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WLAN_INTERFACE_INFO_LIST_HEADER {
+            public uint dwNumberOfItems;
+            public uint dwIndex;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WLAN_INTERFACE_INFO {
+            public Guid InterfaceGuid;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string strInterfaceDescription;
+            public uint isState;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct DOT11_SSID {
+            public uint uSSIDLength;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public byte[] ucSSID;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WLAN_ASSOCIATION_ATTRIBUTES {
+            public DOT11_SSID dot11Ssid;
+            public uint dot11BssType;
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 6)] public byte[] dot11Bssid;
+            public uint dot11PhyType;
+            public uint uDot11PhyIndex;
+            public uint wlanSignalQuality;
+            public uint ulRxRate;
+            public uint ulTxRate;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WLAN_CONNECTION_ATTRIBUTES {
+            public uint isState;
+            public uint wlanConnectionMode;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)] public string strProfileName;
+            public WLAN_ASSOCIATION_ATTRIBUTES wlanAssociationAttributes;
+        }
+
+        [DllImport("wlanapi.dll")]
+        private static extern uint WlanOpenHandle(uint clientVersion, IntPtr reserved,
+            out uint negotiatedVersion, out IntPtr handle);
+        [DllImport("wlanapi.dll")]
+        private static extern uint WlanCloseHandle(IntPtr handle, IntPtr reserved);
+        [DllImport("wlanapi.dll")]
+        private static extern uint WlanEnumInterfaces(IntPtr handle, IntPtr reserved, out IntPtr list);
+        [DllImport("wlanapi.dll")]
+        private static extern uint WlanQueryInterface(IntPtr handle, ref Guid interfaceGuid, uint opCode,
+            IntPtr reserved, out uint dataSize, out IntPtr data, IntPtr valueType);
+        [DllImport("wlanapi.dll")]
+        private static extern void WlanFreeMemory(IntPtr memory);
+
+        private const uint WLAN_INTERFACE_STATE_CONNECTED = 1;
+        private const uint WLAN_INTF_OPCODE_CURRENT_CONNECTION = 7;
+
+        /// <summary>Signal quality 0-100 of the first connected Wi-Fi adapter, or -1 for none.</summary>
+        private static int WifiSignal() {
+            IntPtr client = IntPtr.Zero;
+            IntPtr list = IntPtr.Zero;
+            try {
+                uint negotiated;
+                /* Client version 2 is Vista and later; every Windows this app runs on. */
+                if (WlanOpenHandle(2, IntPtr.Zero, out negotiated, out client) != 0) return -1;
+                if (WlanEnumInterfaces(client, IntPtr.Zero, out list) != 0 || list == IntPtr.Zero) return -1;
+
+                var header = (WLAN_INTERFACE_INFO_LIST_HEADER)Marshal.PtrToStructure(
+                    list, typeof(WLAN_INTERFACE_INFO_LIST_HEADER));
+                int stride = Marshal.SizeOf(typeof(WLAN_INTERFACE_INFO));
+                int first = 8; /* the two ULONGs of the header */
+
+                for (int i = 0; i < header.dwNumberOfItems; i++) {
+                    var info = (WLAN_INTERFACE_INFO)Marshal.PtrToStructure(
+                        new IntPtr(list.ToInt64() + first + (long)i * stride), typeof(WLAN_INTERFACE_INFO));
+                    if (info.isState != WLAN_INTERFACE_STATE_CONNECTED) continue;
+
+                    uint size;
+                    IntPtr data;
+                    Guid guid = info.InterfaceGuid;
+                    if (WlanQueryInterface(client, ref guid, WLAN_INTF_OPCODE_CURRENT_CONNECTION,
+                            IntPtr.Zero, out size, out data, IntPtr.Zero) != 0 || data == IntPtr.Zero) {
+                        continue;
+                    }
+                    try {
+                        var conn = (WLAN_CONNECTION_ATTRIBUTES)Marshal.PtrToStructure(
+                            data, typeof(WLAN_CONNECTION_ATTRIBUTES));
+                        long quality = conn.wlanAssociationAttributes.wlanSignalQuality;
+                        /* Out of range means the layout read something that is not a quality.
+                           Reporting "unknown" is the honest answer; reporting 0 would draw an
+                           empty set of bars over a connection that works. */
+                        if (quality < 0 || quality > 100) return -1;
+                        return (int)quality;
+                    } finally {
+                        WlanFreeMemory(data);
+                    }
+                }
+                return -1;
+            } catch {
+                return -1;
+            } finally {
+                if (list != IntPtr.Zero) { try { WlanFreeMemory(list); } catch { } }
+                if (client != IntPtr.Zero) { try { WlanCloseHandle(client, IntPtr.Zero); } catch { } }
+            }
+        }
+
+        /* ---- One reading ---------------------------------------------------- */
+
+        private struct Reading {
+            public int Volume;
+            public bool Muted;
+            public string Network;
+            public int Signal;
+            public int Battery;
+            public bool Charging;
+
+            public string Line() {
+                return "STATUS " + Volume + " " + (Muted ? 1 : 0) + " " + Network + " "
+                    + Signal + " " + Battery + " " + (Charging ? 1 : 0);
+            }
+        }
+
+        private static string NetworkKind() {
+            try {
+                bool wifi = false, ethernet = false, other = false;
+                foreach (var nic in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()) {
+                    if (nic.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+                    var type = nic.NetworkInterfaceType;
+                    if (type == System.Net.NetworkInformation.NetworkInterfaceType.Loopback) continue;
+                    if (type == System.Net.NetworkInformation.NetworkInterfaceType.Tunnel) continue;
+                    if (type == System.Net.NetworkInformation.NetworkInterfaceType.Wireless80211) wifi = true;
+                    else if (type == System.Net.NetworkInformation.NetworkInterfaceType.Ethernet
+                          || type == System.Net.NetworkInformation.NetworkInterfaceType.GigabitEthernet
+                          || type == System.Net.NetworkInformation.NetworkInterfaceType.FastEthernetT
+                          || type == System.Net.NetworkInformation.NetworkInterfaceType.FastEthernetFx) ethernet = true;
+                    else other = true;
+                }
+                /* Ethernet wins: a laptop docked with Wi-Fi still enabled is on the cable. */
+                if (ethernet) return "ethernet";
+                if (wifi) return "wifi";
+                if (other) return "other";
+                return "none";
+            } catch {
+                return "none";
+            }
+        }
+
+        private static Reading Read() {
+            var reading = new Reading();
+
+            reading.Volume = -1;
+            reading.Muted = false;
+            var volume = Endpoint();
+            if (volume != null) {
+                try {
+                    float scalar;
+                    bool muted;
+                    if (volume.GetMasterVolumeLevelScalar(out scalar) == 0) {
+                        reading.Volume = (int)Math.Round(Math.Max(0f, Math.Min(1f, scalar)) * 100f);
+                    }
+                    if (volume.GetMute(out muted) == 0) reading.Muted = muted;
+                } catch {
+                    /* The default device went away mid-read; the next poll fetches a new one. */
+                    DropEndpoint();
+                }
+            }
+
+            reading.Network = NetworkKind();
+            reading.Signal = reading.Network == "wifi" ? WifiSignal() : -1;
+
+            reading.Battery = -1;
+            reading.Charging = false;
+            try {
+                var power = SystemInformation.PowerStatus;
+                bool none = (power.BatteryChargeStatus
+                    & BatteryChargeStatus.NoSystemBattery) == BatteryChargeStatus.NoSystemBattery;
+                bool unknown = (power.BatteryChargeStatus
+                    & BatteryChargeStatus.Unknown) == BatteryChargeStatus.Unknown;
+                if (!none && !unknown) {
+                    float life = power.BatteryLifePercent;
+                    if (life >= 0f && life <= 1f) reading.Battery = (int)Math.Round(life * 100f);
+                }
+                reading.Charging = power.PowerLineStatus == PowerLineStatus.Online;
+            } catch {
+                /* leave it unknown */
+            }
+
+            return reading;
+        }
+
+        /* ---- The loop -------------------------------------------------------- */
+
+        private static readonly ConcurrentQueue<string> Commands = new ConcurrentQueue<string>();
+        private static readonly AutoResetEvent Wake = new AutoResetEvent(false);
+
+        private static void Emit(string line) {
+            try {
+                Console.Out.WriteLine(line);
+                Console.Out.Flush();
+            } catch {
+                /* main is gone; the parent watch is about to end this process anyway */
+            }
+        }
+
+        private static void SetVolume(int percent) {
+            var volume = Endpoint();
+            if (volume == null) return;
+            try {
+                float scalar = Math.Max(0, Math.Min(100, percent)) / 100f;
+                volume.SetMasterVolumeLevelScalar(scalar, ref EventContext);
+                /* Setting a level on a muted endpoint leaves it muted and silent, which reads as
+                   the slider doing nothing. Dragging it is an instruction to be heard. */
+                if (percent > 0) volume.SetMute(false, ref EventContext);
+            } catch {
+                DropEndpoint();
+            }
+        }
+
+        private static void SetMuted(int mode) {
+            var volume = Endpoint();
+            if (volume == null) return;
+            try {
+                bool next;
+                if (mode == 2) {
+                    bool current;
+                    if (volume.GetMute(out current) != 0) return;
+                    next = !current;
+                } else {
+                    next = mode == 1;
+                }
+                volume.SetMute(next, ref EventContext);
+            } catch {
+                DropEndpoint();
+            }
+        }
+
+        public static void Run(int parentPid) {
+            var input = new Thread(() => {
+                string line;
+                while ((line = Console.ReadLine()) != null) {
+                    Commands.Enqueue(line);
+                    Wake.Set();
+                }
+                Commands.Enqueue("EXIT");
+                Wake.Set();
+            });
+            input.IsBackground = true;
+            input.Start();
+
+            if (parentPid > 0) {
+                var parentWatch = new Thread(() => {
+                    IntPtr handle = OpenProcess(SYNCHRONIZE, false, parentPid);
+                    if (handle == IntPtr.Zero) return;
+                    WaitForSingleObject(handle, INFINITE);
+                    CloseHandle(handle);
+                    Commands.Enqueue("EXIT");
+                    Wake.Set();
+                });
+                parentWatch.IsBackground = true;
+                parentWatch.Start();
+            }
+
+            Emit("READY");
+
+            int interval = 0;
+            string last = null;
+            bool running = true;
+
+            while (running) {
+                /* No poll asked for: sleep until a command arrives. An idle session costs nothing. */
+                Wake.WaitOne(interval > 0 ? interval : Timeout.Infinite);
+
+                bool forced = false;
+                string command;
+                while (Commands.TryDequeue(out command)) {
+                    if (command == null) continue;
+                    string text = command.Trim();
+                    if (text.Length == 0) continue;
+                    string[] parts = text.Split(' ');
+                    string verb = parts[0].ToUpperInvariant();
+
+                    if (verb == "EXIT") { running = false; break; }
+                    if (verb == "POLL") { forced = true; continue; }
+                    if (verb == "WATCH" && parts.Length > 1) {
+                        int ms;
+                        if (!int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out ms)) continue;
+                        /* Under 250ms is a poll nobody can read; over 10s is not a live readout. */
+                        interval = ms <= 0 ? 0 : Math.Max(250, Math.Min(10000, ms));
+                        /* Starting to watch is itself a request for a reading: the dock is about to
+                           be drawn and must not paint a blank for one whole interval. */
+                        if (interval > 0) forced = true;
+                        continue;
+                    }
+                    if (verb == "VOL" && parts.Length > 1) {
+                        int percent;
+                        if (int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out percent)) {
+                            SetVolume(percent);
+                            forced = true;
+                        }
+                        continue;
+                    }
+                    if (verb == "MUTE" && parts.Length > 1) {
+                        int mode;
+                        if (int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out mode)) {
+                            SetMuted(mode);
+                            forced = true;
+                        }
+                        continue;
+                    }
+                }
+                if (!running) break;
+                if (interval <= 0 && !forced) continue;
+
+                string line = Read().Line();
+                /* Only what changed goes over the pipe. A parked wheel with a steady battery and a
+                   steady volume produces one line per open, not one per second. */
+                if (forced || line != last) {
+                    last = line;
+                    Emit(line);
+                }
+            }
+        }
+    }
+
     class Program {
         [STAThread]
         static void Main(string[] args) {
@@ -1148,7 +1606,15 @@ namespace Rovyl.NativeHelper {
                 return;
             }
 
+            if (args.Length > 0 && args[0] == "system-status") {
+                int parentPid = 0;
+                if (args.Length > 1) int.TryParse(args[1], out parentPid);
+                RovylSystemStatus.Run(parentPid);
+                return;
+            }
+
             Console.WriteLine("Usage: rovyl-helper.exe [mouse-blocker <parentPid> | foreground-focus"
+                + " | system-status <parentPid>"
                 + " | update-splash --pid <n> --name <installer.exe> --version <v> --logo <path>]");
         }
     }

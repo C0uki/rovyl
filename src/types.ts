@@ -76,11 +76,38 @@ export interface GameModeConfig {
 }
 
 /**
- * What the taskbar does while the wheel is open. Shape and defaults live in
- * `src/utils/taskbarOverlay.ts`, because the main process needs the same answers and a second copy
- * of that reasoning is how the two drift.
+ * The two corner docks drawn beside the open wheel. Shape, defaults and every rule about them live
+ * in `src/utils/screenDocks.ts`, because the wheel, the settings panel and the window sizing all
+ * need the same answers and a second copy of them is how the three drift.
  */
-export type { TaskbarOverlayFlags } from "./utils/taskbarOverlay";
+export type {
+  DockPosition,
+  ShortcutDockConfig,
+  StatusDockConfig,
+} from "./utils/screenDocks";
+
+/**
+ * One reading of the things the status dock displays, as the main process reports it.
+ *
+ * Every number carries its own "not available": `-1` for a machine with no battery and for a
+ * network with no signal quality to give (a cable has none), `null` for a whole reading that has
+ * not arrived yet. A readout that cannot distinguish "0%" from "unknown" shows a flat battery to
+ * somebody sitting at a desktop PC.
+ */
+export interface SystemStatus {
+  /** 0-100, or -1 when there is no audio endpoint to ask. */
+  volume: number;
+  muted: boolean;
+  network: "none" | "ethernet" | "wifi" | "other";
+  /** Wi-Fi signal quality, 0-100. -1 on anything that is not Wi-Fi. */
+  signal: number;
+  /** 0-100, or -1 on a machine with no battery. */
+  battery: number;
+  charging: boolean;
+}
+
+/** The Windows panels a status readout may open. Named, never spelled as a URI by the renderer. */
+export type SystemPanel = "volume" | "network" | "battery" | "clock";
 
 export interface Workspace {
   id: string;
@@ -172,16 +199,20 @@ export interface UIConfig {
    */
   backdropDimScale?: number;
   /**
-   * What happens to the Windows taskbar while the wheel is up, on the wheel's monitor only.
+   * The readouts — clock, battery, network, volume — in one corner of the open wheel.
    *
    * ABSENT means off, which is what every config written before this feature says. Read it through
-   * `normalizeTaskbarOverlay`, never field by field: a blob from disk may be missing any of them.
-   *
-   * Only the elements are reliably undoable. `transparent` repaints the bar's background, and
-   * Windows offers no way to read back what explorer had there, so it is opt-in and says so in the
-   * settings row. See docs/ARCHITECTURE.md, "The taskbar while the wheel is open".
+   * `normalizeStatusDock`, never field by field: a blob from disk may be missing any of them, and
+   * a missing `iconSize` read as 0 is a dock that is enabled, placed and invisible.
    */
-  taskbarOverlay?: import("./utils/taskbarOverlay").TaskbarOverlayFlags;
+  statusDock?: import("./utils/screenDocks").StatusDockConfig;
+  /**
+   * The user's own icons, in a corner of the open wheel. Same rule: `normalizeShortcutDock`.
+   *
+   * Its `items` are ordinary `AppItem`s so that one launch path serves both these and the wheel —
+   * a second way to run a shortcut is a second place for launch failures to be reported wrongly.
+   */
+  shortcutDock?: import("./utils/screenDocks").ShortcutDockConfig;
   menuBackgroundStyle: "circle" | "fullscreen";
   appSpacing: number; // New: spacing between apps in radial menu
   activationThreshold: number;
@@ -509,25 +540,23 @@ export interface ElectronAPI {
   parkRadialCursor?: () => void;
   setGameMode: (config: GameModeConfig) => void;
   /**
-   * Main enacts this one, so it has to hold the flags BEFORE a wheel opens -- the global shortcut
-   * is registered before React has committed anything, so main also seeds them from disk at boot.
+   * Whether the status dock needs live readings. Main owns the helper that produces them, so it is
+   * told what the switches say and decides for itself whether a process is worth starting.
    */
-  setTaskbarOverlay?: (config: import("./utils/taskbarOverlay").TaskbarOverlayFlags) => void;
+  setStatusDockActive?: (active: boolean) => void;
+  /** The last reading main has. Resolves immediately from its cache; never starts a helper to answer. */
+  getSystemStatus?: () => Promise<SystemStatus>;
+  /** Pushed whenever a reading changes while the wheel is up. */
+  onSystemStatus?: (callback: (status: SystemStatus) => void) => () => void;
+  /** 0-100. Applied to the default output device, the same one the reading comes from. */
+  setSystemVolume?: (percent: number) => void;
+  setSystemMuted?: (muted: boolean) => void;
   /**
-   * Which taskbar this machine has: 'classic' | 'mixed' | 'xaml' | 'none'.
-   *
-   * Answering costs a helper process, so it is asked for only when the settings section that needs
-   * it is on screen, and the answer is cached for the session.
+   * Opens one of Windows' own panels. An ENUM and not a URI: the renderer naming the exact
+   * `ms-settings:` string would be a renderer that can ask the shell to open anything.
    */
-  getTaskbarCapability?: () => Promise<string>;
+  openSystemPanel?: (panel: SystemPanel) => void;
   prewarmApps?: (commands: string[]) => void;
-  getVolume: () => Promise<number>;
-  setVolume: (value: number) => void;
-  getBrightness: () => Promise<number>;
-  setBrightness: (value: number) => void;
-  getHardwareCapabilities: () => Promise<{ hasWifi: boolean; hasBluetooth: boolean }>;
-  toggleWifi: (enabled: boolean) => Promise<boolean>;
-  toggleBluetooth: (enabled: boolean) => Promise<boolean>;
   getFileIcon: (path: string) => Promise<string | null>;
   /** Favicon fetched in the main (data URL) — the renderer usually fails with <img https://…>. */
   getWebsiteFaviconDataUrl?: (pageUrl: string) => Promise<string | null>;

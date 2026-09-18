@@ -248,10 +248,108 @@
       'ワークスペースの切り替え',
     'Workspaces':
       'ワークスペース',
+    'A strip of your own icons beside the open wheel. Click one to launch it.':
+      '開いたホイールの脇に並ぶ、自分のアイコンの帯。クリックで起動します。',
+    'Aim by direction: the slice you point toward highlights from anywhere on screen.':
+      '向きで狙います。画面のどこからでも、指した扇形が光ります。',
+    'Back':
+      '戻る',
+    'Battery':
+      'バッテリー',
+    'Bottom center':
+      '下中央',
+    'Bottom left':
+      '左下',
+    'Bottom right':
+      '右下',
+    'Cancel':
+      '取り消し',
+    'Charge level and whether it is plugged in. Hidden on a machine with no battery.':
+      '充電残量と、電源につながっているかどうか。バッテリーのない機械では出ません。',
+    'Clock':
+      '時計',
+    'Current':
+      '現在',
+    'Erase everything':
+      'すべて消去',
+    'Every workspace, shortcut, icon and preference on this PC is deleted and Rovyl restarts. This cannot be undone - use Export settings first if you want a copy.':
+      'この PC のワークスペース・ショートカット・アイコン・設定がすべて削除され、Rovyl が再起動します。取り消せません。控えが要るなら、先に設定の書き出しを。',
+    'Forward':
+      '進む',
+    'How big each icon is drawn.':
+      'アイコン1つの大きさ。',
+    'How big the glyphs and the text are drawn.':
+      '記号と文字の大きさ。',
+    'Instant':
+      '即時',
+    'Launch without clicking is on, so the wheel always aims by direction - each item owns an equal slice of the screen.':
+      'クリックなしの起動が有効なので、ホイールは常に向きで狙います。項目それぞれが画面を等分した扇形を持ちます。',
+    'Names under the icons':
+      'アイコンの下に名前',
+    'Network':
+      'ネットワーク',
+    'New workspace':
+      '新しいワークスペース',
+    'Off by default: a strip of eight names is a menu.':
+      '既定はオフ。名前が8つ並べばそれはメニューです。',
+    'Only the icon under the pointer highlights. Release away from every icon to cancel.':
+      'ポインターの下のアイコンだけが光ります。どのアイコンからも離れた場所で離せば取り消しです。',
+    'Output level, with a slider you can drag. Click the glyph to mute.':
+      '出力レベル。スライダーで動かせます。記号をクリックでミュート。',
+    'Paused':
+      '一時停止中',
+    'Reset to default':
+      '既定に戻す',
+    'Shortcut dock':
+      'ショートカットドック',
+    'Spacing':
+      '間隔',
+    'System dock':
+      'システムドック',
+    'The corner or edge the readouts are placed against.':
+      '表示を寄せる角または辺。',
+    'The corner or edge the strip is placed against.':
+      '帯を寄せる角または辺。',
+    'The gap between neighbouring icons.':
+      '隣り合うアイコンのあいだの空き。',
+    'The gap between neighbouring readouts.':
+      '隣り合う表示のあいだの空き。',
+    'The time, and the date under it.':
+      '時刻と、その下に日付。',
+    'The wheel always opens on the main screen, wherever the pointer happens to be.':
+      'ポインターがどこにあっても、ホイールは常にメイン画面に開きます。',
+    'The wheel opens on the screen the pointer is already on, so what you launch lands where you are working.':
+      'ポインターのある画面にホイールが開くので、起動したものは作業している場所に出ます。',
+    'Time, battery, network and volume, read live, beside the open wheel.':
+      '時刻・バッテリー・ネットワーク・音量を、開いたホイールの脇に実時間で。',
+    'Top center':
+      '上中央',
+    'Top left':
+      '左上',
+    'Top right':
+      '右上',
+    'Volume':
+      '音量',
+    'Where it sits':
+      '置く場所',
+    'Wi-Fi signal or a wired connection. Click it for the Windows network panel.':
+      'Wi-Fi の電波、または有線接続。クリックすると Windows のネットワークパネルが開きます。',
+    'Your Main workspace, at the size these settings give it.':
+      'メインのワークスペースを、この設定どおりの大きさで。',
   };
 
   const isJapanese = document.documentElement.lang === 'ja';
   const tr = (value) => (isJapanese && value && JA[value]) || value;
+
+  /* The six places a dock may sit. Same list, same order, in src/utils/screenDocks.ts. */
+  const DOCK_POSITION_CHOICES = [
+    ['top-left', 'Top left'],
+    ['top-center', 'Top center'],
+    ['top-right', 'Top right'],
+    ['bottom-left', 'Bottom left'],
+    ['bottom-center', 'Bottom center'],
+    ['bottom-right', 'Bottom right'],
+  ];
 
   /* The eight the app ships, in the app's order, each under its own name for itself.
      Someone stranded in a UI they cannot read is looking for the row that LOOKS like
@@ -293,13 +391,20 @@
     radialHoverColor: LOOK.hoverColor || '#FFFFFF',
     radialSelectionMode: 'angle',
     alwaysShowAppLabels: false,
-    backdropOpacity: LOOK.backdropOpacity ?? 0.6,
-    taskbarOverlay: false,
-    taskbarStart: false,
-    taskbarApps: false,
-    taskbarTray: false,
-    taskbarClock: false,
-    taskbarTransparent: false,
+    backdropOpacity: LOOK.backdropOpacity ?? 0.9,
+    statusDock: false,
+    statusDockPosition: 'bottom-right',
+    statusDockIconSize: 18,
+    statusDockGap: 10,
+    statusDockClock: true,
+    statusDockBattery: true,
+    statusDockNetwork: true,
+    statusDockVolume: true,
+    shortcutDock: false,
+    shortcutDockPosition: 'bottom-left',
+    shortcutDockIconSize: 40,
+    shortcutDockGap: 12,
+    shortcutDockLabels: false,
 
     performanceMode: false,
     strictOfflineMode: false,
@@ -335,8 +440,15 @@
     radialHoverColor: '#FFFFFF',
     radialSelectionMode: 'angle',
     alwaysShowAppLabels: false,
-    backdropOpacity: 0.6,
-    taskbarOverlay: false,
+    backdropOpacity: 0.9,
+    statusDock: false,
+    statusDockPosition: 'bottom-right',
+    statusDockIconSize: 18,
+    statusDockGap: 10,
+    shortcutDock: false,
+    shortcutDockPosition: 'bottom-left',
+    shortcutDockIconSize: 40,
+    shortcutDockGap: 12,
     strictOfflineMode: false,
   };
 
@@ -427,23 +539,37 @@
         desc: 'How much the rest of the screen recedes. At 100% it goes: the desktop is covered edge to edge.',
         kind: 'range', key: 'backdropOpacity', min: 0, max: 1, step: 0.01,
         format: (v) => `${Math.round(v * 100)}%` },
-      { group: 'Presence', title: 'Quiet the taskbar',
-        desc: 'Hide parts of the Windows taskbar while the wheel is open, on the screen the wheel is on. Everything comes back when it closes.',
-        kind: 'bool', key: 'taskbarOverlay' },
-      ...(S.taskbarOverlay ? [
-        { group: 'Presence', title: 'Keep the Start button', desc: 'Start and Task View stay on the bar.',
-          kind: 'bool', key: 'taskbarStart' },
-        { group: 'Presence', title: 'Keep pinned and open apps', desc: 'The app buttons, and anything else docked beside them.',
-          kind: 'bool', key: 'taskbarApps' },
-        { group: 'Presence', title: 'Keep the notification area', desc: 'Tray icons and the chevron that holds the rest.',
-          kind: 'bool', key: 'taskbarTray' },
-        { group: 'Presence', title: 'Keep the clock', desc: 'The time and date at the end of the bar.',
-          kind: 'bool', key: 'taskbarClock' },
-        /* The caveat belongs in the row, not in a release note: this is the only part
-           of Rovyl that changes something about Windows it cannot put back exactly. */
-        { group: 'Presence', title: 'Make the bar transparent',
-          desc: 'The bar itself goes, and whatever you kept above still shows. Windows does not report how the bar was painted before, so its background is restored to the standard look - which can differ slightly from a custom theme.',
-          kind: 'bool', key: 'taskbarTransparent' },
+      { group: 'Shortcut dock', title: 'Shortcut dock',
+        desc: 'A strip of your own icons beside the open wheel. Click one to launch it.',
+        kind: 'bool', key: 'shortcutDock' },
+      ...(S.shortcutDock ? [
+        { group: 'Shortcut dock', title: 'Where it sits', desc: 'The corner or edge the strip is placed against.',
+          kind: 'select', key: 'shortcutDockPosition', choices: DOCK_POSITION_CHOICES },
+        { group: 'Shortcut dock', title: 'Icon size', desc: 'How big each icon is drawn.',
+          kind: 'range', key: 'shortcutDockIconSize', min: 24, max: 88, step: 1, format: (v) => `${v} px` },
+        { group: 'Shortcut dock', title: 'Spacing', desc: 'The gap between neighbouring icons.',
+          kind: 'range', key: 'shortcutDockGap', min: 0, max: 48, step: 1, format: (v) => `${v} px` },
+        { group: 'Shortcut dock', title: 'Names under the icons', desc: 'Off by default: a strip of eight names is a menu.',
+          kind: 'bool', key: 'shortcutDockLabels' },
+      ] : []),
+      { group: 'System dock', title: 'System dock',
+        desc: 'Time, battery, network and volume, read live, beside the open wheel.',
+        kind: 'bool', key: 'statusDock' },
+      ...(S.statusDock ? [
+        { group: 'System dock', title: 'Where it sits', desc: 'The corner or edge the readouts are placed against.',
+          kind: 'select', key: 'statusDockPosition', choices: DOCK_POSITION_CHOICES },
+        { group: 'System dock', title: 'Icon size', desc: 'How big the glyphs and the text are drawn.',
+          kind: 'range', key: 'statusDockIconSize', min: 12, max: 32, step: 1, format: (v) => `${v} px` },
+        { group: 'System dock', title: 'Spacing', desc: 'The gap between neighbouring readouts.',
+          kind: 'range', key: 'statusDockGap', min: 0, max: 48, step: 1, format: (v) => `${v} px` },
+        { group: 'System dock', title: 'Clock', desc: 'The time, and the date under it.',
+          kind: 'bool', key: 'statusDockClock' },
+        { group: 'System dock', title: 'Battery', desc: 'Charge level and whether it is plugged in. Hidden on a machine with no battery.',
+          kind: 'bool', key: 'statusDockBattery' },
+        { group: 'System dock', title: 'Network', desc: 'Wi-Fi signal or a wired connection. Click it for the Windows network panel.',
+          kind: 'bool', key: 'statusDockNetwork' },
+        { group: 'System dock', title: 'Volume', desc: 'Output level, with a slider you can drag. Click the glyph to mute.',
+          kind: 'bool', key: 'statusDockVolume' },
       ] : []),
     ];
 
@@ -880,7 +1006,6 @@
   function paintPreview() {
     if (!previewLayer) return;
     const { scrim, layer } = previewLayer;
-    scrim.style.background = `rgba(0, 0, 0, ${S.backdropOpacity})`;
 
     const items = previewItems();
     const count = items.length || 6;
@@ -895,6 +1020,15 @@
 
     layer.replaceChildren();
     layer.style.transform = `scale(${scale})`;
+    /* Drawn on the stage, not inside the scaled layer, with the radius scaled to
+       match - a gradient inside `scale()` would shrink its own falloff. */
+    scrim.style.background = window.RovylScrim
+      ? RovylScrim.gradient(
+        { x: '50%', y: '50%' },
+        S.backdropOpacity,
+        Math.max(radius * scale, 1),
+      )
+      : `rgba(0, 0, 0, ${S.backdropOpacity})`;
 
     const hub = el('div', 'wheel-hub');
     hub.style.width = `${Math.round(S.iconSize * 0.84)}px`;

@@ -1077,6 +1077,17 @@
 .zs-workspace-item-copy > b { color: var(--zn-text); font-size: 11.5px; font-weight: 500; }
 .zs-workspace-item-copy > small { margin-top: 3px; color: var(--zn-text-3); font-size: 9.5px; }
 .zs-workspace-item-copy em { color: var(--zn-text-2); font-style: normal; }
+/* The dock list renames in place: there is nothing else to edit on a dock icon, so an expanding
+   editor card for one field would be a whole panel to open and close for a word. It sits exactly
+   where the workspace list's `<b>` does, and only looks like a field once it is reached for. */
+.zs-dock-name-input {
+  display: block; width: 100%; padding: 2px 4px; margin: -2px -4px;
+  color: var(--zn-text); font: inherit; font-size: 11.5px; font-weight: 500;
+  border: 1px solid transparent; border-radius: var(--zn-r-chip); background: transparent;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.zs-dock-name-input:hover { border-color: var(--zn-line); }
+.zs-dock-name-input:focus { outline: none; border-color: var(--zn-solid); background: var(--zn-raised); }
 .zs-item-actions { display: flex; gap: 2px; opacity: .7; transition: opacity .15s var(--zn-ease); }
 .zs-workspace-item:hover .zs-item-actions, .zs-workspace-item.is-editing .zs-item-actions { opacity: 1; }
 .zs-item-actions button { width: 25px; height: 25px; display: grid; place-items: center; padding: 0; color: var(--zn-text-3); border: 0; border-radius: var(--zn-r-chip); background: transparent; cursor: pointer; }
@@ -1606,6 +1617,245 @@
   background: rgba(20, 20, 24, 0.88);
   color: rgba(255, 255, 255, 0.92);
 }
+
+
+/* ── The corner docks ────────────────────────────────────────────────────────
+   Two strips beside the open wheel: the user's own icons, and the machine's
+   readouts. Everything here is sized from inline styles the settings panel
+   drives (icon size, gap); the rules below own only the plate, the states and
+   the type, so that one slider moves a whole strip coherently.
+
+   No `backdrop-filter` anywhere. The overlay is a transparent HWND on Windows,
+   so there is nothing underneath for it to sample — the plates carry their own
+   background, exactly as the HUD pill and the corner gear do. */
+
+.zn-dock-shell {
+  position: fixed;
+  z-index: 12;
+  display: flex;
+  /* The shell spans the edge it is pinned to; `justify-*` from the region class
+     puts the stack at the left, the middle or the right of it. */
+  padding: 20px;
+  pointer-events: none;
+  color: #fff;
+}
+
+.zn-dock-stack {
+  display: flex;
+  flex-direction: column;
+  max-width: min(92vw, 1100px);
+}
+
+.zn-dock-plate {
+  display: flex;
+  align-items: center;
+  /* A strip longer than the screen wraps rather than running off it: a dock of
+     twenty shortcuts on a laptop is a thing people will build. */
+  flex-wrap: wrap;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(8, 8, 10, 0.72);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+  line-height: 1;
+}
+
+/* One readout, or one launchable icon. Buttons, because they are pressed. */
+.zn-dock-icon-button,
+.zn-dock-tile {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  padding: 4px 6px;
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  font: inherit;
+  transition:
+    background-color 130ms ease-out,
+    border-color 130ms ease-out,
+    color 130ms ease-out;
+}
+
+.zn-dock-icon-button:hover,
+.zn-dock-tile:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.zn-dock-icon-button:active,
+.zn-dock-tile:active {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.zn-dock-readout {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.zn-dock-idle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  color: rgba(255, 255, 255, 0.45);
+  font-weight: 500;
+}
+
+/* ── Clock ─────────────────────────────────────────────────────────────────── */
+
+.zn-dock-clock {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.zn-dock-clock-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.zn-dock-clock-date {
+  color: rgba(255, 255, 255, 0.45);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* ── Battery ───────────────────────────────────────────────────────────────── */
+
+/* Drawn rather than glyphed: what a person reads off a battery is the fill, and
+   a Lucide outline is a fixed level. The nub on the right is the ::after. */
+.zn-dock-battery {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  border: 1.5px solid rgba(255, 255, 255, 0.45);
+  border-radius: 4px;
+  padding: 1.5px;
+  overflow: visible;
+}
+
+.zn-dock-battery::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  width: 2px;
+  height: 40%;
+  transform: translateY(-50%);
+  border-radius: 0 2px 2px 0;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.zn-dock-battery-fill {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.9);
+  transition: width 400ms ease-out;
+}
+
+/* Outlined, not filled: the bolt sits over the dark empty part of the meter at 8% and over the
+   bright fill at 95%, and one flat colour vanishes into one of them. `paint-order: stroke` puts
+   the dark halo behind the white body rather than through the middle of it. */
+.zn-dock-battery-bolt {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  fill: #ffffff;
+  stroke: rgba(0, 0, 0, 0.7);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  paint-order: stroke fill;
+}
+
+/* ── Volume ────────────────────────────────────────────────────────────────── */
+
+.zn-dock-volume {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* A 5px rail with a 23px hit area. The padding is the difference, and it is
+   `content-box` on purpose — the preflight makes everything border-box, which
+   would have eaten the padding and left a rail nobody can hit with a mouse. */
+.zn-dock-volume-track {
+  position: relative;
+  flex: none;
+  box-sizing: content-box;
+  height: 5px;
+  padding: 9px 0;
+  background: transparent;
+  cursor: pointer;
+  touch-action: none;
+}
+
+/* The rail itself, so the hit area above and below it stays invisible. */
+.zn-dock-volume-track::before {
+  content: "";
+  position: absolute;
+  inset: 9px 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.zn-dock-volume-track.is-idle {
+  cursor: default;
+  opacity: 0.4;
+}
+
+/* Positioned, or the absolutely-positioned rail above would paint over it. */
+.zn-dock-volume-fill {
+  position: relative;
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+/* ── Shortcut tiles ────────────────────────────────────────────────────────── */
+
+.zn-dock-tile {
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 0;
+}
+
+.zn-dock-tile-art {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.zn-dock-tile-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.zn-dock-tile-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* `performanceMode` and the wheel's closing state already retune `.zn-radial-pill`,
+   which the stack carries — so the docks leave on the same curve as everything else. */
 
 /* `performanceMode`: same drawing, no overshoot and shorter. */
 .zn-radial--fast .zn-radial-slice,

@@ -41,10 +41,15 @@ const distDir = join(root, "dist");
 /**
  * Ceiling for all statically loaded JS, in bytes.
  *
- * It sits at ~267 kB; it was 288 kB when one document served both windows, and 806 kB before §3.
+ * It sits at ~284 kB; it was 288 kB when one document served both windows, and 806 kB before §3.
  * The split is worth less here than it looks, and that is the honest reading: the wheel's critical
  * path had already been cut to what it genuinely needs, so what separating the entries bought was
  * not bytes but the guarantee that nobody can add them back by accident.
+ *
+ * The corner docks are what took it from ~267 kB: they are drawn beside the wheel, so `ScreenDocks`
+ * and the seven glyphs its readouts use are genuinely eager. The list that EDITS a dock is not —
+ * `DockShortcuts.tsx` is reachable only from the settings entry, which is why it is a module of its
+ * own rather than part of the component that draws them.
  */
 const CRITICAL_JS_BUDGET = 300 * 1024;
 

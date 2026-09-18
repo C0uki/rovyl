@@ -8,6 +8,13 @@ import { useWheelStrings } from './i18n/wheel/useWheelStrings';
 import { normalizeLanguage } from './i18n/languages';
 import { preloadIconsByName } from './iconMap';
 import { radialScrimNeedsFullBleed } from './utils/radialScrim';
+import { useSystemStatus } from './components/ScreenDocks';
+import {
+  docksNeedFullBleed,
+  normalizeShortcutDock,
+  normalizeStatusDock,
+  statusDockNeedsHelper,
+} from './utils/screenDocks';
 import type { DiscoveryPhase } from './discovery';
 
 /**
@@ -35,6 +42,8 @@ function* iterateItemIconNames(items: AppItem[]): Generator<string | undefined> 
 
 function* iterateConfigIconNames(config: UIConfig, apps: AppItem[]): Generator<string | undefined> {
   yield config.centerButton?.iconName;
+  /** The shortcut dock draws glyphs too, and it is on screen at the same moment the wheel is. */
+  yield* iterateItemIconNames(config.shortcutDock?.items ?? []);
   yield* iterateItemIconNames(apps);
   for (const workspace of config.workspaces ?? []) {
     yield workspace.pickerIconName;
@@ -173,6 +182,30 @@ export default function RadialApp() {
   }, [config, apps]);
 
   /* ------------------------------------------------------------------ */
+  /* The docks                                                           */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Normalized once, here, and handed to everything that needs them.
+   *
+   * Two things read these and they must not disagree: the window geometry below, which decides
+   * whether the overlay takes the whole monitor, and the wheel, which draws the docks in it. A
+   * dock that believes it is placed in the screen's corner while the window is a box around the
+   * wheel is a strip floating on a diagonal, and that divergence would be invisible in the code.
+   */
+  const statusDock = useMemo(() => normalizeStatusDock(config.statusDock), [config.statusDock]);
+  const shortcutDock = useMemo(() => normalizeShortcutDock(config.shortcutDock), [config.shortcutDock]);
+
+  /**
+   * The live readings, held HERE rather than in the wheel.
+   *
+   * `RadialMenu` is remounted on every open — `radialMountKey` — so a reading kept inside it would
+   * reset to "unknown" at the start of every gesture and the dock would paint blanks until the
+   * next poll answered. This component survives every open the session has.
+   */
+  const systemStatus = useSystemStatus(statusDockNeedsHelper(statusDock));
+
+  /* ------------------------------------------------------------------ */
   /* Geometry this window asks main for                                  */
   /* ------------------------------------------------------------------ */
 
@@ -206,7 +239,9 @@ export default function RadialApp() {
          * on a diagonal — not in the corner of anything the user can see. Over the monitor, the
          * corner is the screen's.
          */
-        config.showSettingsCorner === true,
+        config.showSettingsCorner === true ||
+        /** And so does either dock, which is placed against a screen edge or is placed nowhere. */
+        docksNeedFullBleed(statusDock, shortcutDock),
       /** Which monitor the wheel is born on — main needs it BEFORE an open. */
       monitor: config.radialMonitor === 'cursor' ? 'cursor' : 'primary',
       /** And where on it. Same reason: the box is placed before this renderer hears about the open. */
@@ -226,6 +261,8 @@ export default function RadialApp() {
     config.showSettingsCorner,
     config.radialMonitor,
     config.radialPlacement,
+    statusDock,
+    shortcutDock,
   ]);
 
   /**
@@ -601,6 +638,7 @@ export default function RadialApp() {
         onWorkspaceSwitch={handleWorkspaceSwitch}
         onDirectionHintSeen={handleDirectionHintSeen}
         onOpenSettings={handleOpenSettings}
+        systemStatus={systemStatus}
         currentWorkspace={radialCurrentWorkspace}
         animationReady={
           radialPendingPaintToken === null ||

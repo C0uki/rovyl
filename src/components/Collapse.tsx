@@ -122,10 +122,10 @@ function followIntoView(nodes: HTMLElement[], durationMs: number) {
 /**
  * Reveals that land in the same frame are one movement.
  *
- * Quieting the taskbar opens five rows at once, and five boxes each scrolling themselves into view
- * is five scrollers fighting over one container — the last one registered wins and the other four
- * are never accounted for. Collecting a frame's worth first lets the follow loop aim at the union
- * of the boxes, which is what the eye is reading anyway.
+ * Turning the system dock on opens seven rows at once, and seven boxes each scrolling themselves
+ * into view is seven scrollers fighting over one container — the last one registered wins and the
+ * rest are never accounted for. Collecting a frame's worth first lets the follow loop aim at the
+ * union of the boxes, which is what the eye is reading anyway.
  */
 const pendingReveals = new Set<HTMLElement>();
 let revealFrame = 0;
@@ -144,7 +144,7 @@ function scheduleReveal(node: HTMLElement) {
 /**
  * A block that opens and closes in place instead of appearing.
  *
- * Every conditional row in Settings — the dwell tunings, the taskbar's four keepers, the
+ * Every conditional row in Settings — the dwell tunings, a dock's placement and readouts, the
  * fullscreen scope — exists because another switch is on. Mounting them outright made the list
  * jump under the pointer that had just moved that switch, which reads as a flash and says nothing
  * about the new rows belonging to the thing the user just turned on.

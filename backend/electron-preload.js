@@ -151,10 +151,27 @@ contextBridge.exposeInMainWorld("electron", {
   /** Pulls the pointer back to the centre mid-gesture — does not end it, does not touch the return point. */
   parkRadialCursor: () => ipcRenderer.send("park-radial-cursor"),
   setGameMode: (config) => ipcRenderer.send("set-game-mode", config),
-  /** Main owns the taskbar helper; the renderer only ever states what the switches say. */
-  setTaskbarOverlay: (config) => ipcRenderer.send("set-taskbar-overlay", config),
-  /** 'classic' | 'mixed' | 'xaml' | 'none' — what this machine's taskbar lets anyone touch. */
-  getTaskbarCapability: () => ipcRenderer.invoke("get-taskbar-capability"),
+
+  /* ---- The system dock's readings ---- */
+
+  /**
+   * Whether the dock asks for anything a helper has to answer.
+   *
+   * Main owns the process; the renderer only ever states what the switches say. A clock-only dock
+   * is drawn from `Date` and reports false, so it costs no process at all.
+   */
+  setStatusDockActive: (active) => ipcRenderer.send("set-status-dock-active", !!active),
+  /** The last reading main has. Never starts a helper to answer — "unknown" is a valid reply. */
+  getSystemStatus: () => ipcRenderer.invoke("get-system-status"),
+  onSystemStatus: (callback) => {
+    const listener = (_event, status) => callback(status);
+    ipcRenderer.on("system-status", listener);
+    return () => ipcRenderer.removeListener("system-status", listener);
+  },
+  setSystemVolume: (percent) => ipcRenderer.send("set-system-volume", percent),
+  setSystemMuted: (muted) => ipcRenderer.send("set-system-muted", !!muted),
+  /** One of four names — never a URI, so the renderer cannot ask the shell to open anything. */
+  openSystemPanel: (panel) => ipcRenderer.send("open-system-panel", panel),
   prewarmApps: (commands) => ipcRenderer.send("prewarm-apps", commands),
   setLoginItemSettings: (settings) =>
     ipcRenderer.send("set-login-item-settings", settings),

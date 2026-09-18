@@ -44,7 +44,18 @@ import type { LucideIcon } from 'lucide-react';
 import { SETTINGS_CORNERS } from '../types';
 import type { AppItem, SettingsCorner, UIConfig, UpdateChannel, UpdateState, Workspace } from '../types';
 import { DEFAULT_UI_CONFIG } from '../defaults';
-import { normalizeTaskbarOverlay } from '../utils/taskbarOverlay';
+import {
+  DOCK_GAP_MAX,
+  DOCK_GAP_MIN,
+  DOCK_POSITIONS,
+  SHORTCUT_DOCK_ICON_MAX,
+  SHORTCUT_DOCK_ICON_MIN,
+  STATUS_DOCK_ICON_MAX,
+  STATUS_DOCK_ICON_MIN,
+  normalizeShortcutDock,
+  normalizeStatusDock,
+} from '../utils/screenDocks';
+import type { DockPosition } from '../utils/screenDocks';
 import { getIcon } from '../iconMap';
 import { resolveWebsiteIconFields } from '../siteFavicon';
 import { hostLabelFromUrl, looksFetchable, normalizeSiteUrl, resolveWebsiteTitle } from '../siteTitle';
@@ -57,6 +68,7 @@ import { NativeAppIcon, useInstalledApps, clearInstalledAppsMemory, type Install
 import { radialCrowding } from '../utils/workspaceRadial';
 import { startMenuAppIdToLaunchCommand } from '../utils/windowsLaunchCommand';
 import { WheelPreview } from './WheelPreview';
+import { DockShortcutsManager } from './DockShortcuts';
 import {
   BACK_KEY_OFF,
   DEFAULT_BACK_KEY,
@@ -65,6 +77,7 @@ import {
 } from '../constants/radialBackKey';
 import { nextTypeAheadBuffer, selectMenuPlacement, typeAheadIndex } from './selectMenu';
 import { LANGUAGES, normalizeLanguage, translations, useTranslation } from '../i18n/useTranslation';
+import type { TranslationKey } from '../i18n/translations';
 import { PanelLanguageProvider, usePanelLanguage } from '../i18n/panelLanguage';
 
 interface PrecisionSettingsProps {
@@ -131,6 +144,7 @@ type Editor =
   | { kind: 'shortcut' }
   | { kind: 'backKey' }
   | { kind: 'blocked' }
+  | { kind: 'dockShortcuts' }
   | { kind: 'workspace'; index: number }
   | null;
 
@@ -206,6 +220,15 @@ interface SettingItem {
  * nobody had reason to open this one again. What the arithmetic actually needs is the sequence, so
  * that is all it holds now.
  */
+const DOCK_POSITION_KEYS: Record<DockPosition, TranslationKey> = {
+  'top-left': 'dockPosTopLeft',
+  'top-center': 'dockPosTopCenter',
+  'top-right': 'dockPosTopRight',
+  'bottom-left': 'dockPosBottomLeft',
+  'bottom-center': 'dockPosBottomCenter',
+  'bottom-right': 'dockPosBottomRight',
+};
+
 const SECTION_ORDER: readonly SectionId[] = ['spaces', 'trigger', 'advanced', 'appearance', 'general'];
 
 export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
@@ -539,35 +562,18 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
     window.electron?.setGameMode?.(next);
   };
 
-  const taskbar = normalizeTaskbarOverlay(config.taskbarOverlay);
-  const updateTaskbar = (patch: Partial<typeof taskbar>) => {
-    const next = { ...taskbar, ...patch };
-    update('taskbarOverlay', next);
-    /** Main is what enacts this, and it must not wait for the next save to hear about it. */
-    window.electron?.setTaskbarOverlay?.(next);
-  };
-
   /**
-   * Which taskbar this machine has, as reported by the helper: 'classic' | 'mixed' | 'xaml'.
+   * The two docks, normalized on read.
    *
-   * Null while nobody has asked yet. On a Windows 11 bar rebuilt in XAML (22H2 and later) the
-   * Start button, the clock, the tray and the task buttons are not windows at all, so there is
-   * nothing an outside process can hide -- and the four switches below are withdrawn rather than
-   * left there doing nothing. Asked for only when this section is on screen: answering it costs a
-   * helper process, and the feature is off for most people.
+   * Never field by field: a config written before one of these switches existed is missing it, and
+   * a missing `iconSize` read as 0 is a dock that is enabled, placed, and invisible.
    */
-  const [taskbarKind, setTaskbarKind] = useState<string | null>(null);
-  useEffect(() => {
-    if (sectionId !== 'appearance' || taskbarKind !== null) return;
-    let cancelled = false;
-    window.electron?.getTaskbarCapability?.().then((kind) => {
-      /** Never gate the WRITE on `cancelled` -- only the setState, which is all it can speak for. */
-      if (!cancelled && typeof kind === 'string') setTaskbarKind(kind);
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, [sectionId, taskbarKind]);
-  /** Unknown reads as capable: on Win10, which is the common case, withdrawing them would be wrong. */
-  const taskbarElementsReachable = taskbarKind !== 'xaml';
+  const statusDock = normalizeStatusDock(config.statusDock);
+  const updateStatusDock = (patch: Partial<typeof statusDock>) =>
+    update('statusDock', { ...statusDock, ...patch });
+  const shortcutDock = normalizeShortcutDock(config.shortcutDock);
+  const updateShortcutDock = (patch: Partial<typeof shortcutDock>) =>
+    update('shortcutDock', { ...shortcutDock, ...patch });
 
   /**
    * A patch, or a function of the workspace as it is when the update actually runs.
@@ -1211,55 +1217,123 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
           config.backdropOpacity ?? DEFAULT_UI_CONFIG.backdropOpacity, 0, 1,
           (value) => update('backdropOpacity', value), (value) => `${Math.round(value * 100)}%`,
           0.01, 'backdropOpacity'),
-        {
-          key: 'taskbar', configKey: 'taskbarOverlay', group: t('presence'), title: t('quietTaskbar'),
-          description: taskbarElementsReachable
-            ? t('quietTaskbarDesc')
-            : t('quietTaskbarDescUnavailable'),
-          kind: 'bool', enabled: taskbar.enabled,
-          onToggle: () => updateTaskbar({ enabled: !taskbar.enabled }),
-        },
         /**
-         * Withdrawn rather than disabled, and withdrawn entirely on a Windows 11 XAML bar — the
-         * same rule the dwell tunings follow: a switch that stays on screen controlling nothing is
-         * worse than one that is not offered.
+         * The docks, in the order they are met: the one you fill yourself first, the one that
+         * reads the machine second. Everything under each is withdrawn rather than disabled while
+         * its dock is off — the same rule the dwell tunings follow, because a placement control
+         * for a strip that is not on screen is a control that does nothing.
          */
-        ...(taskbar.enabled && taskbarElementsReachable ? ([
+        {
+          /**
+           * No `configKey`, deliberately — and it is the one row here that must not have one.
+           * The revert chip writes `DEFAULT_UI_CONFIG[key]`, and this key holds the user's own
+           * icons: a small button whose label says "default" would delete every one of them. The
+           * workspace rows leave it off for exactly the same reason.
+           */
+          key: 'shortcutDock', group: t('dockGroupShortcut'),
+          title: t('dockGroupShortcut'),
+          description: shortcutDock.items.length
+            ? t('dockShortcutDesc')
+            : t('dockShortcutDescEmpty'),
+          keywords: 'dock strip icons taskbar corner launcher pinned chrome steam discord',
+          kind: 'bool', enabled: shortcutDock.enabled,
+          onToggle: () => updateShortcutDock({ enabled: !shortcutDock.enabled }),
+        },
+        ...(shortcutDock.enabled ? ([
           {
-            key: 'taskbar-start', group: t('presence'), title: t('keepStart'),
-            description: t('keepStartDesc'),
-            kind: 'bool' as const, enabled: taskbar.showStart,
-            onToggle: () => updateTaskbar({ showStart: !taskbar.showStart }),
+            key: 'shortcutDock-items', group: t('dockGroupShortcut'), title: t('dockIconsRow'),
+            description: shortcutDock.items.length === 1
+              ? t('dockIconsOne')
+              : tf('dockIconsMany', { count: shortcutDock.items.length }),
+            kind: 'open' as const,
+            value: shortcutDock.items.length ? t('dockIconsEdit') : t('dockIconsAdd'),
+            onOpen: () => setEditor({ kind: 'dockShortcuts' as const }),
           },
           {
-            key: 'taskbar-apps', group: t('presence'), title: t('keepApps'),
-            description: t('keepAppsDesc'),
-            kind: 'bool' as const, enabled: taskbar.showApps,
-            onToggle: () => updateTaskbar({ showApps: !taskbar.showApps }),
+            key: 'shortcutDock-position', group: t('dockGroupShortcut'), title: t('dockWhereItSits'),
+            description: t('dockShortcutPosDesc'),
+            /** A select, not a segmented control: six region names is far wider than the column. */
+            kind: 'select' as const,
+            current: shortcutDock.position,
+            choices: DOCK_POSITIONS.map((position) => ({
+              value: position,
+              label: t(DOCK_POSITION_KEYS[position]),
+            })),
+            onChange: (value: number | string) =>
+              updateShortcutDock({ position: value as typeof shortcutDock.position }),
           },
+          range('shortcutDock-size', t('dockGroupShortcut'), t('iconSizeRow'),
+            t('dockShortcutSizeDesc'),
+            shortcutDock.iconSize, SHORTCUT_DOCK_ICON_MIN, SHORTCUT_DOCK_ICON_MAX,
+            (value) => updateShortcutDock({ iconSize: Math.round(value) }),
+            (value) => `${Math.round(value)} px`),
+          range('shortcutDock-gap', t('dockGroupShortcut'), t('dockSpacingRow'),
+            t('dockShortcutGapDesc'),
+            shortcutDock.gap, DOCK_GAP_MIN, DOCK_GAP_MAX,
+            (value) => updateShortcutDock({ gap: Math.round(value) }),
+            (value) => `${Math.round(value)} px`),
           {
-            key: 'taskbar-tray', group: t('presence'), title: t('keepTray'),
-            description: t('keepTrayDesc'),
-            kind: 'bool' as const, enabled: taskbar.showTray,
-            onToggle: () => updateTaskbar({ showTray: !taskbar.showTray }),
-          },
-          {
-            key: 'taskbar-clock', group: t('presence'), title: t('keepClock'),
-            description: t('keepClockDesc'),
-            kind: 'bool' as const, enabled: taskbar.showClock,
-            onToggle: () => updateTaskbar({ showClock: !taskbar.showClock }),
+            key: 'shortcutDock-labels', group: t('dockGroupShortcut'), title: t('dockLabelsRow'),
+            description: t('dockLabelsDesc'),
+            kind: 'bool' as const, enabled: shortcutDock.showLabels,
+            onToggle: () => updateShortcutDock({ showLabels: !shortcutDock.showLabels }),
           },
         ]) : []),
-        ...(taskbar.enabled ? ([
+        {
+          key: 'statusDock', configKey: 'statusDock', group: t('dockGroupSystem'),
+          title: t('dockGroupSystem'),
+          description: t('dockSystemDesc'),
+          keywords: 'clock time battery network wifi volume sound tray indicators status corner',
+          kind: 'bool', enabled: statusDock.enabled,
+          onToggle: () => updateStatusDock({ enabled: !statusDock.enabled }),
+        },
+        ...(statusDock.enabled ? ([
           {
-            key: 'taskbar-transparent', group: t('presence'), title: t('barTransparent'),
-            /**
-             * The caveat belongs in the row, not in a release note. This is the only part of Rovyl
-             * that changes something about Windows it cannot put back exactly.
-             */
-            description: t('barTransparentDesc'),
-            kind: 'bool' as const, enabled: taskbar.transparent,
-            onToggle: () => updateTaskbar({ transparent: !taskbar.transparent }),
+            key: 'statusDock-position', group: t('dockGroupSystem'), title: t('dockWhereItSits'),
+            description: t('dockSystemPosDesc'),
+            kind: 'select' as const,
+            current: statusDock.position,
+            choices: DOCK_POSITIONS.map((position) => ({
+              value: position,
+              label: t(DOCK_POSITION_KEYS[position]),
+            })),
+            onChange: (value: number | string) =>
+              updateStatusDock({ position: value as typeof statusDock.position }),
+          },
+          range('statusDock-size', t('dockGroupSystem'), t('iconSizeRow'),
+            t('dockSystemSizeDesc'),
+            statusDock.iconSize, STATUS_DOCK_ICON_MIN, STATUS_DOCK_ICON_MAX,
+            (value) => updateStatusDock({ iconSize: Math.round(value) }),
+            (value) => `${Math.round(value)} px`),
+          range('statusDock-gap', t('dockGroupSystem'), t('dockSpacingRow'),
+            t('dockSystemGapDesc'),
+            statusDock.gap, DOCK_GAP_MIN, DOCK_GAP_MAX,
+            (value) => updateStatusDock({ gap: Math.round(value) }),
+            (value) => `${Math.round(value)} px`),
+          {
+            key: 'statusDock-volume', group: t('dockGroupSystem'), title: t('dockVolumeRow'),
+            description: t('dockVolumeDesc'),
+            kind: 'bool' as const, enabled: statusDock.showVolume,
+            onToggle: () => updateStatusDock({ showVolume: !statusDock.showVolume }),
+          },
+          {
+            key: 'statusDock-network', group: t('dockGroupSystem'), title: t('dockNetworkRow'),
+            description: t('dockNetworkDesc'),
+            kind: 'bool' as const, enabled: statusDock.showNetwork,
+            onToggle: () => updateStatusDock({ showNetwork: !statusDock.showNetwork }),
+          },
+          {
+            key: 'statusDock-battery', group: t('dockGroupSystem'), title: t('battery'),
+            /** Said up front, because the row is otherwise a switch that visibly does nothing. */
+            description: t('dockBatteryDesc'),
+            kind: 'bool' as const, enabled: statusDock.showBattery,
+            onToggle: () => updateStatusDock({ showBattery: !statusDock.showBattery }),
+          },
+          {
+            key: 'statusDock-clock', group: t('dockGroupSystem'), title: t('clock'),
+            description: t('dockClockDesc'),
+            kind: 'bool' as const, enabled: statusDock.showClock,
+            onToggle: () => updateStatusDock({ showClock: !statusDock.showClock }),
           },
         ]) : []),
       ],
@@ -1384,7 +1458,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
         },
       ],
     };
-  }, [config, gameMode, taskbar, taskbarElementsReachable, theme, apps, update, setConfig, updateRow, canUpdate, onReset, deleteWorkspace, reorderWorkspaces, t, tf]);
+  }, [config, gameMode, statusDock, shortcutDock, theme, apps, update, setConfig, updateRow, canUpdate, onReset, deleteWorkspace, reorderWorkspaces, t, tf]);
 
   const trimmedQuery = query.trim().toLowerCase();
   const activeMeta = sectionsList.find((section) => section.id === sectionId) || sectionsList[0];
@@ -2433,6 +2507,9 @@ function SettingsEditor({
   focusAppId?: string | null;
   onFocusApplied?: () => void;
 }) {
+  /** Which dock icon the glyph picker is open for. Unused by every other editor kind. */
+  const [dockIconItemId, setDockIconItemId] = useState<string | null>(null);
+
   const { t } = useTranslation(usePanelLanguage());
   let title = 'Edit setting';
   let description = 'Changes are applied immediately.';
@@ -2472,6 +2549,50 @@ function SettingsEditor({
     );
   }
 
+  if (editor.kind === 'dockShortcuts') {
+    const dock = normalizeShortcutDock(config.shortcutDock);
+    title = 'Dock icons';
+    description = 'What sits in the strip beside the open wheel. Drag to reorder.';
+    /**
+     * The glyph picker is held HERE rather than inside the list, by item ID and not by position:
+     * the list reorders and deletes underneath it, and an index would quietly start editing the
+     * neighbour. Same reason `WorkspaceManager` holds `iconEditItemId`.
+     */
+    const iconEditItem = dockIconItemId
+      ? dock.items.find((item) => item.id === dockIconItemId) ?? null
+      : null;
+    const setDockIcon = (iconName: string) =>
+      update('shortcutDock', {
+        ...dock,
+        items: dock.items.map((item) =>
+          item.id === dockIconItemId ? { ...item, iconName } : item,
+        ),
+      });
+    content = (
+      <>
+        <DockShortcutsManager
+          dock={dock}
+          onChange={(items) => update('shortcutDock', { ...dock, items })}
+          showToast={showToast}
+          onPickIcon={setDockIconItemId}
+        />
+        <AnimatePresence>
+          {iconEditItem && (
+            <IconPickerModal
+              key="dock-icon"
+              titleId="dock-icon-modal-title"
+              title="Dock icon"
+              hint={`Shown in the dock for “${iconEditItem.label || 'this shortcut'}”. An application or a website keeps its own picture until you pick a glyph here.`}
+              selectedIcon={iconEditItem.iconName?.trim() || 'AppWindow'}
+              onSelect={setDockIcon}
+              onClose={() => setDockIconItemId(null)}
+            />
+          )}
+        </AnimatePresence>
+      </>
+    );
+  }
+
 
   if (editor.kind === 'workspace') {
     const index = editor.index;
@@ -2507,7 +2628,7 @@ function SettingsEditor({
   return (
     <div className="zs-editor-layer" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
       <motion.div
-        className={`zs-editor${editor.kind === 'workspace' || editor.kind === 'blocked' ? ' is-workspace' : ''}`}
+        className={`zs-editor${editor.kind === 'workspace' || editor.kind === 'blocked' || editor.kind === 'dockShortcuts' ? ' is-workspace' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
