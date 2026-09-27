@@ -350,9 +350,9 @@ export const DEFAULT_UI_CONFIG: UIConfig = {
   /** On, both of them, with a different note for each so the two moments never sound alike. */
   radialSounds: true,
   radialOpenSound: true,
-  radialOpenSoundId: 'thump',
+  radialOpenSoundId: 'sub-tick',
   radialHoverSound: true,
-  radialHoverSoundId: 'sub-tick',
+  radialHoverSoundId: 'thump',
   showBattery: false,
   showWeather: false,
   clockPosition: "top-center",

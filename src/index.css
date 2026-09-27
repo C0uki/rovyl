@@ -450,7 +450,7 @@
 .zs-row.is-picker .zs-dockpick { grid-column: 1 / -1; }
 .zs-row.is-picker .zs-row-widget { grid-column: 1 / -1; min-width: 0; }
 
-/* ── Practice wheel (Appearance → Sound) ────────────────────────────────────
+/* ── Practice wheel (Sound) ────────────────────────────────────────────────
    Dark in both themes, like the wheel it stands in for. The tiles and hub share one transform
    recipe — centre on the point, then `--zn-tf` — so the bloom below can interpolate it function by
    function instead of falling back to matrices. */

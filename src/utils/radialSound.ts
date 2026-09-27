@@ -238,8 +238,8 @@ export function resolveRadialSounds(config: Pick<UIConfig,
 >): RadialSounds {
   const on = config.radialSounds !== false;
   return {
-    open: on && config.radialOpenSound !== false ? normalizeRadialSound(config.radialOpenSoundId, 'thump') : null,
-    hover: on && config.radialHoverSound !== false ? normalizeRadialSound(config.radialHoverSoundId, 'sub-tick') : null,
+    open: on && config.radialOpenSound !== false ? normalizeRadialSound(config.radialOpenSoundId, 'sub-tick') : null,
+    hover: on && config.radialHoverSound !== false ? normalizeRadialSound(config.radialHoverSoundId, 'thump') : null,
   };
 }
 

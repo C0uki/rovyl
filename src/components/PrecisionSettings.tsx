@@ -48,6 +48,7 @@ import {
   TerminalSquare,
   Trash2,
   Undo2,
+  Volume2,
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -161,7 +162,7 @@ interface PrecisionSettingsProps {
   isPage?: boolean;
 }
 
-export type SectionId = 'general' | 'trigger' | 'appearance' | 'spaces' | 'advanced';
+export type SectionId = 'general' | 'trigger' | 'sound' | 'appearance' | 'spaces' | 'advanced';
 
 /**
  * The navigation that has to outlive the tree: open section and sidebar.
@@ -289,6 +290,7 @@ interface SettingItem {
 const SECTIONS: Array<{ id: SectionId; label: string; caption: string; icon: LucideIcon }> = [
   { id: 'spaces', label: 'Workspaces', caption: 'Contexts and their shortcuts.', icon: SquareStack },
   { id: 'trigger', label: 'Activation', caption: 'How and where the wheel appears.', icon: Mouse },
+  { id: 'sound', label: 'Sound', caption: 'Notes for opening and moving around the wheel.', icon: Volume2 },
   { id: 'advanced', label: 'Advanced', caption: 'Performance, protection, and data.', icon: Shield },
   { id: 'appearance', label: 'Appearance', caption: 'Shape, presence, and theme.', icon: Palette },
   { id: 'general', label: 'General', caption: 'Core Rovyl behavior.', icon: Settings },
@@ -310,6 +312,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
   const sectionsList = useMemo(() => [
     { id: 'spaces' as const, label: t('workspaces'), caption: t('workspacesDesc'), icon: SquareStack },
     { id: 'trigger' as const, label: t('trigger'), caption: t('triggerDesc'), icon: Mouse },
+    { id: 'sound' as const, label: t('sound'), caption: t('soundDesc'), icon: Volume2 },
     { id: 'advanced' as const, label: t('advanced'), caption: t('advancedDesc'), icon: Shield },
     { id: 'appearance' as const, label: t('appearance'), caption: t('appearanceDesc'), icon: Palette },
     { id: 'general' as const, label: t('general'), caption: t('generalDesc'), icon: Settings },
@@ -897,8 +900,8 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
     const soundsOn = config.radialSounds !== false;
     const openSoundOn = config.radialOpenSound !== false;
     const hoverSoundOn = config.radialHoverSound !== false;
-    const openSoundId = normalizeRadialSound(config.radialOpenSoundId, 'thump');
-    const hoverSoundId = normalizeRadialSound(config.radialHoverSoundId, 'sub-tick');
+    const openSoundId = normalizeRadialSound(config.radialOpenSoundId, 'sub-tick');
+    const hoverSoundId = normalizeRadialSound(config.radialHoverSoundId, 'thump');
     const soundChoices = RADIAL_SOUNDS.map((sound) => ({ value: sound.id, label: sound.name }));
     const soundName = (id: RadialSoundId) => RADIAL_SOUNDS.find((sound) => sound.id === id)?.name ?? id;
     const sounds = resolveRadialSounds(config);
@@ -1123,6 +1126,91 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
           config.activationThreshold, 20, 120, (value) => update('activationThreshold', value), (value) => `${Math.round(value)} px`,
           1, 'activationThreshold'),
       ],
+      /**
+       * One unnamed group, as in General: under a section already called Sound, a "Sound" heading
+       * labels nothing.
+       */
+      sound: [
+        /**
+         * The master switch, then one switch per moment with its own pick beneath it. Withdrawn
+         * rather than disabled while off, like the docks' rows: a sound picker for a sound that
+         * will never play is a control that does nothing.
+         */
+        {
+          key: 'sounds', configKey: 'radialSounds', group: '', title: 'Sound effects',
+          description: 'Short bass notes as the wheel opens and as you move between items.',
+          keywords: 'sound audio click tick bass thump feedback haptic noise mute effects',
+          kind: 'bool', enabled: soundsOn,
+          onToggle: () => update('radialSounds', !soundsOn),
+        },
+        ...(soundsOn ? ([
+          {
+            key: 'openSound', configKey: 'radialOpenSound', group: '', title: 'When the wheel opens',
+            description: 'One note as the wheel blooms open, and again when you aim back at the center.',
+            keywords: 'open launch launcher appear start sound',
+            kind: 'bool', enabled: openSoundOn,
+            /** Turning it on plays the note once, so the switch answers with the thing it switched on. */
+            onToggle: () => {
+              update('radialOpenSound', !openSoundOn);
+              if (!openSoundOn) previewRadialSound(openSoundId);
+            },
+          },
+          ...(openSoundOn ? ([{
+            key: 'openSoundId', configKey: 'radialOpenSoundId', group: '', title: 'Opening sound',
+            description: 'Press play beside a name to hear it before choosing.',
+            kind: 'select', current: openSoundId, choices: soundChoices,
+            onPreview: (value: string) => previewRadialSound(value as RadialSoundId),
+            onChange: (value: number | string) => {
+              update('radialOpenSoundId', value as RadialSoundId);
+              previewRadialSound(value as RadialSoundId);
+            },
+          }] as SettingItem[]) : []),
+          {
+            key: 'hoverSound', configKey: 'radialHoverSound', group: '', title: 'When moving between items',
+            description: 'A note each time the highlight moves to a different item.',
+            keywords: 'hover highlight select item move aim sound',
+            kind: 'bool', enabled: hoverSoundOn,
+            onToggle: () => {
+              update('radialHoverSound', !hoverSoundOn);
+              if (!hoverSoundOn) previewRadialSound(hoverSoundId);
+            },
+          },
+          ...(hoverSoundOn ? ([{
+            key: 'hoverSoundId', configKey: 'radialHoverSoundId', group: '', title: 'Hover sound',
+            description: 'Press play beside a name to hear it before choosing.',
+            kind: 'select', current: hoverSoundId, choices: soundChoices,
+            onPreview: (value: string) => previewRadialSound(value as RadialSoundId),
+            onChange: (value: number | string) => {
+              update('radialHoverSoundId', value as RadialSoundId);
+              previewRadialSound(value as RadialSoundId);
+            },
+          }] as SettingItem[]) : []),
+          /**
+           * Last, under the picks it plays: choosing a sound and then feeling it at the speed a
+           * sweep across the wheel produces are one task. Only while there is a note to hear.
+           */
+          ...(openSoundOn || hoverSoundOn ? ([{
+            key: 'soundTry', group: '', title: 'Try it',
+            description: tryDescription,
+            keywords: 'try test practice preview listen hear demo wheel',
+            kind: 'widget',
+            widget: (
+              <SoundTryWheel
+                apps={previewApps.length ? previewApps : PLACEHOLDERS}
+                sounds={sounds}
+                hoverColor={config.radialHoverColor ?? '#FFFFFF'}
+                targeting={
+                  config.radialSelectionMode === 'cursor' && config.radialInstantActivate !== 'dwell'
+                    ? 'cursor'
+                    : 'area'
+                }
+                labelledBy="soundTry-label"
+                describedBy="soundTry-desc"
+              />
+            ),
+          }] as SettingItem[]) : []),
+        ] as SettingItem[]) : []),
+      ],
       appearance: [
         {
           key: 'theme', configKey: 'appearanceTheme', group: 'Theme', title: 'Rovyl surfaces',
@@ -1211,85 +1299,6 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
           kind: 'bool', enabled: config.showWorkspacePill !== false,
           onToggle: () => update('showWorkspacePill', config.showWorkspacePill === false),
         },
-        /**
-         * The master switch, then one switch per moment with its own pick beneath it. Withdrawn
-         * rather than disabled while off, like the docks' rows: a sound picker for a sound that
-         * will never play is a control that does nothing.
-         */
-        {
-          key: 'sounds', configKey: 'radialSounds', group: 'Sound', title: 'Sound effects',
-          description: 'Short bass notes as the wheel opens and as you move between items.',
-          keywords: 'sound audio click tick bass thump feedback haptic noise mute effects',
-          kind: 'bool', enabled: soundsOn,
-          onToggle: () => update('radialSounds', !soundsOn),
-        },
-        ...(soundsOn ? ([
-          {
-            key: 'openSound', configKey: 'radialOpenSound', group: 'Sound', title: 'When the wheel opens',
-            description: 'One note as the wheel blooms open, and again when you aim back at the center.',
-            keywords: 'open launch launcher appear start sound',
-            kind: 'bool', enabled: openSoundOn,
-            /** Turning it on plays the note once, so the switch answers with the thing it switched on. */
-            onToggle: () => {
-              update('radialOpenSound', !openSoundOn);
-              if (!openSoundOn) previewRadialSound(openSoundId);
-            },
-          },
-          ...(openSoundOn ? ([{
-            key: 'openSoundId', configKey: 'radialOpenSoundId', group: 'Sound', title: 'Opening sound',
-            description: 'Press play beside a name to hear it before choosing.',
-            kind: 'select', current: openSoundId, choices: soundChoices,
-            onPreview: (value: string) => previewRadialSound(value as RadialSoundId),
-            onChange: (value: number | string) => {
-              update('radialOpenSoundId', value as RadialSoundId);
-              previewRadialSound(value as RadialSoundId);
-            },
-          }] as SettingItem[]) : []),
-          {
-            key: 'hoverSound', configKey: 'radialHoverSound', group: 'Sound', title: 'When moving between items',
-            description: 'A note each time the highlight moves to a different item.',
-            keywords: 'hover highlight select item move aim sound',
-            kind: 'bool', enabled: hoverSoundOn,
-            onToggle: () => {
-              update('radialHoverSound', !hoverSoundOn);
-              if (!hoverSoundOn) previewRadialSound(hoverSoundId);
-            },
-          },
-          ...(hoverSoundOn ? ([{
-            key: 'hoverSoundId', configKey: 'radialHoverSoundId', group: 'Sound', title: 'Hover sound',
-            description: 'Press play beside a name to hear it before choosing.',
-            kind: 'select', current: hoverSoundId, choices: soundChoices,
-            onPreview: (value: string) => previewRadialSound(value as RadialSoundId),
-            onChange: (value: number | string) => {
-              update('radialHoverSoundId', value as RadialSoundId);
-              previewRadialSound(value as RadialSoundId);
-            },
-          }] as SettingItem[]) : []),
-          /**
-           * Last, under the picks it plays: choosing a sound and then feeling it at the speed a
-           * sweep across the wheel produces are one task. Only while there is a note to hear.
-           */
-          ...(openSoundOn || hoverSoundOn ? ([{
-            key: 'soundTry', group: 'Sound', title: 'Try it',
-            description: tryDescription,
-            keywords: 'try test practice preview listen hear demo wheel',
-            kind: 'widget',
-            widget: (
-              <SoundTryWheel
-                apps={previewApps.length ? previewApps : PLACEHOLDERS}
-                sounds={sounds}
-                hoverColor={config.radialHoverColor ?? '#FFFFFF'}
-                targeting={
-                  config.radialSelectionMode === 'cursor' && config.radialInstantActivate !== 'dwell'
-                    ? 'cursor'
-                    : 'area'
-                }
-                labelledBy="soundTry-label"
-                describedBy="soundTry-desc"
-              />
-            ),
-          }] as SettingItem[]) : []),
-        ] as SettingItem[]) : []),
         {
           key: 'radialPlacement', configKey: 'radialPlacement', group: 'Position', title: 'Where it opens',
           /**
