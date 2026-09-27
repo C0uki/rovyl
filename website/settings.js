@@ -395,10 +395,11 @@
           } },
         ...(on ? [
           /* One level for both notes. Letting go plays the hover note, the one heard
-             most, at the new level. */
+             most, at the new level. The drag moves in tens, one dot each; the readout
+             takes a typed number for anything in between. */
           ...(openOn || hoverOn ? [
             { group: '', title: 'Volume', desc: 'How loud both sounds play. Windows volume still applies on top.',
-              kind: 'range', key: 'radialSoundVolume', min: 0, max: 100, step: 1,
+              kind: 'range', key: 'radialSoundVolume', min: 0, max: 100, step: 10, ticks: true, unit: '%',
               format: (v) => `${Math.round(v)}%`,
               commit: () => previewSound(sounds.hover || sounds.open || hoverId) },
           ] : []),
@@ -1468,7 +1469,7 @@
     copy.append(el('b', '', row.title));
     if (row.desc) copy.append(el('small', '', row.desc));
 
-    const readout = el('span', 'readout', row.format(get(row.key)));
+    const readout = row.unit ? valueField(row) : el('span', 'readout', row.format(get(row.key)));
     const control_ = el('span', 'win-control');
     control_.append(revertSlot(row), readout);
 
@@ -1484,7 +1485,9 @@
        thumb, which is the whole reason the preview exists. */
     input.addEventListener('input', () => {
       put(row.key, Number(input.value));
-      readout.textContent = row.format(get(row.key));
+      const box = readout.querySelector('input');
+      if (box) box.value = row.format(get(row.key));
+      else readout.textContent = row.format(get(row.key));
       paintPreview();
     });
     /* `change` is the thumb let go: the row settles (its revert arrow), and a row
@@ -1495,14 +1498,78 @@
     });
     /* The ends of the scale, flanking the track: a bare track says how far the thumb
        has come but not what it is a fraction of. */
+    const rail = el('span', row.ticks ? 'slider-rail has-ticks' : 'slider-rail');
+    if (row.ticks) {
+      const ticks = el('span', 'slider-ticks');
+      ticks.setAttribute('aria-hidden', 'true');
+      const count = Math.round((row.max - row.min) / (row.step || 1)) + 1;
+      for (let i = 0; i < count; i += 1) ticks.append(el('i'));
+      rail.append(ticks);
+    }
+    rail.append(input);
     slider.append(
       el('span', 'slider-bounds', row.format(row.min)),
-      input,
+      rail,
       el('span', 'slider-bounds', row.format(row.max)),
     );
 
     line.append(copy, control_, slider);
     return line;
+  }
+
+  /* A readout that also takes a typed value: `37%` at rest, a bare `37` with the `%`
+     outside the box while it has focus, so the unit reads as given rather than as
+     something to type. Enter or clicking away keeps it, clamped to the slider's ends;
+     Escape drops it. */
+  function valueField(row) {
+    const wrap = el('span', 'valuefield');
+    const box = el('input', 'valuefield-input');
+    box.type = 'text';
+    box.inputMode = 'numeric';
+    box.value = row.format(get(row.key));
+    box.setAttribute('aria-label', row.title);
+    const unit = el('span', 'valuefield-unit', row.unit);
+    unit.setAttribute('aria-hidden', 'true');
+    let discard = false;
+
+    box.addEventListener('focus', () => {
+      wrap.classList.add('is-editing');
+      box.maxLength = 3;
+      box.value = String(Math.round(get(row.key)));
+      box.select();
+    });
+    box.addEventListener('input', () => { box.value = box.value.replace(/\D/g, ''); });
+    box.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        box.blur();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        discard = true;
+        box.blur();
+      }
+    });
+    box.addEventListener('blur', () => {
+      /* A render that replaced this row took the box with it; nothing here to settle. */
+      if (!box.isConnected) return;
+      const typed = box.value.trim();
+      wrap.classList.remove('is-editing');
+      box.removeAttribute('maxlength');
+      const next = Math.round(Math.min(row.max, Math.max(row.min, Number(typed))));
+      const keep = !discard && typed !== '' && Number.isFinite(next) && next !== get(row.key);
+      discard = false;
+      if (!keep) {
+        box.value = row.format(get(row.key));
+        return;
+      }
+      put(row.key, next);
+      render();
+      if (row.commit) row.commit(next);
+    });
+
+    wrap.append(box, unit);
+    return wrap;
   }
 
   /* ── The wheel preview ──────────────────────────────────────────────────

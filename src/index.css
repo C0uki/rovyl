@@ -912,6 +912,34 @@
 .zs-slider input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.12); }
 .zs-slider input[type="range"]:active::-webkit-slider-thumb { transform: scale(.94); }
 .zs-slider-bounds { color: var(--zn-text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+.zs-slider-rail { position: relative; min-width: 0; flex: 1; display: flex; align-items: center; }
+/* With stops, the rail paints the line and the track goes clear, so the dots can sit ON the line
+   and the thumb, drawn last, covers the one it rests on. */
+.zs-slider-rail.has-ticks::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 4px; margin-top: -2px;
+  border-radius: 999px; background: var(--zn-raised);
+}
+.zs-slider-rail.has-ticks input[type="range"] { position: relative; }
+.zs-slider-rail.has-ticks input[type="range"]::-webkit-slider-runnable-track { background: transparent; }
+/* Inset by half the thumb: the thumb's centre, not its edge, is what reaches the ends. */
+.zs-slider-ticks {
+  position: absolute; inset: 0 6.5px; display: flex; align-items: center; justify-content: space-between;
+  pointer-events: none;
+}
+.zs-slider-ticks i { width: 6px; height: 6px; border-radius: 50%; background: var(--zn-line-strong); }
+/* A readout you can type into. The box gives up the unit's width while focused, so the `%`
+   stepping outside it moves nothing else in the row. */
+.zs-valuefield { width: 58px; display: flex; align-items: center; gap: 3px; }
+.zs-valuefield-input {
+  min-width: 0; flex: 1; height: 24px; padding: 0 6px;
+  color: var(--zn-text); border: 1px solid var(--zn-line); border-radius: var(--zn-r-chip); background: var(--zn-sunken);
+  font: 500 12.5px/1 var(--font-display); font-variant-numeric: tabular-nums; text-align: right;
+  outline: 0; cursor: text; transition: border-color .15s var(--zn-ease);
+}
+.zs-valuefield-input:hover { border-color: var(--zn-line-strong); }
+.zs-valuefield-input:focus,
+.zs-valuefield-input:focus-visible { border-color: var(--zn-line-strong); box-shadow: 0 0 0 2px var(--zn-focus); }
+.zs-valuefield-unit { flex: none; color: var(--zn-text-3); font: 500 12.5px/1 var(--font-display); }
 .zs-readout { min-width: 58px; color: var(--zn-text); font: 500 12.5px/1 var(--font-display); font-variant-numeric: tabular-nums; text-align: right; }
 /* A word-free readout: the picture below says where, so the right column only has to name it. */
 .zs-readout.is-place { min-width: 0; font-variant-numeric: normal; }
