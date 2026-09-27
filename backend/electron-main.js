@@ -5074,51 +5074,150 @@ app.whenReady().then(async () => {
     refreshTrayMenu();
   };
 
-  const buildTrayMenu = () =>
-    Menu.buildFromTemplate(
-      buildTrayMenuTemplate({
-        workspaces: Array.isArray(currentSettings.workspaces) ? currentSettings.workspaces : [],
-        activeWorkspaceIndex: Number.isInteger(currentSettings.activeWorkspaceIndex)
-          ? currentSettings.activeWorkspaceIndex
-          : 0,
-        pausedUntil: triggersPausedUntil,
-        now: Date.now(),
-        version: app.getVersion(),
-        /** The Store owns updates for an MSIX build, and an unpackaged one has no updater at all. */
-        canCheckUpdates: buildChannel() === "direct",
-        /**
-         * The tray reads the same state machine the Settings row does. With an installer already
-         * on disk the item is the restart, not another check — offering "Check for updates" there
-         * only invites a second download of what is already downloaded.
-         */
-        updateState: lastKnownUpdate.state,
-        updateVersion: lastKnownUpdate.version,
-        icons: {
-          brand: menuIcon("tray-brand"),
-          wheel: menuIcon("tray-wheel"),
-          spaces: menuIcon("tray-spaces"),
-          pause: menuIcon("tray-pause"),
-          settings: menuIcon("tray-settings"),
-          update: menuIcon("tray-update"),
-          power: menuIcon("tray-power"),
-        },
-        actions: {
-          openWheel: () => { void openWheelFromTray(); },
-          switchWorkspace: (index) => { void switchWorkspaceFromTray(index); },
-          setPause: setTriggerPause,
-          openSettings: () => { void openSettingsFromTray(); },
-          checkForUpdates: () => { void runUpdateCheck(); },
-          installUpdate: () => installUpdateNow("tray"),
-          quit: () => app.quit(),
-        },
-      }),
-    );
+  /**
+   * The menu on screen right now and the point it was opened at, or null once it is gone. Set
+   * BEFORE each popup, so the old menu's `menu-will-close` — which Electron may fire during the next
+   * popup or after it — finds a different menu here and knows it is not the user walking away.
+   */
+  let openTrayMenu = null;
+  /** The answer to a check the menu asked for (`current` | `error`), held on the row for a moment. */
+  let trayUpdateNotice = null;
+  let trayUpdateNoticeTimer = null;
+  const TRAY_UPDATE_NOTICE_MS = 2000;
+  /**
+   * `update-not-available` and the check's own promise land a tick apart; one repaint for both, not
+   * a menu that blinks "Checking…" back up between them.
+   */
+  const TRAY_REPAINT_COALESCE_MS = 40;
+  let trayRepaintTimer = null;
+
+  /** Any row the user presses closes the menu, so from that moment there is nothing to repaint. */
+  const fromMenu = (action) => (...args) => {
+    openTrayMenu = null;
+    return action(...args);
+  };
+
+  const buildTrayMenuTemplateNow = (anchor) =>
+    buildTrayMenuTemplate({
+      workspaces: Array.isArray(currentSettings.workspaces) ? currentSettings.workspaces : [],
+      activeWorkspaceIndex: Number.isInteger(currentSettings.activeWorkspaceIndex)
+        ? currentSettings.activeWorkspaceIndex
+        : 0,
+      pausedUntil: triggersPausedUntil,
+      now: Date.now(),
+      version: app.getVersion(),
+      /** The Store owns updates for an MSIX build, and an unpackaged one has no updater at all. */
+      canCheckUpdates: buildChannel() === "direct",
+      /**
+       * The tray reads the same state machine the Settings row does. With an installer already
+       * on disk the item is the restart, not another check — offering "Check for updates" there
+       * only invites a second download of what is already downloaded.
+       *
+       * `checking` is read off the request itself, not the updater's event: the menu reopens in
+       * the same instant the check starts, before electron-updater has said anything.
+       */
+      updateState:
+        pendingUpdateCheck && lastKnownUpdate.state !== "ready" && lastKnownUpdate.state !== "downloading"
+          ? "checking"
+          : lastKnownUpdate.state,
+      updateVersion: lastKnownUpdate.version,
+      updateNotice: trayUpdateNotice,
+      icons: {
+        brand: menuIcon("tray-brand"),
+        wheel: menuIcon("tray-wheel"),
+        spaces: menuIcon("tray-spaces"),
+        pause: menuIcon("tray-pause"),
+        settings: menuIcon("tray-settings"),
+        update: menuIcon("tray-update"),
+        power: menuIcon("tray-power"),
+      },
+      actions: {
+        openWheel: fromMenu(() => { void openWheelFromTray(); }),
+        switchWorkspace: fromMenu((index) => { void switchWorkspaceFromTray(index); }),
+        setPause: fromMenu(setTriggerPause),
+        openSettings: fromMenu(() => { void openSettingsFromTray(); }),
+        checkForUpdates: fromMenu(() => checkForUpdatesFromTray(anchor)),
+        installUpdate: fromMenu(() => installUpdateNow("tray")),
+        quit: fromMenu(() => app.quit()),
+      },
+    });
+
+  /** The top-level rows as one string: equal means reopening the menu would show the same thing. */
+  const trayMenuSignature = (template) => template.map((item) => item.label ?? "---").join("|");
 
   /**
    * The live menu, kept in a variable for exactly as long as it is on screen: Electron holds the
    * model behind a weak pointer, and a menu collected while the user is reading it is a crash.
    */
   let trayMenu = null;
+
+  /**
+   * Opens the menu at `anchor`, replacing the one on screen if there is one — Electron cancels the
+   * running menu itself before it runs the next. Same point, same rows, one label different: to the
+   * eye it is the same menu changing its mind.
+   */
+  const showTrayMenuAt = (anchor) => {
+    if (!tray || tray.isDestroyed() || isAppQuitting) return;
+    const template = buildTrayMenuTemplateNow(anchor);
+    const menu = Menu.buildFromTemplate(template);
+    openTrayMenu = { menu, anchor, signature: trayMenuSignature(template) };
+    menu.on("menu-will-close", () => {
+      if (openTrayMenu?.menu === menu) openTrayMenu = null;
+    });
+    trayMenu = menu;
+    tray.popUpContextMenu(menu, anchor);
+  };
+
+  /**
+   * A native menu cannot change a label while it is open, and it closes on every click. So the menu
+   * that asked for a check reopens where it was and repaints itself as the answer arrives — the
+   * only way a Win32 menu can look like it stayed open. Only while it is still on screen: once the
+   * user has closed it, nothing brings it back.
+   */
+  const repaintOpenTrayMenu = () => {
+    if (!openTrayMenu || trayRepaintTimer) return;
+    trayRepaintTimer = setTimeout(() => {
+      trayRepaintTimer = null;
+      if (!openTrayMenu) return;
+      /** Nothing a reader could see has changed: reopening would only flicker. */
+      if (trayMenuSignature(buildTrayMenuTemplateNow(openTrayMenu.anchor)) === openTrayMenu.signature) return;
+      try {
+        showTrayMenuAt(openTrayMenu.anchor);
+      } catch (e) {
+        diagLog(`[Tray] repaint menu: ${e.message}`);
+      }
+    }, TRAY_REPAINT_COALESCE_MS);
+  };
+
+  /**
+   * Checking → (downloading → restart) or → "latest version" for a moment and back to the button,
+   * all on the same row of a menu that never seemed to close. The download and the restart arrive
+   * as updater states; only "nothing new" and "failed" need a notice, because as states they would
+   * read as the plain button again.
+   */
+  const checkForUpdatesFromTray = (anchor) => {
+    if (trayUpdateNoticeTimer) clearTimeout(trayUpdateNoticeTimer);
+    trayUpdateNoticeTimer = null;
+    trayUpdateNotice = null;
+    /** Started first, so the reopened menu already reads "Checking…". */
+    const check = runUpdateCheck();
+    try {
+      showTrayMenuAt(anchor);
+    } catch (e) {
+      diagLog(`[Tray] reopen menu: ${e.message}`);
+    }
+    void check.then((result) => {
+      const notice = result?.state === "current" ? "current" : result?.ok === false ? "error" : null;
+      if (!notice) return;
+      trayUpdateNotice = notice;
+      repaintOpenTrayMenu();
+      trayUpdateNoticeTimer = setTimeout(() => {
+        trayUpdateNoticeTimer = null;
+        trayUpdateNotice = null;
+        repaintOpenTrayMenu();
+      }, TRAY_UPDATE_NOTICE_MS);
+    });
+  };
   /** One popup in flight at a time — a second right-click during the wait is the same request. */
   let trayMenuOpening = false;
 
@@ -5140,9 +5239,8 @@ app.whenReady().then(async () => {
     trayMenuOpening = true;
     try {
       await waitForMouseButtonsUp(TRAY_MENU_BUTTON_WAIT_MS);
-      if (!tray || tray.isDestroyed() || isAppQuitting) return;
-      trayMenu = buildTrayMenu();
-      tray.popUpContextMenu(trayMenu);
+      /** Pinned now, so every repaint lands where this menu did even if the pointer wanders off. */
+      showTrayMenuAt(screen.getCursorScreenPoint());
     } catch (e) {
       diagLog(`[Tray] pop up menu: ${e.message}`);
     } finally {
@@ -5151,11 +5249,12 @@ app.whenReady().then(async () => {
   };
 
   /**
-   * Only the tooltip now: the menu itself is built when it opens, so nothing about it can go stale.
-   * The call sites stay — they are the places that know the state changed.
+   * The tooltip, and the menu only if it is on screen: a closed one is built when it opens, so it
+   * cannot go stale. The call sites are the places that know the state changed.
    */
   const refreshTrayMenu = () => {
     if (!tray || tray.isDestroyed()) return;
+    repaintOpenTrayMenu();
     try {
       tray.setToolTip(triggersArePaused() ? "Rovyl — trigger paused" : "Rovyl");
     } catch (e) {

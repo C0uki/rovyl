@@ -30,6 +30,8 @@ const withIcon = (icon) => (icon ? { icon } : {});
  * @param {boolean} state.canCheckUpdates
  * @param {string} state.updateState idle | checking | current | downloading | ready | error
  * @param {string|null} state.updateVersion version the updater is working on, when it knows one
+ * @param {string|null} state.updateNotice current | error — the answer to a check started from this
+ *   menu, held on the row for a moment before it goes back to being a button
  * @param {Record<string, unknown>} state.icons resolved images by base name, any may be null
  * @param {object} actions every click handler, so this module never reaches for one
  */
@@ -42,6 +44,7 @@ function buildTrayMenuTemplate({
   canCheckUpdates = false,
   updateState = "idle",
   updateVersion = null,
+  updateNotice = null,
   icons = {},
   actions = {},
 }) {
@@ -128,6 +131,17 @@ function buildTrayMenuTemplate({
     } else if (updateState === "downloading") {
       items.push({
         label: updateVersion ? `Downloading ${updateVersion}…` : "Downloading update…",
+        ...withIcon(icons.update),
+        enabled: false,
+      });
+    } else if (updateNotice === "current" || updateNotice === "error") {
+      /**
+       * The answer, where the question was asked. Disabled for the same reason the status rows
+       * are: pressing "you're up to date" means nothing, and a second check a second later would
+       * only say it again.
+       */
+      items.push({
+        label: updateNotice === "current" ? "You're on the latest version" : "Couldn't check for updates",
         ...withIcon(icons.update),
         enabled: false,
       });

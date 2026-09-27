@@ -152,6 +152,21 @@ check("mid-flight the row is a status line, not a button", () => {
   }
 });
 
+check("a check asked from the menu answers on its row, as a status line", () => {
+  for (const [notice, label] of [["current", "You're on the latest version"], ["error", "Couldn't check for updates"]]) {
+    const menu = buildTrayMenuTemplate({ ...BASE, updateState: notice, updateNotice: notice });
+    const row = find(menu, label);
+    assert.ok(row, `expected "${label}" in ${labels(menu).join("|")}`);
+    assert.equal(row.enabled, false);
+    assert.equal(find(menu, "Check for updates"), undefined);
+  }
+});
+
+check("a found update outranks the notice", () => {
+  const menu = buildTrayMenuTemplate({ ...BASE, updateState: "ready", updateVersion: "1.5.1", updateNotice: "current" });
+  assert.ok(find(menu, "Restart to update to 1.5.1"), labels(menu).join("|"));
+});
+
 check("a failed check leaves something to press again", () => {
   const menu = buildTrayMenuTemplate({ ...BASE, updateState: "error" });
   assert.ok(find(menu, "Check for updates"), labels(menu).join("|"));
