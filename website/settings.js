@@ -394,14 +394,20 @@
             if (!on) { const next = resolveSounds(); previewSound(next.open || next.hover); }
           } },
         ...(on ? [
-          /* One level for both notes. Letting go plays the hover note, the one heard
-             most, at the new level. The drag moves in tens, one dot each; the readout
-             takes a typed number for anything in between. */
+          /* First, straight under the switch: turning sound on is a request to hear it,
+             so the wheel that plays it is the answer, and the rows below tune it. */
+          ...(openOn || hoverOn ? [
+            { group: '', title: 'Try it', desc: tryDesc, kind: 'widget', build: tryWheel },
+          ] : []),
+          /* One level for both notes. Every dot the thumb lands on plays the hover
+             note, the one heard most, at that level, so the drag is heard as it goes.
+             The drag moves in tens, one dot each; the readout takes a typed number for
+             anything in between. */
           ...(openOn || hoverOn ? [
             { group: '', title: 'Volume', desc: 'How loud both sounds play. Windows volume still applies on top.',
               kind: 'range', key: 'radialSoundVolume', min: 0, max: 100, step: 10, ticks: true, unit: '%',
               format: (v) => `${Math.round(v)}%`,
-              commit: () => previewSound(sounds.hover || sounds.open || hoverId) },
+              heard: () => previewSound(sounds.hover || sounds.open || hoverId) },
           ] : []),
           { group: '', title: 'When the wheel opens',
             desc: 'One note as the wheel blooms open, and again when you aim back at the center.',
@@ -418,11 +424,6 @@
           ...(hoverOn ? [
             { group: '', title: 'Hover sound', desc: 'Press play beside a name to hear it before choosing.',
               kind: 'select', key: 'radialHoverSoundId', choices, preview: previewSound },
-          ] : []),
-          /* Last, under the picks it plays: choosing a sound and then feeling it at the
-             speed a sweep across the wheel produces are one task. */
-          ...(openOn || hoverOn ? [
-            { group: '', title: 'Try it', desc: tryDesc, kind: 'widget', build: tryWheel },
           ] : []),
         ] : []),
       ];
@@ -1489,13 +1490,11 @@
       if (box) box.value = row.format(get(row.key));
       else readout.textContent = row.format(get(row.key));
       paintPreview();
+      /* A row whose result is heard - Volume - plays it at every step of the drag. */
+      if (row.heard) row.heard();
     });
-    /* `change` is the thumb let go: the row settles (its revert arrow), and a row
-       whose result is heard - Volume - plays it once, at the new level. */
-    input.addEventListener('change', () => {
-      render();
-      if (row.commit) row.commit(Number(input.value));
-    });
+    /* `change` is the thumb let go: the row settles (its revert arrow). */
+    input.addEventListener('change', render);
     /* The ends of the scale, flanking the track: a bare track says how far the thumb
        has come but not what it is a fraction of. */
     const rail = el('span', row.ticks ? 'slider-rail has-ticks' : 'slider-rail');
@@ -1565,7 +1564,7 @@
       }
       put(row.key, next);
       render();
-      if (row.commit) row.commit(next);
+      if (row.heard) row.heard();
     });
 
     wrap.append(box, unit);

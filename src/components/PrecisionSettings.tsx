@@ -255,11 +255,6 @@ interface SettingItem {
   onToggle?: () => void;
   onChange?: (value: number | string) => void;
   /**
-   * `range` only: the slider was let go, or stepped by a key — the native `change`, where
-   * `onChange` is every tick of a drag. For a result worth a sound, like the Volume slider's note.
-   */
-  onCommit?: (value: number) => void;
-  /**
    * `select` only: puts a play button on every option, for lists whose choices are heard rather
    * than read. Pressing it previews that option without choosing it.
    */
@@ -1172,9 +1167,35 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
          */
         ...(soundsOn ? ([
           /**
-           * One level for both notes, straight under the switch it refines. Only while one of
-           * them is on: a volume for nothing is a control that does nothing. Letting go plays the
-           * hover note, the one heard most, at the new level.
+           * First, straight under the switch: turning sound on is a request to hear it, so the
+           * wheel that plays it is the answer, and the rows below tune what it plays. Only while
+           * there is a note to hear.
+           */
+          ...(openSoundOn || hoverSoundOn ? ([{
+            key: 'soundTry', group: '', title: 'Try it',
+            description: tryDescription,
+            keywords: 'try test practice preview listen hear demo wheel',
+            kind: 'widget',
+            widget: (
+              <SoundTryWheel
+                apps={previewApps.length ? previewApps : PLACEHOLDERS}
+                sounds={sounds}
+                hoverColor={config.radialHoverColor ?? '#FFFFFF'}
+                targeting={
+                  config.radialSelectionMode === 'cursor' && config.radialInstantActivate !== 'dwell'
+                    ? 'cursor'
+                    : 'area'
+                }
+                labelledBy="soundTry-label"
+                describedBy="soundTry-desc"
+              />
+            ),
+          }] as SettingItem[]) : []),
+          /**
+           * One level for both notes, under the switch it refines. Only while one of
+           * them is on: a volume for nothing is a control that does nothing. Every dot the thumb
+           * lands on plays the hover note, the one heard most, at that level — the drag is heard
+           * as it goes, not only once it is let go.
            *
            * The drag moves in tens, one dot each, because a hand cannot hear 37 from 38; the
            * readout takes a typed number for the person who wants exactly that.
@@ -1186,12 +1207,12 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
               (value) => {
                 setRadialSoundVolume(value);
                 update('radialSoundVolume', value);
+                previewRadialSound(sounds.hover ?? sounds.open ?? hoverSoundId);
               },
               (value) => `${Math.round(value)}%`, 10, 'radialSoundVolume'),
             ticks: true,
             unit: '%',
             keywords: 'volume loud quiet level louder softer sound effects',
-            onCommit: () => previewRadialSound(sounds.hover ?? sounds.open ?? hoverSoundId),
           }] as SettingItem[]) : []),
           {
             key: 'openSound', configKey: 'radialOpenSound', group: '', title: 'When the wheel opens',
@@ -1233,30 +1254,6 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
               update('radialHoverSoundId', value as RadialSoundId);
               previewRadialSound(value as RadialSoundId);
             },
-          }] as SettingItem[]) : []),
-          /**
-           * Last, under the picks it plays: choosing a sound and then feeling it at the speed a
-           * sweep across the wheel produces are one task. Only while there is a note to hear.
-           */
-          ...(openSoundOn || hoverSoundOn ? ([{
-            key: 'soundTry', group: '', title: 'Try it',
-            description: tryDescription,
-            keywords: 'try test practice preview listen hear demo wheel',
-            kind: 'widget',
-            widget: (
-              <SoundTryWheel
-                apps={previewApps.length ? previewApps : PLACEHOLDERS}
-                sounds={sounds}
-                hoverColor={config.radialHoverColor ?? '#FFFFFF'}
-                targeting={
-                  config.radialSelectionMode === 'cursor' && config.radialInstantActivate !== 'dwell'
-                    ? 'cursor'
-                    : 'area'
-                }
-                labelledBy="soundTry-label"
-                describedBy="soundTry-desc"
-              />
-            ),
           }] as SettingItem[]) : []),
         ] as SettingItem[]).map((item) => ({ ...item, reveal: false })) : []),
       ],
@@ -2101,18 +2098,6 @@ function SettingRow({
     return () => window.clearTimeout(timer);
   }, [confirming]);
 
-  /** React's `onChange` on a slider is the `input` event; `onCommit` wants the native `change`. */
-  const sliderRef = useRef<HTMLInputElement>(null);
-  const onCommitRef = useRef(item.onCommit);
-  onCommitRef.current = item.onCommit;
-  useEffect(() => {
-    const slider = sliderRef.current;
-    if (!slider) return;
-    const commit = () => onCommitRef.current?.(Number(slider.value));
-    slider.addEventListener('change', commit);
-    return () => slider.removeEventListener('change', commit);
-  }, []);
-
   const dragProps = reorderable
     ? {
         draggable: armed,
@@ -2328,7 +2313,6 @@ function SettingRow({
               </span>
             )}
             <input
-              ref={sliderRef}
               type="range"
               min={item.min}
               max={item.max}
@@ -2374,7 +2358,6 @@ function RangeValueField({ item }: { item: SettingItem }) {
     const next = Math.round(Math.min(max, Math.max(min, Number(typed))));
     if (!Number.isFinite(next) || next === item.raw) return;
     item.onChange?.(next);
-    item.onCommit?.(next);
   };
 
   return (
