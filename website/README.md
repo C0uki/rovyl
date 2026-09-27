@@ -10,7 +10,8 @@ website/
 ├── docs.html      the workspace-file reference the app's file view links to (/docs#workspace-file)
 ├── styles.css     the design system, lifted from the app
 ├── site.js        the hero wheel, the workspace cards, scroll reveal
-├── settings.js    the settings panel, working: five sections, live controls
+├── settings.js    the settings panel, working: six sections, live controls
+├── sound.js       the wheel's sound effects, synthesized as in the app
 ├── workspaces.js  GENERATED - the real workspaces and appearance config
 ├── vercel.json    clean URLs + cache headers
 ├── tools/
@@ -31,11 +32,13 @@ generated from an installed Rovyl - the actual workspaces in the actual order,
 with the icons the app extracted from the Start Menu - so the wheel on the page
 is the wheel on the machine. The same file drives the workspace cards further
 down and the settings panel, which is not a screenshot: `settings.js` rebuilds
-all five sections with the app's own groups, titles, descriptions and
+all six sections with the app's own groups, titles, descriptions and
 conditional rows, and controls that actually move - including the panel's own
-language dropdown rather than a native `<select>`, whose popup Chromium draws
-from the OS theme, and the revert arrow that appears beside a row once it leaves
-its default. Flipping Rovyl surfaces to White
+dropdown rather than a native `<select>`, whose popup Chromium draws
+from the OS theme, the revert arrow that appears beside a row once it leaves
+its default, the mouse-button recorder (press Record, then any button - the
+press is swallowed, so Mouse 4/5 do not take the browser Back), the dock
+position picker, and Sound's play buttons and practice wheel. Flipping Rovyl surfaces to White
 repaints the window with the app's light token set; the Appearance sliders
 drive a live wheel preview for the same reason the app has one, which is that
 radius, icon size, spacing and dimming had no visible effect until the panel was
@@ -52,6 +55,10 @@ node website/tools/sync-workspaces.mjs
 It reads `%APPDATA%/Rovyl/config-v2.json` and the icon store beside it. The
 output is committed, so building the site never requires Rovyl to be installed -
 and if `workspaces.js` is missing the hero simply does not run.
+
+It copies every enabled workspace verbatim - names, shortcut labels, icons - so
+read the diff before committing it. A shortcut to a personal file publishes that
+file's name.
 
 One thing to decide before publishing: those icons are third-party marks
 (Discord, Steam, Figma…). Showing them is ordinary for a launcher - the product
@@ -107,22 +114,29 @@ The hub is the app's too: the Rovyl mark at the root, and the explicit Back
 control once you are inside a level, at the same proportions `RadialMenu` draws
 them.
 
-The stage carries one control that is the page's own rather than the product's -
-a switch for **Launch without clicking**. Flip it and the demo behaves the way
-the app does with `radialInstantActivate: 'dwell'`: the pointer stops existing,
-the aim alone lights a target, and holding that aim opens it. Nothing is
-clicked, which is the only way to explain a hands-free gesture. It uses the
-app's shipped hover time (`DEFAULTS.radialInstantDwellMs`, 400 ms) and the same
-settling window the app wins back on every level swap, so the first move after a
-ring changes cannot resolve an aim nobody made.
+It also has the app's two levels. With more than one workspace the app always
+opens on the home launcher, so the wheel OPENS on the workspaces - synthetic
+slices carrying each one's Lucide glyph and key, the way
+`buildWorkspacePickerItems` builds them - and the one you aim at replaces the
+ring with its shortcuts. The pill under the wheel says "Workspaces" there, and
+the workspace's name once inside it, as the app's does. There is no switcher
+widget on the page because there is none in the product. With a single
+workspace the hero drops the launcher level on its own.
 
-It also has the app's two levels. The config says `workspaceSwitchMode: "picker"`,
-so the wheel OPENS on the workspaces - synthetic slices carrying each one's
-Lucide glyph and number key, the way `buildWorkspacePickerItems` builds them -
-and the one you aim at replaces the ring with its shortcuts. There is no
-switcher widget on the page because there is none in the product; the number
-keys are not bound either, since the app disables 1-9 in picker mode. If the
-config is ever set to `hotkeys`, the hero drops the picker level on its own.
+The wedges are drawn only when the config has Area targeting with **Visible
+wedges** on (`areaWedges` in `workspaces.js`); off, the aim is the same and only
+the icon lights, exactly as in the app.
+
+The stage carries two controls that are the page's own rather than the
+product's: **Sound** (see below), and **Launch without clicking**. Flip the
+second and the demo behaves the way the app does with
+`radialInstantActivate: 'dwell'`: the pointer stops existing, the aim alone
+lights a target, and holding that aim opens it. Nothing is clicked, which is the
+only way to explain a hands-free gesture. It uses the app's shipped hover time
+(`DEFAULTS.radialInstantDwellMs`, 400 ms) and the same settling window the app
+wins back on every level swap, so the first move after a ring changes cannot
+resolve an aim nobody made. Neither switch aims the wheel: over them nothing is
+lit, and a click on one is never a release on a slice.
 
 Its geometry is solved from a budget rather than a fixed ratio: the aimed slice
 puts a label under its tile and the workspace pill sits under the whole wheel, so
@@ -134,3 +148,18 @@ the wheel. Two further rules hold it together:
 - **Nothing runs off screen.** An `IntersectionObserver` and `visibilitychange`
   stop the loop, and a coarse pointer never takes the gesture at all - swallowing
   a touch scroll to demo a mouse gesture is a bad trade.
+
+## Sound
+
+`sound.js` is `src/utils/radialSound.ts` ported line for line: the same ten
+notes synthesized with Web Audio, the same master gain and limiter, and the same
+`noteForHighlight` rule for when one plays - a note as the wheel opens, one each
+time the highlight moves to a different item, and the opening note again when
+the aim comes back to the centre. The page holds one copy of the sound settings
+(seeded from `look.sounds`), so the Sound switch on the stage, the hero wheel and
+the Sound section of the settings panel all read and write the same thing: pick
+Knock in the panel and the wheel at the top plays Knock.
+
+Notes play only while a visitor is driving a wheel; the unattended loop is
+silent. Browsers will not start audio before the page has been clicked or typed
+into, so until then every note is skipped rather than queued.

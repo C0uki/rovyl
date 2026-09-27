@@ -63,10 +63,27 @@
   const leanWithRoom = (lean, plateau) =>
     1 - (1 - lean) * Math.min(1, (1 - plateau) / BEAM_RUN);
   const beamLean = (count) => Math.sin(Math.PI / Math.max(count, 2));
+  /* One item is tempered as two: its ring is bent towards the icon by the solo
+     mask below, which leaves it lighting about half the plane. */
   const beamAlphas = (alphas, count) => {
-    const temper = Math.min(1, Math.sqrt(Math.max(count, 1) / ALPHA_COUNT));
+    const temper = Math.min(1, Math.sqrt(Math.max(count, 2) / ALPHA_COUNT));
     return [alphas[0] * temper, alphas[1] * temper];
   };
+
+  /* `sectorSoloFadeMask`: a one-item wheel's wedge is a full ring, and a ring lit
+     evenly is a halo that points at nothing. This fades it by angle instead -
+     brightest out through the icon, gone on the far side. CSS measures from
+     twelve o'clock; these degrees measure from three. */
+  const SOLO_POWER = 1.5;
+  const SOLO_SAMPLES = 36;
+  function soloFadeMask(centre) {
+    const stops = Array.from({ length: SOLO_SAMPLES + 1 }, (_, index) => {
+      const turn = index / SOLO_SAMPLES;
+      const weight = ((1 + Math.cos(turn * 2 * Math.PI)) / 2) ** SOLO_POWER;
+      return `rgba(0, 0, 0, ${weight.toFixed(4)}) ${(turn * 360).toFixed(1)}deg`;
+    });
+    return `conic-gradient(from ${centre + 90}deg at 50% 50%, ${stops.join(', ')})`;
+  }
 
   function gradientStops(innerStop, falloffStop, near, far) {
     const plateau = plateauStop(innerStop, falloffStop);
@@ -135,6 +152,9 @@
     svg.setAttribute('width', size);
     svg.setAttribute('height', size);
     svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
+    const solo = count === 1 ? soloFadeMask(centreDeg(0, 1)) : '';
+    svg.style.webkitMaskImage = solo;
+    svg.style.maskImage = solo;
 
     const innerStop = inner / outer;
     const falloffStop = Math.min(0.9, Math.max(innerStop + 0.02, falloff / outer));

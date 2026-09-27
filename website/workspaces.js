@@ -8,21 +8,33 @@ window.ROVYL = {
     "appSpacing": 10,
     "backdropOpacity": 0.9,
     "selectionMode": "area",
+    "areaWedges": true,
+    "showPill": true,
+    "placement": "center",
     "showLabels": true,
     "globalShortcut": "Alt+F",
     "activationThreshold": 45,
     "radialMonitor": "cursor",
+    "keyboardTrigger": true,
+    "shortcutMode": "toggle",
     "mouseTrigger": false,
     "mouseButton": "middle",
     "mouseMode": "click",
     "theme": "black",
-    "version": "1.13.0",
-    "switchMode": "picker",
+    "version": "1.17.1",
     "activeWorkspace": 0,
     "centerLabel": "Center",
     "handsFree": false,
     "handsFreeSensitivity": "low",
-    "handsFreeDwellMs": 400
+    "handsFreeDwellMs": 400,
+    "sounds": {
+      "radialSounds": true,
+      "radialSoundVolume": 100,
+      "radialOpenSound": true,
+      "radialOpenSoundId": "sub-tick",
+      "radialHoverSound": true,
+      "radialHoverSoundId": "thump"
+    }
   },
   "workspaces": [
     {

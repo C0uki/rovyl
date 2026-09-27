@@ -103,9 +103,9 @@
 
   /* ══ The wheel ═════════════════════════════════════════════════════════
      Rebuilt with the app's own state machine - bloom, presence, sustained aim,
-     launch echo - and, because the config says `workspaceSwitchMode: "picker"`,
-     with the app's own two levels: the wheel OPENS on the workspaces, and the
-     one you aim at replaces the ring with its shortcuts. There is no separate
+     launch echo - and with the app's own two levels: with more than one
+     workspace the wheel OPENS on the home launcher of workspaces, and the one
+     you aim at replaces the ring with its shortcuts. There is no separate
      switcher on the page because there is none in the product.
      ══════════════════════════════════════════════════════════════════════ */
 
@@ -119,6 +119,8 @@
   const pillChip = document.getElementById('pillChip');
   const cards = [...document.querySelectorAll('.ws-strip .ws')];
   const hfSwitch = document.getElementById('handsFree');
+  const soundSwitch = document.getElementById('soundFx');
+  const SOUND = window.RovylSound || null;
   if (!stage || !wheel || !SPACES.length) return;
 
   const ECHO_MS = 520;
@@ -127,9 +129,13 @@
      (`DEFAULTS.radialInstantDwellMs`). The arc is the only sign a timer is
      running, so the demo uses the shipped number rather than a made-up one. */
   const HANDS_FREE_MS = 400;
-  const PICKER = LOOK.switchMode === 'picker' && SPACES.length > 1;
-  /* The app's `radialSelectionMode: 'area'`: the wedges are drawn. */
-  const AREA = LOOK.selectionMode === 'area' && !!sectors && !!window.RovylSectors;
+  /* The app always opens on the home launcher when more than one workspace is
+     on; a single workspace skips straight to its shortcuts. */
+  const PICKER = SPACES.length > 1;
+  /* Area targeting with "Visible wedges" on: the shares are drawn. Off, the aim
+     is identical and only the icon lights, so there is nothing to draw. */
+  const AREA = LOOK.selectionMode !== 'cursor' && LOOK.areaWedges === true
+    && !!sectors && !!window.RovylSectors;
 
   /* The app's own appearance settings, honoured rather than guessed at. */
   stage.style.setProperty('--hover', LOOK.hoverColor || '#ffffff');
@@ -262,7 +268,9 @@
     for (const slice of slices) slice.root.remove();
     const items = level === 0 ? pickerItems() : SPACES[space].items;
     slices = items.map(buildSlice);
-    if (pillName) pillName.textContent = SPACES[space].name;
+    /* At the launcher the root IS the choice of workspace, so the pill names
+       that rather than whichever workspace was picked last. */
+    if (pillName) pillName.textContent = level === 0 ? 'Workspaces' : SPACES[space].name;
     /* At the root the chip is the centre's label; inside a level it is the way
        back out. */
     if (pillChip) pillChip.textContent = level === 0 ? (LOOK.centerLabel || 'Center') : 'Back';
@@ -422,7 +430,8 @@
       sectors.classList.toggle('is-on', open && !firing);
       wedges.forEach((wedge, i) => { wedge.style.opacity = open && i === active ? '1' : '0'; });
     }
-    pill.classList.toggle('is-on', open);
+    /* Appearance → Workspace name: the pill can be switched off. */
+    pill.classList.toggle('is-on', open && LOOK.showPill !== false);
     pill.style.transform = open
       ? 'translate(-50%, var(--pill-y))'
       : 'translate(-50%, 0) scale(.9)';
@@ -596,7 +605,7 @@
     fire(index);
     after(ECHO_MS, () => { open = false; reset(); paint(); });
     /* Back to the picker, so the next throw can start straight away. */
-    after(ECHO_MS + 260, () => { if (manual) { toRoot(); open = true; paint(); } });
+    after(ECHO_MS + 260, reopen);
   }
 
   function armDwell(index) {
@@ -630,6 +639,73 @@
     hfSwitch.addEventListener('click', () => setHandsFree(!handsFree));
   }
 
+  /* ── Sound ──────────────────────────────────────────────────────────────
+     The app's two notes: one as the wheel opens, one each time the highlight
+     moves to a different item, and the opening note again when the aim comes
+     back to the centre. Only while a visitor is driving the wheel - the
+     unattended loop plays in silence, because a page that makes noise at
+     someone who is only reading it is a page they close.
+
+     Which note, and when, is the app's own rule (`noteForHighlight`), keyed on
+     the item and not its index, so a level swap that puts a new item under a
+     still pointer is heard, as it is in the app. */
+
+  const HUB_TARGET = SOUND ? SOUND.HUB : '__hub__';
+  let openedAt = Number.NEGATIVE_INFINITY;
+  /** Whether an item has been lit since the wheel opened. */
+  let aimedAway = false;
+  let sounded = null;
+
+  function soundOpen() {
+    openedAt = performance.now();
+    aimedAway = false;
+    sounded = null;
+    if (!SOUND) return;
+    const sounds = SOUND.resolve();
+    if (!sounds.open && !sounds.hover) return;
+    SOUND.wake();
+    if (sounds.open) SOUND.play(sounds.open);
+  }
+
+  function soundAim(target) {
+    if (target === sounded) return;
+    sounded = target;
+    const wasAway = aimedAway;
+    if (target !== null && target !== HUB_TARGET) aimedAway = true;
+    if (!SOUND || !manual || !open || firing) return;
+    const note = SOUND.noteFor(target, wasAway, performance.now() - openedAt, SOUND.resolve());
+    if (note) SOUND.play(note);
+  }
+
+  /* The page's switch for it. It shares the one copy of the sound settings the
+     panel further down edits, so either can turn it off. */
+  function syncSoundSwitch() {
+    if (!soundSwitch) return;
+    const on = !!SOUND && SOUND.settings.radialSounds !== false;
+    soundSwitch.setAttribute('aria-checked', String(on));
+    soundSwitch.querySelector('.toggle').classList.toggle('is-on', on);
+  }
+
+  if (soundSwitch) {
+    if (!SOUND) {
+      soundSwitch.hidden = true;
+    } else {
+      syncSoundSwitch();
+      SOUND.subscribe(syncSoundSwitch);
+      soundSwitch.addEventListener('click', () => {
+        const on = SOUND.settings.radialSounds === false;
+        SOUND.set({ radialSounds: on });
+        /* Turning it on plays a note, so the switch answers with the thing it
+           switched on - the app's Sound switches do the same. */
+        if (on) {
+          const sounds = SOUND.resolve();
+          const id = sounds.open || sounds.hover;
+          if (id) SOUND.preview(id);
+        }
+      });
+    }
+  }
+
   function enterManual() {
     if (manual) return;
     manual = true;
@@ -639,6 +715,7 @@
     toRoot();
     open = true;
     paint();
+    soundOpen();
   }
 
   function leaveManual() {
@@ -650,28 +727,49 @@
     toRoot();
     open = false;
     paint();
+    if (SOUND) SOUND.sleep();
     after(320, startLoop);
   }
+
+  /** After a launch, the wheel comes back for the next throw - a new open. */
+  function reopen() {
+    if (!manual) return;
+    toRoot();
+    open = true;
+    paint();
+    soundOpen();
+  }
+
+  /* The corner switches are the page's, not the wheel's: over them nothing is
+     aimed, and a press on one is not a release on whatever was aimed before. */
+  const onControls = (event) => !!(event.target && event.target.closest && event.target.closest('.stage-ctl'));
 
   function aimAt(event) {
     /* `pointerenter` is not guaranteed (a pointer parked on the stage before the
        page settles never crosses the boundary), so the first move takes over too. */
     if (!manual) enterManual();
     if (firing) return;
+    if (onControls(event)) {
+      soundAim(null);
+      setActive(-1);
+      return;
+    }
     const box = stage.getBoundingClientRect();
     const dx = event.clientX - (box.left + box.width / 2);
     const dy = event.clientY - (box.top + box.height / 2 - LIFT);
     const distance = Math.hypot(dx, dy);
 
     /* The activation zone: closer than this and the gesture is a cancel, so
-       nothing may be lit. */
+       nothing may be lit - except the centre itself, which has a note. */
     if (distance < deadZone()) {
+      soundAim(HUB_TARGET);
       setActive(-1);
       return;
     }
     const deg = (Math.atan2(dy, dx) * 180) / Math.PI;
     const step = 360 / slices.length;
     const index = ((Math.round((deg + 90) / step) % slices.length) + slices.length) % slices.length;
+    soundAim(slices[index] ? slices[index].item : null);
     setActive(index);
   }
 
@@ -695,6 +793,7 @@
     stage.addEventListener('pointerleave', leaveManual);
 
     stage.addEventListener('pointerdown', (event) => {
+      if (onControls(event)) return;
       if (!manual) { enterManual(); aimAt(event); }
       if (firing || active < 0) return;
       event.preventDefault();
@@ -709,7 +808,7 @@
 
       fire(active);
       after(ECHO_MS, () => { open = false; reset(); paint(); });
-      after(ECHO_MS + 260, () => { if (manual) { toRoot(); open = true; paint(); } });
+      after(ECHO_MS + 260, reopen);
     });
   }
 
