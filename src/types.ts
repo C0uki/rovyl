@@ -304,6 +304,8 @@ export interface UIConfig {
   radialHoverSound?: boolean;
   /** Which of the ten plays on hover. Read through `normalizeRadialSound`. */
   radialHoverSoundId?: import("./utils/radialSound").RadialSoundId;
+  /** One volume for both notes, 0–100. 100 is the level they were tuned at. Read through `normalizeRadialVolume`. */
+  radialSoundVolume?: number;
   showBattery: boolean; // New
   showWeather: boolean; // New
   weatherLocation?: string; // New: CEP or city name for weather

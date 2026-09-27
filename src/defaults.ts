@@ -353,6 +353,7 @@ export const DEFAULT_UI_CONFIG: UIConfig = {
   radialOpenSoundId: 'sub-tick',
   radialHoverSound: true,
   radialHoverSoundId: 'thump',
+  radialSoundVolume: 100,
   showBattery: false,
   showWeather: false,
   clockPosition: "top-center",

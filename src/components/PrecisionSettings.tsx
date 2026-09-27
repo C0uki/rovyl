@@ -86,8 +86,10 @@ import { openExternalSiteUrl } from '../utils/openExternalSiteUrl';
 import {
   RADIAL_SOUNDS,
   normalizeRadialSound,
+  normalizeRadialVolume,
   previewRadialSound,
   resolveRadialSounds,
+  setRadialSoundVolume,
   type RadialSoundId,
 } from '../utils/radialSound';
 import { SoundTryWheel } from './SoundTryWheel';
@@ -241,6 +243,11 @@ interface SettingItem {
   onToggle?: () => void;
   onChange?: (value: number | string) => void;
   /**
+   * `range` only: the slider was let go, or stepped by a key — the native `change`, where
+   * `onChange` is every tick of a drag. For a result worth a sound, like the Volume slider's note.
+   */
+  onCommit?: (value: number) => void;
+  /**
    * `select` only: puts a play button on every option, for lists whose choices are heard rather
    * than read. Pressing it previews that option without choosing it.
    */
@@ -308,6 +315,8 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
   discoveryPhase = 'idle',
 }) => {
   const { t, dir } = useTranslation(config.language);
+  /** This window's notes — the play buttons and the practice wheel — at the Volume setting. */
+  useEffect(() => { setRadialSoundVolume(config.radialSoundVolume); }, [config.radialSoundVolume]);
 
   const sectionsList = useMemo(() => [
     { id: 'spaces' as const, label: t('workspaces'), caption: t('workspacesDesc'), icon: SquareStack },
@@ -905,6 +914,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
     const soundChoices = RADIAL_SOUNDS.map((sound) => ({ value: sound.id, label: sound.name }));
     const soundName = (id: RadialSoundId) => RADIAL_SOUNDS.find((sound) => sound.id === id)?.name ?? id;
     const sounds = resolveRadialSounds(config);
+    const soundVolume = normalizeRadialVolume(config.radialSoundVolume);
     /** What the practice wheel says it does, which depends on which of the two notes are on. */
     const tryDescription = sounds.open && sounds.hover
       ? `Move around the wheel: items play ${soundName(sounds.hover)}, and aiming back at the center plays ${soundName(sounds.open)}. Click the wheel to open it again.`
@@ -1144,6 +1154,23 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
           onToggle: () => update('radialSounds', !soundsOn),
         },
         ...(soundsOn ? ([
+          /**
+           * One level for both notes, straight under the switch it refines. Only while one of
+           * them is on: a volume for nothing is a control that does nothing. Letting go plays the
+           * hover note, the one heard most, at the new level.
+           */
+          ...(openSoundOn || hoverSoundOn ? ([{
+            ...range('soundVolume', '', 'Volume',
+              'How loud both sounds play. Windows volume still applies on top.',
+              soundVolume, 0, 100,
+              (value) => {
+                setRadialSoundVolume(value);
+                update('radialSoundVolume', value);
+              },
+              (value) => `${Math.round(value)}%`, 1, 'radialSoundVolume'),
+            keywords: 'volume loud quiet level louder softer sound effects',
+            onCommit: () => previewRadialSound(sounds.hover ?? sounds.open ?? hoverSoundId),
+          }] as SettingItem[]) : []),
           {
             key: 'openSound', configKey: 'radialOpenSound', group: '', title: 'When the wheel opens',
             description: 'One note as the wheel blooms open, and again when you aim back at the center.',
@@ -2052,6 +2079,18 @@ function SettingRow({
     return () => window.clearTimeout(timer);
   }, [confirming]);
 
+  /** React's `onChange` on a slider is the `input` event; `onCommit` wants the native `change`. */
+  const sliderRef = useRef<HTMLInputElement>(null);
+  const onCommitRef = useRef(item.onCommit);
+  onCommitRef.current = item.onCommit;
+  useEffect(() => {
+    const slider = sliderRef.current;
+    if (!slider) return;
+    const commit = () => onCommitRef.current?.(Number(slider.value));
+    slider.addEventListener('change', commit);
+    return () => slider.removeEventListener('change', commit);
+  }, []);
+
   const dragProps = reorderable
     ? {
         draggable: armed,
@@ -2256,6 +2295,7 @@ function SettingRow({
         <div className="zs-slider">
           <span className="zs-slider-bounds">{item.format?.(item.min ?? 0)}</span>
           <input
+            ref={sliderRef}
             type="range"
             min={item.min}
             max={item.max}

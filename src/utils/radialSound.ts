@@ -43,6 +43,8 @@ let noiseBuffer: AudioBuffer | null = null;
 const SLEEP_AFTER_MS = 1500;
 /** Master level, with a limiter behind it; the same chain the sounds were auditioned through. */
 const MASTER_GAIN = 0.7;
+/** The Volume setting, 0–1. At 1 the notes play at `MASTER_GAIN`, the level they were tuned at. */
+let volume = 1;
 
 function context(): AudioContext | null {
   if (ctx) return ctx;
@@ -58,9 +60,17 @@ function context(): AudioContext | null {
   limiter.attack.value = 0.001;
   limiter.release.value = 0.05;
   master = ctx.createGain();
-  master.gain.value = MASTER_GAIN;
+  master.gain.value = masterGain();
   master.connect(limiter).connect(ctx.destination);
   return ctx;
+}
+
+/**
+ * Squared, because loudness is heard on a log scale: a linear 50% is only 6 dB down and sounds
+ * barely quieter, while the square puts it 12 dB down, near what "half" feels like.
+ */
+function masterGain(): number {
+  return MASTER_GAIN * volume * volume;
 }
 
 /* -- Building blocks ------------------------------------------------------ */
@@ -224,6 +234,12 @@ export function normalizeRadialSound(value: unknown, fallback: RadialSoundId): R
   return typeof value === 'string' && value in VOICES ? (value as RadialSoundId) : fallback;
 }
 
+/** The Volume setting as a whole percent; a missing or hand-edited value plays at full. */
+export function normalizeRadialVolume(value: unknown): number {
+  const n = typeof value === 'number' && Number.isFinite(value) ? value : 100;
+  return Math.round(Math.min(100, Math.max(0, n)));
+}
+
 /* -- Which note, when ----------------------------------------------------- */
 
 /** What each moment plays, with `null` for a moment that is switched off. */
@@ -274,6 +290,15 @@ export function noteForHighlight(
 }
 
 /* -- Playback ------------------------------------------------------------- */
+
+/**
+ * One level for both notes. Each window — the wheel, Settings — has its own copy of this module,
+ * so each sets it from its own config.
+ */
+export function setRadialSoundVolume(percent: unknown): void {
+  volume = normalizeRadialVolume(percent) / 100;
+  if (master) master.gain.value = masterGain();
+}
 
 /** Called when the wheel opens with a sound on, so the stream is up before the first note. */
 export function wakeRadialSound(): void {

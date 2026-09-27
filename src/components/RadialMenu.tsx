@@ -30,6 +30,7 @@ import {
   noteForHighlight,
   playRadialSound,
   resolveRadialSounds,
+  setRadialSoundVolume,
   sleepRadialSound,
   wakeRadialSound,
 } from '../utils/radialSound';
@@ -1600,6 +1601,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
    */
   const sounds = resolveRadialSounds(config);
   const anySound = sounds.open !== null || sounds.hover !== null;
+  useEffect(() => { setRadialSoundVolume(config.radialSoundVolume); }, [config.radialSoundVolume]);
   useEffect(() => {
     if (isOpen && anySound) wakeRadialSound();
     else sleepRadialSound();
