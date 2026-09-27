@@ -244,7 +244,8 @@ export default function App() {
   }, []);
 
   /**
-   * Open — unless Windows opened the app.
+   * Open — unless Windows opened the app, or it is the reopen after an update started from the
+   * tray (see `startInTray`).
    *
    * Settings is what a manual launch is asking for, and the last thing a login start wants: with
    * "start with Windows" on, Rovyl signs in to the tray with the wheel warm behind it. The window
@@ -253,7 +254,7 @@ export default function App() {
    * so the choice can be made here, in the first render, rather than as a flash.
    */
   const [isSettingsOpen, setIsSettingsOpen] = useState(
-    () => window.electron?.openedAtLogin !== true,
+    () => window.electron?.startInTray !== true,
   );
   /**
    * Where Settings was open. Up here because the panel does not survive using the app.

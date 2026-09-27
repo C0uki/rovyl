@@ -17,7 +17,7 @@ contextBridge.exposeInMainWorld("electron", {
   getBuildChannel: () => ipcRenderer.invoke("get-build-channel"),
   getUpdateState: () => ipcRenderer.invoke("get-update-state"),
   checkForUpdates: () => ipcRenderer.invoke("check-for-updates"),
-  installUpdateNow: () => ipcRenderer.send("install-update-now"),
+  installUpdateNow: (reopen) => ipcRenderer.send("install-update-now", reopen),
   /** Auto-update state — feeds the badge on the radial's hub. */
   onUpdateState: (callback) => {
     const listener = (_event, payload) => callback(payload);
@@ -32,11 +32,12 @@ contextBridge.exposeInMainWorld("electron", {
    * A login start belongs in the tray, and that is decided in the first render or not at all — an
    * awaited answer would show the Settings window and then hide it again at every sign-in.
    */
-  openedAtLogin: (() => {
+  ...(() => {
     try {
-      return ipcRenderer.sendSync("get-launch-flags")?.openedAtLogin === true;
+      const flags = ipcRenderer.sendSync("get-launch-flags");
+      return { openedAtLogin: flags?.openedAtLogin === true, startInTray: flags?.startInTray === true };
     } catch (e) {
-      return false;
+      return { openedAtLogin: false, startInTray: false };
     }
   })(),
   appSupportsRecents: (appName, appCommand) => ipcRenderer.invoke("app-supports-recents", appName, appCommand),

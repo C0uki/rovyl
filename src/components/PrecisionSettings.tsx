@@ -219,6 +219,16 @@ interface SettingItem {
   raw?: number;
   format?: (value: number) => string;
   /**
+   * `range` only: a dot on the track at every `step`, for a slider whose drag is coarse on purpose
+   * and whose exact value is typed instead — see `unit`.
+   */
+  ticks?: boolean;
+  /**
+   * `range` only: the readout is also a field the exact value is typed into. While it is being
+   * typed in, the unit steps outside the box, so it reads as something not to type.
+   */
+  unit?: string;
+  /**
    * `hint` is support text drawn beside the label; `help` is a sentence too long to draw at
    * all, reachable from the option's own help affordance.
    */
@@ -231,6 +241,8 @@ interface SettingItem {
   widget?: React.ReactNode;
   /** `dockPosition` only: the other dock's region, drawn faint so a shared corner is a choice. */
   occupied?: { position: DockPosition; label: string };
+  /** `false`: the row opens in place without scrolling the list to follow it — see `Collapse`. */
+  reveal?: boolean;
   /**
    * Extra words the search box matches, beyond title/description/group.
    *
@@ -492,7 +504,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
         kind: 'action' as const,
         actionLabel: 'Restart now',
         actionIcon: ArrowUpFromLine,
-        onRun: () => window.electron?.installUpdateNow?.(),
+        onRun: () => window.electron?.installUpdateNow?.('window'),
       };
     }
 
@@ -1153,11 +1165,19 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
           kind: 'bool', enabled: soundsOn,
           onToggle: () => update('radialSounds', !soundsOn),
         },
+        /**
+         * Everything under the switch opens without a scroll. Together with the practice wheel it
+         * is taller than the list, so following it into view pushed the switch just pressed off the
+         * top — the list moved on its own, and the switch was gone to answer whether it took.
+         */
         ...(soundsOn ? ([
           /**
            * One level for both notes, straight under the switch it refines. Only while one of
            * them is on: a volume for nothing is a control that does nothing. Letting go plays the
            * hover note, the one heard most, at the new level.
+           *
+           * The drag moves in tens, one dot each, because a hand cannot hear 37 from 38; the
+           * readout takes a typed number for the person who wants exactly that.
            */
           ...(openSoundOn || hoverSoundOn ? ([{
             ...range('soundVolume', '', 'Volume',
@@ -1167,7 +1187,9 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
                 setRadialSoundVolume(value);
                 update('radialSoundVolume', value);
               },
-              (value) => `${Math.round(value)}%`, 1, 'radialSoundVolume'),
+              (value) => `${Math.round(value)}%`, 10, 'radialSoundVolume'),
+            ticks: true,
+            unit: '%',
             keywords: 'volume loud quiet level louder softer sound effects',
             onCommit: () => previewRadialSound(sounds.hover ?? sounds.open ?? hoverSoundId),
           }] as SettingItem[]) : []),
@@ -1236,7 +1258,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
               />
             ),
           }] as SettingItem[]) : []),
-        ] as SettingItem[]) : []),
+        ] as SettingItem[]).map((item) => ({ ...item, reveal: false })) : []),
       ],
       appearance: [
         {
@@ -1956,7 +1978,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
                           */}
                           <AnimatePresence initial={false}>
                             {group.items.map((item) => (
-                              <Collapse key={item.key}>
+                              <Collapse key={item.key} reveal={item.reveal !== false}>
                                 <SettingRow
                                   item={item}
                                   /**
@@ -2207,7 +2229,9 @@ function SettingRow({
           <MouseTriggerControl item={item} describedBy={describedBy} />
         )}
 
-        {item.kind === 'range' && <span className="zs-readout">{item.value}</span>}
+        {item.kind === 'range' && (item.unit
+          ? <RangeValueField item={item} />
+          : <span className="zs-readout">{item.value}</span>)}
 
         {/* The picture answers "where"; this says it in words, for the search and the screen reader. */}
         {item.kind === 'dockPosition' && <span className="zs-readout is-place">{item.value}</span>}
@@ -2294,21 +2318,92 @@ function SettingRow({
       {item.kind === 'range' && (
         <div className="zs-slider">
           <span className="zs-slider-bounds">{item.format?.(item.min ?? 0)}</span>
-          <input
-            ref={sliderRef}
-            type="range"
-            min={item.min}
-            max={item.max}
-            step={item.step}
-            value={item.raw}
-            aria-labelledby={`${item.key}-label`}
-            aria-describedby={describedBy}
-            onChange={(event) => item.onChange?.(Number(event.target.value))}
-          />
+          <span className={`zs-slider-rail${item.ticks ? ' has-ticks' : ''}`}>
+            {item.ticks && (
+              <span className="zs-slider-ticks" aria-hidden="true">
+                {Array.from(
+                  { length: Math.round(((item.max ?? 0) - (item.min ?? 0)) / (item.step || 1)) + 1 },
+                  (_, index) => <i key={index} />,
+                )}
+              </span>
+            )}
+            <input
+              ref={sliderRef}
+              type="range"
+              min={item.min}
+              max={item.max}
+              step={item.step}
+              value={item.raw}
+              aria-labelledby={`${item.key}-label`}
+              aria-describedby={describedBy}
+              onChange={(event) => item.onChange?.(Number(event.target.value))}
+            />
+          </span>
           <span className="zs-slider-bounds">{item.format?.(item.max ?? 0)}</span>
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * A slider's readout that also takes a typed value: `37%` at rest, a bare `37` with the `%`
+ * outside the box while it has focus, so the unit reads as given rather than as something to
+ * type. Enter or clicking away keeps the number, clamped to the slider's ends; Escape drops it.
+ */
+function RangeValueField({ item }: { item: SettingItem }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  /** Escape blurs too, and the blur must not keep what Escape just threw away. */
+  const discardRef = useRef(false);
+  const editing = draft !== null;
+
+  /** After the render that swapped `37%` for `37`, or the selection would cover the old text. */
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+
+  const settle = () => {
+    const typed = draft?.trim() ?? '';
+    const discard = discardRef.current;
+    discardRef.current = false;
+    setDraft(null);
+    if (discard || typed === '') return;
+    const min = item.min ?? 0;
+    const max = item.max ?? 100;
+    const next = Math.round(Math.min(max, Math.max(min, Number(typed))));
+    if (!Number.isFinite(next) || next === item.raw) return;
+    item.onChange?.(next);
+    item.onCommit?.(next);
+  };
+
+  return (
+    <span className={`zs-valuefield${editing ? ' is-editing' : ''}`}>
+      <input
+        ref={inputRef}
+        type="text"
+        inputMode="numeric"
+        className="zs-valuefield-input"
+        value={editing ? draft : item.value ?? ''}
+        maxLength={editing ? 3 : undefined}
+        aria-labelledby={`${item.key}-label`}
+        onFocus={() => setDraft(String(Math.round(item.raw ?? 0)))}
+        onChange={(event) => setDraft(event.target.value.replace(/\D/g, ''))}
+        onBlur={settle}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            event.currentTarget.blur();
+          } else if (event.key === 'Escape') {
+            /** Marked, so the panel's own Escape leaves this press alone. */
+            event.preventDefault();
+            discardRef.current = true;
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      {editing && <span className="zs-valuefield-unit" aria-hidden="true">{item.unit}</span>}
+    </span>
   );
 }
 

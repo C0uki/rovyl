@@ -63,7 +63,7 @@ const { parseForegroundSnapshot, createLineSplitter } = require("./foreground-sn
 const { isPhysicalRectFullscreen } = require("./fullscreen-bounds.cjs");
 const { fullBleedBounds } = require("./full-bleed-bounds.cjs");
 const { titleFromHtmlBuffer } = require("./page-title.cjs");
-const { decidePendingUpdate } = require("./pending-update.cjs");
+const { decidePendingUpdate, isNewerVersion } = require("./pending-update.cjs");
 const { createSystemStatusService } = require("./system-status.cjs");
 const { inspectDroppedPath } = require("./drop-inspect.cjs");
 const crypto = require("crypto");
@@ -1011,63 +1011,24 @@ const showUpdateSplash = ({ version, installerPath, installerPid }) => {
  */
 let pendingUpdateInstallStarted = false;
 
-/** `true` when an installer now owns the machine and this process is on its way out. */
-const installPendingUpdateAndExit = () => {
-  if (!isPackagedBuild || process.platform !== "win32" || isStoreBuild()) return false;
+/**
+ * Set when this launch is the reopen after an update the user started from the tray (or the
+ * wheel): the new version signs back in to the tray instead of putting Settings on screen.
+ */
+let reopenedIntoTray = false;
 
-  const pending = readPendingUpdate();
-  if (!pending) return false;
-
-  const decision = decidePendingUpdate({
-    pending,
-    currentVersion: app.getVersion(),
-    installerExists: () => fs.existsSync(pending.installerPath),
-    installerRunning: () => isInstallerRunning(pending.installerPath),
-  });
-
-  if (decision.action === "clear") {
-    clearPendingUpdate();
-    return false;
-  }
-  if (decision.action === "give-up") {
-    diagLog(
-      `[Update] ${pending.version} did not install (${decision.reason}) — starting on ${app.getVersion()}`,
-    );
-    writePendingUpdate({ ...pending, gaveUp: true });
-    return false;
-  }
-  if (decision.action !== "install") {
-    diagLog(`[Update] Not installing before startup: ${decision.reason}`);
-    return false;
-  }
-
-  writePendingUpdate({
-    ...pending,
-    attempts: (Number(pending.attempts) || 0) + 1,
-    lastAttemptAt: Date.now(),
-  });
-
-  /**
-   * `--updated` tells the NSIS script this is an update and not a first install, `/S` keeps it
-   * silent, and `--force-run` is the part the quit-time install was missing: it opens Rovyl again
-   * once the files are replaced.
-   */
+/**
+ * Hand the machine to the silent installer, with the splash on screen while it works.
+ *
+ * `--updated` tells the NSIS script this is an update and not a first install, `/S` keeps it
+ * silent — without it the assisted installer walks the user through the whole first-install
+ * wizard again — and `--force-run` opens Rovyl once the files are replaced.
+ *
+ * `onStarted` runs once the installer really exists (that is when the caller should exit);
+ * `onFailed` when nothing could be started. Returns `false` if even the spawn call threw.
+ */
+const startPendingInstaller = (pending, { onStarted, onFailed }) => {
   const installerArgs = ["--updated", "/S", "--force-run"];
-  /** Nothing was started: give the launch back to the app. */
-  const abortInstall = () => {
-    pendingUpdateInstallStarted = false;
-    if (app.isReady()) {
-      app.relaunch();
-      app.exit(0);
-    }
-  };
-  const exitForInstaller = () => {
-    try {
-      app.exit(0);
-    } catch (e) {
-      process.exit(0);
-    }
-  };
 
   let child;
   try {
@@ -1087,7 +1048,7 @@ const installPendingUpdateAndExit = () => {
       installerPath: pending.installerPath,
       installerPid: child.pid,
     });
-    exitForInstaller();
+    onStarted();
   });
   child.once("error", (error) => {
     diagLog(`[Update] Installer spawn failed (${error.code || "?"}): ${error.message}`);
@@ -1104,21 +1065,92 @@ const installPendingUpdateAndExit = () => {
         }).unref();
         /** No pid worth passing — elevate.exe is not the installer. The splash watches the name. */
         showUpdateSplash({ version: pending.version, installerPath: pending.installerPath });
-        exitForInstaller();
+        onStarted();
       } catch (e) {
         diagLog(`[Update] elevate.exe failed too: ${e.message}`);
-        abortInstall();
+        onFailed();
       }
       return;
     }
     /**
      * Nothing is installing, so exiting now would reproduce the bug this whole path exists to fix:
-     * a click that opens nothing. Start the app instead — `whenReady` has not resolved yet at this
-     * point, and if it somehow has, only a restart can still build a window.
+     * a click that opens nothing. The caller decides how to stay alive instead.
      */
-    abortInstall();
+    onFailed();
   });
   child.unref();
+  return true;
+};
+
+/** `true` when an installer now owns the machine and this process is on its way out. */
+const installPendingUpdateAndExit = () => {
+  if (!isPackagedBuild || process.platform !== "win32" || isStoreBuild()) return false;
+
+  let pending = readPendingUpdate();
+  if (!pending) return false;
+
+  const decision = decidePendingUpdate({
+    pending,
+    currentVersion: app.getVersion(),
+    installerExists: () => fs.existsSync(pending.installerPath),
+    installerRunning: () => isInstallerRunning(pending.installerPath),
+  });
+
+  if (decision.action === "clear") {
+    /**
+     * The first launch of the version the note asked for — the installer's `--force-run`. Where
+     * the update was started from decides where it comes back: the tray menu or the wheel put it
+     * back in the tray, the Settings window puts it back on screen.
+     */
+    if (!isNewerVersion(pending.version, app.getVersion()) && pending.reopen === "tray") {
+      reopenedIntoTray = true;
+    }
+    clearPendingUpdate();
+    return false;
+  }
+  if (decision.action === "give-up") {
+    diagLog(
+      `[Update] ${pending.version} did not install (${decision.reason}) — starting on ${app.getVersion()}`,
+    );
+    writePendingUpdate({ ...pending, gaveUp: true });
+    return false;
+  }
+  if (decision.action !== "install") {
+    diagLog(`[Update] Not installing before startup: ${decision.reason}`);
+    return false;
+  }
+
+  /**
+   * This launch is what the reopened app stands in for: a login start goes back to the tray, a
+   * click on the icon was asking for the window.
+   */
+  pending = {
+    ...pending,
+    attempts: (Number(pending.attempts) || 0) + 1,
+    lastAttemptAt: Date.now(),
+    reopen: startedAtLogin ? "tray" : "window",
+  };
+  writePendingUpdate(pending);
+
+  /** Nothing was started: give the launch back to the app. */
+  const abortInstall = () => {
+    pendingUpdateInstallStarted = false;
+    if (app.isReady()) {
+      app.relaunch();
+      app.exit(0);
+    }
+  };
+  const exitForInstaller = () => {
+    try {
+      app.exit(0);
+    } catch (e) {
+      process.exit(0);
+    }
+  };
+
+  if (!startPendingInstaller(pending, { onStarted: exitForInstaller, onFailed: abortInstall })) {
+    return false;
+  }
 
   diagLog(`[Update] Installing ${pending.version} before startup`);
   pendingUpdateInstallStarted = true;
@@ -5076,7 +5108,7 @@ app.whenReady().then(async () => {
           setPause: setTriggerPause,
           openSettings: () => { void openSettingsFromTray(); },
           checkForUpdates: () => { void runUpdateCheck(); },
-          installUpdate: () => installUpdateNow(),
+          installUpdate: () => installUpdateNow("tray"),
           quit: () => app.quit(),
         },
       }),
@@ -8532,7 +8564,11 @@ ipcMain.handle("was-opened-at-login", () => {
  * itself away again.
  */
 ipcMain.on("get-launch-flags", (event) => {
-  event.returnValue = { openedAtLogin: startedAtLogin };
+  event.returnValue = {
+    openedAtLogin: startedAtLogin,
+    /** Login start, or the reopen after an update started from the tray: Settings stays closed. */
+    startInTray: startedAtLogin || reopenedIntoTray,
+  };
 });
 
 ipcMain.handle("get-app-version", () => app.getVersion());
@@ -8617,35 +8653,69 @@ const runUpdateCheck = async () => {
 
 ipcMain.handle("check-for-updates", () => runUpdateCheck());
 
-/** Restart to install — the user picks the moment, in the Settings row. */
-const installUpdateNow = () => {
+/**
+ * Restart to install — the user picks the moment, in the Settings row, the tray menu or the badge
+ * on the wheel's hub.
+ *
+ * Not `quitAndInstall`. The installer is the assisted one (`oneClick: false`, for the folder
+ * choice on a first install), and electron-updater only makes it silent when asked to — so the
+ * restart the user asked for opened the whole first-install wizard, Next buttons and all. This is
+ * the same silent install + splash the launch-time path runs, started from here instead.
+ *
+ * `reopen` is where the new version comes back: "tray" from the tray menu and the wheel (the user
+ * was not looking at a window), "window" from Settings.
+ */
+const installUpdateNow = (reopen = "window") => {
   if (isStoreBuild()) return;
   /** There is only something to install after `update-downloaded`; before that there is no file. */
   if (lastKnownUpdate.state !== "ready") return;
   if (updateInstallInProgress) return;
-  diagLog("[Update] Install requested by the user");
+  diagLog(`[Update] Install requested by the user (reopens into ${reopen})`);
   updateInstallInProgress = true;
 
   /** The pointer may be parked at the wheel's centre: give it back while the helper is alive. */
   releaseRadialCursor();
   /**
-   * Stop the helpers BEFORE exiting. `will-quit` stops them too, but `quitAndInstall` runs the
-   * installer as soon as the process ends, and one orphan PowerShell with a file from the install
-   * folder open is enough for the replacement to fail.
+   * Stop the helpers BEFORE exiting. `will-quit` stops them too, but the installer starts the
+   * moment the spawn succeeds, and one orphan PowerShell with a file from the install folder open
+   * is enough for the replacement to fail.
    */
   stopMouseHookForShutdown();
   stopRadialMouseBlocker();
   stopForegroundFocusHelper();
   systemStatus.stop();
 
+  /** Last resort, silent all the same: no note (or no spawn) must not bring the wizard back. */
+  const fallBackToUpdater = () => getAutoUpdater().quitAndInstall(true, true);
+
+  const pending = readPendingUpdate();
+  if (!pending || !fs.existsSync(pending.installerPath)) {
+    diagLog("[Update] No installer on record — handing the install to electron-updater");
+    fallBackToUpdater();
+    return;
+  }
+
   /**
-   * `isForceRunAfter: true` — without this NSIS installs and does NOT relaunch the app, forcing the
-   * user to open it by hand. An app that lives in the tray simply vanished after updating.
+   * The note carries the reopen target across the install, and counts this as an attempt: if the
+   * installer dies, the next launch retries it within the same limit as any other.
    */
-  getAutoUpdater().quitAndInstall(false, true);
+  const note = {
+    ...pending,
+    attempts: (Number(pending.attempts) || 0) + 1,
+    lastAttemptAt: Date.now(),
+    reopen: reopen === "tray" ? "tray" : "window",
+  };
+  writePendingUpdate(note);
+
+  const started = startPendingInstaller(note, {
+    /** `quit`, not `exit`: `will-quit` still tidies up; `before-quit` skips the renderer flush. */
+    onStarted: () => app.quit(),
+    onFailed: fallBackToUpdater,
+  });
+  if (!started) fallBackToUpdater();
 };
 
-ipcMain.on("install-update-now", installUpdateNow);
+ipcMain.on("install-update-now", (_event, reopen) => installUpdateNow(reopen === "tray" ? "tray" : "window"));
 
 ipcMain.on("show-window", () => {
   if (!mainWindow || mainWindow.isDestroyed()) return;

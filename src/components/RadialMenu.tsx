@@ -4097,7 +4097,8 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                   onMouseUp={(e) => e.stopPropagation()}
                   onClick={(e) => {
                     e.stopPropagation();
-                    window.electron?.installUpdateNow?.();
+                    /** Pressed on the wheel, not in a window: the new version comes back in the tray. */
+                    window.electron?.installUpdateNow?.('tray');
                   }}
                   aria-label="Restart to update"
                   title="Restart to update"
