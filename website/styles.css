@@ -1104,6 +1104,9 @@ a { color: inherit; text-decoration: none; }
   pointer-events: none;
 }
 .slider-ticks i { width: 6px; height: 6px; border-radius: 50%; background: var(--zn-line-strong); }
+/* The ends need no dot: the bounds beside the track already name them. Hidden, not removed,
+   so the rest keep their spacing. */
+.slider-ticks i:first-child, .slider-ticks i:last-child { visibility: hidden; }
 /* A readout you can type into. The box gives up the unit's width while focused, so
    the `%` stepping outside it moves nothing else in the row. */
 .valuefield { width: 58px; display: flex; align-items: center; gap: 3px; }
