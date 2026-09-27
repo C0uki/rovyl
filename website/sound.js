@@ -12,7 +12,8 @@
    Browsers will not start audio before a visitor has interacted with the page,
    and the page does not try to: until the first click or key press every note
    is simply skipped, rather than queued up to arrive late or warned about in
-   the console.
+   the console - and the Sound switch reads off until then, so the press it
+   invites is the one that turns sound on.
    ══════════════════════════════════════════════════════════════════════════ */
 
 (function () {
@@ -51,26 +52,45 @@
   const listeners = new Set();
 
   /* ── Autoplay ───────────────────────────────────────────────────────────
-     `userActivation.hasBeenActive` is the browser's own answer to "may this
-     page make a sound yet"; the flag is the fallback for one that cannot say. */
-  let interacted = false;
-  const allowed = () =>
-    interacted || Boolean(navigator.userActivation && navigator.userActivation.hasBeenActive);
+     No page may start audio before its visitor has clicked or pressed a key.
+     `ready` is whether that has happened, and the page's Sound switch shows
+     it: a switch that reads "on" while nothing can play gets pressed, turns
+     OFF, and has to be pressed again before anything is heard.
+
+     `userActivation.hasBeenActive` is the browser's own answer, and it is
+     already true when a capturing listener hears the press that made it so. A
+     key the browser does not count (Tab, Escape) leaves it false, and is
+     ignored here too rather than unlocking a stream that could not start. */
+  let ready = Boolean(navigator.userActivation && navigator.userActivation.hasBeenActive);
+  const allowed = () => ready;
+  const readyListeners = new Set();
 
   /* The first gesture starts the stream inside the gesture itself, which is the
      one place every browser lets it start, and lets it sleep again straight away.
-     Later notes then only have to resume it. */
-  const unlock = () => {
-    interacted = true;
+     Later notes then only have to resume it.
+
+     A press on a Sound switch is left to the switch: it has to know that this
+     press is the one that made sound possible, so that it turns sound ON rather
+     than toggling a setting that was on all along. */
+  function unlock(event) {
+    if (ready) return;
+    const target = event && event.target;
+    if (target && target.closest && target.closest('[data-sound-switch]')) return;
+    if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+    ready = true;
     window.removeEventListener('pointerdown', unlock, true);
     window.removeEventListener('keydown', unlock, true);
-    if (!wanted()) return;
-    const c = context();
-    if (c && c.state === 'suspended') void c.resume().catch(() => undefined);
-    sleep();
-  };
-  window.addEventListener('pointerdown', unlock, true);
-  window.addEventListener('keydown', unlock, true);
+    if (wanted()) {
+      const c = context();
+      if (c && c.state === 'suspended') void c.resume().catch(() => undefined);
+      sleep();
+    }
+    for (const listener of readyListeners) listener();
+  }
+  if (!ready) {
+    window.addEventListener('pointerdown', unlock, true);
+    window.addEventListener('keydown', unlock, true);
+  }
 
   function context() {
     if (ctx) return ctx;
@@ -351,6 +371,12 @@
     return () => listeners.delete(listener);
   }
 
+  /** Called once, when the page becomes allowed to play. */
+  function onReady(listener) {
+    readyListeners.add(listener);
+    return () => readyListeners.delete(listener);
+  }
+
   window.RovylSound = {
     SOUNDS,
     DEFAULTS,
@@ -358,6 +384,10 @@
     settings,
     set,
     subscribe,
+    isReady: allowed,
+    onReady,
+    /** For a Sound switch's own press, which the automatic unlock leaves alone. */
+    unlock: () => unlock(null),
     resolve,
     normalize,
     normalizeVolume,

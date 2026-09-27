@@ -162,4 +162,8 @@ Knock in the panel and the wheel at the top plays Knock.
 
 Notes play only while a visitor is driving a wheel; the unattended loop is
 silent. Browsers will not start audio before the page has been clicked or typed
-into, so until then every note is skipped rather than queued.
+into, so until then every note is skipped rather than queued - and the stage's
+Sound switch reads off until then. It shows whether a note would be heard, not
+just the setting: a switch reading "on" over a silent wheel got pressed, turned
+sound OFF, and had to be pressed a second time. Now the first press turns it on
+and plays a note, and any other first click on the page flips it on by itself.

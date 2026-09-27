@@ -673,17 +673,25 @@
     const wasAway = aimedAway;
     if (target !== null && target !== HUB_TARGET) aimedAway = true;
     if (!SOUND || !manual || !open || firing) return;
+    /* Held awake for as long as the wheel is being driven: a stream that has gone
+       to sleep takes a beat to come back, and that beat lands on the note. */
+    SOUND.wake();
     const note = SOUND.noteFor(target, wasAway, performance.now() - openedAt, SOUND.resolve());
     if (note) SOUND.play(note);
   }
 
   /* The page's switch for it. It shares the one copy of the sound settings the
-     panel further down edits, so either can turn it off. */
+     panel further down edits, so either can turn it off.
+
+     It reads ON only when a note would actually be heard - the setting is on AND
+     the browser has let the page play. Before the first click it reads off, so
+     the press it invites turns sound on instead of off. */
   function syncSoundSwitch() {
     if (!soundSwitch) return;
-    const on = !!SOUND && SOUND.settings.radialSounds !== false;
+    const on = !!SOUND && SOUND.settings.radialSounds !== false && SOUND.isReady();
     soundSwitch.setAttribute('aria-checked', String(on));
     soundSwitch.querySelector('.toggle').classList.toggle('is-on', on);
+    soundSwitch.title = on ? 'Turn sound off' : 'Turn sound on';
   }
 
   if (soundSwitch) {
@@ -692,9 +700,13 @@
     } else {
       syncSoundSwitch();
       SOUND.subscribe(syncSoundSwitch);
+      SOUND.onReady(syncSoundSwitch);
       soundSwitch.addEventListener('click', () => {
-        const on = SOUND.settings.radialSounds === false;
+        const on = soundSwitch.getAttribute('aria-checked') !== 'true';
+        /* The press that makes sound possible: this one, if nothing came first. */
+        SOUND.unlock();
         SOUND.set({ radialSounds: on });
+        syncSoundSwitch();
         /* Turning it on plays a note, so the switch answers with the thing it
            switched on - the app's Sound switches do the same. */
         if (on) {
