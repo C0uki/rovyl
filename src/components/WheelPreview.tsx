@@ -68,7 +68,7 @@ function screenSize(): { width: number; height: number } {
  * be a lie about their own wheel. An EMPTY workspace is the one case with nothing true to draw, and
  * there the placeholders are labelled as such by the caption underneath.
  */
-const PLACEHOLDERS: AppItem[] = Array.from({ length: 6 }, (_, index) => ({
+export const PLACEHOLDERS: AppItem[] = Array.from({ length: 6 }, (_, index) => ({
   id: `preview-${index}`,
   type: 'app',
   label: ['Editor', 'Browser', 'Terminal', 'Files', 'Music', 'Chat'][index],

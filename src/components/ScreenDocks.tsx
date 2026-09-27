@@ -406,11 +406,13 @@ function ShortcutTile({
   size,
   showLabel,
   onLaunch,
+  onHover,
 }: {
   item: AppItem;
   size: number;
   showLabel: boolean;
   onLaunch: (item: AppItem) => void;
+  onHover?: () => void;
 }) {
   /**
    * The bitmap, with the glyph behind it.
@@ -434,6 +436,7 @@ function ShortcutTile({
       aria-label={item.label}
       tabIndex={-1}
       {...swallowProps}
+      onPointerEnter={onHover}
       onClick={(event) => {
         swallow(event);
         onLaunch(item);
@@ -461,9 +464,11 @@ function ShortcutTile({
 function ShortcutDockPlate({
   dock,
   onLaunch,
+  onHover,
 }: {
   dock: ShortcutDockConfig;
   onLaunch: (item: AppItem) => void;
+  onHover?: () => void;
 }) {
   return (
     <div
@@ -478,6 +483,7 @@ function ShortcutDockPlate({
           size={dock.iconSize}
           showLabel={dock.showLabels}
           onLaunch={onLaunch}
+          onHover={onHover}
         />
       ))}
     </div>
@@ -496,6 +502,8 @@ export interface ScreenDocksProps {
   onOpenPanel: (panel: SystemPanel) => void;
   onVolume: (percent: number) => void;
   onMute: () => void;
+  /** A shortcut icon came under the pointer — the wheel's hover note, when that is switched on. */
+  onShortcutHover?: () => void;
   /** `performanceMode` and the closing state come from the wheel's own classes; nothing else is needed. */
   reduceMotion?: boolean;
 }
@@ -509,6 +517,7 @@ export const ScreenDocks: React.FC<ScreenDocksProps> = ({
   onOpenPanel,
   onVolume,
   onMute,
+  onShortcutHover,
 }) => {
   const statusOn = statusDockIsActive(status);
   const shortcutsOn = shortcutDockIsActive(shortcuts);
@@ -539,7 +548,7 @@ export const ScreenDocks: React.FC<ScreenDocksProps> = ({
           />
         ) : null;
         const shortcutPlate = shortcutsOn && shortcuts.position === position ? (
-          <ShortcutDockPlate key="shortcuts" dock={shortcuts} onLaunch={onLaunch} />
+          <ShortcutDockPlate key="shortcuts" dock={shortcuts} onLaunch={onLaunch} onHover={onShortcutHover} />
         ) : null;
         if (isBottom) {
           if (shortcutPlate) plates.push(shortcutPlate);

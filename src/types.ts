@@ -291,6 +291,19 @@ export interface UIConfig {
   alwaysShowAppLabels: boolean;
   /** The pill under the wheel naming where you are (workspace, then folders). Absent means on. */
   showWorkspacePill?: boolean;
+  /**
+   * Sound effects, all of them. The two below only count while this is on, and are read as
+   * `!== false` like it: absent means on.
+   */
+  radialSounds?: boolean;
+  /** A note as the wheel blooms open — once per open, not on every folder or workspace swap. */
+  radialOpenSound?: boolean;
+  /** Which of the ten plays on opening. Read through `normalizeRadialSound`. */
+  radialOpenSoundId?: import("./utils/radialSound").RadialSoundId;
+  /** A note each time the highlight moves to a different item: a wheel slice or a shortcut-dock icon. */
+  radialHoverSound?: boolean;
+  /** Which of the ten plays on hover. Read through `normalizeRadialSound`. */
+  radialHoverSoundId?: import("./utils/radialSound").RadialSoundId;
   showBattery: boolean; // New
   showWeather: boolean; // New
   weatherLocation?: string; // New: CEP or city name for weather

@@ -25,6 +25,14 @@ import { clampDwellMs, directionCommitPx } from '../constants/radialDwell';
 import { isBackKeyEvent, normalizeBackKey } from '../constants/radialBackKey';
 import { workspaceKeyAt, workspaceKeyBindings } from '../constants/workspaceHotkey';
 import { radialScrimGradient } from '../utils/radialScrim';
+import {
+  HUB_TARGET,
+  noteForHighlight,
+  playRadialSound,
+  resolveRadialSounds,
+  sleepRadialSound,
+  wakeRadialSound,
+} from '../utils/radialSound';
 import { HUB_DRAG_SLOP_PX, clampWheelCenter } from '../utils/radialDrag';
 import {
   annularSectorPath,
@@ -535,7 +543,7 @@ export function snapToDevicePixel(value: number): number {
 }
 
 /** Keeps icons and labels readable when the user picks a light or dark hover. */
-function getReadableForeground(background: string): '#000000' | '#FFFFFF' {
+export function getReadableForeground(background: string): '#000000' | '#FFFFFF' {
   const hex = background.replace('#', '');
   if (!/^[0-9a-f]{6}$/i.test(hex)) return '#000000';
   const [r, g, b] = [0, 2, 4].map((offset) => parseInt(hex.slice(offset, offset + 2), 16));
@@ -1584,6 +1592,68 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
   typeAheadRef.current = typeAhead;
   /** A level change is a new set of names, so whatever was typed no longer means anything. */
   useEffect(() => { setTypeAhead(''); }, [rawLevelApps]);
+
+  /**
+   * Sound effects. The stream is woken with the open, so it is running by the time the bloom
+   * starts — which is what the opening note is timed to, not `isOpen`: the window is still being
+   * revealed at that point, and a note ahead of the picture reads as lag.
+   */
+  const sounds = resolveRadialSounds(config);
+  const anySound = sounds.open !== null || sounds.hover !== null;
+  useEffect(() => {
+    if (isOpen && anySound) wakeRadialSound();
+    else sleepRadialSound();
+  }, [isOpen, anySound]);
+  useEffect(() => () => sleepRadialSound(), []);
+
+  /**
+   * When this open's first bloom started; null until it has. Once per open, because the bloom
+   * replays on every folder and workspace swap.
+   */
+  const bloomedAtRef = useRef<number | null>(null);
+  /** Whether an item has been lit since the wheel opened — see `noteForHighlight`. */
+  const aimedAwayRef = useRef(false);
+  useEffect(() => {
+    if (!isOpen) {
+      bloomedAtRef.current = null;
+      aimedAwayRef.current = false;
+      return;
+    }
+    if (!bloom || isExiting || bloomedAtRef.current !== null) return;
+    bloomedAtRef.current = performance.now();
+    if (sounds.open) playRadialSound(sounds.open);
+  }, [isOpen, bloom, isExiting, sounds.open]);
+
+  /**
+   * The highlight as one value: the lit item's id, `HUB_TARGET` for the centre, null for nothing.
+   *
+   * Keyed on this rather than on the dozen places that set `activeIndex`, so pointer, keyboard and
+   * dwell aiming all sound alike. And by id rather than index, because a note belongs to a change
+   * of ITEM: typing narrows the ring and renumbers what stays lit, and a folder or workspace swap
+   * puts a different item under the same index.
+   */
+  const highlight = activeIndex !== null
+    ? currentLevelApps[activeIndex]?.id ?? null
+    : isCenterActive ? HUB_TARGET : null;
+  /** The corner dock's icons are items too, and take the same note. */
+  const hoverNote = sounds.hover;
+  const playDockHover = useCallback(() => {
+    if (hoverNote) playRadialSound(hoverNote);
+  }, [hoverNote]);
+  const soundedHighlightRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previous = soundedHighlightRef.current;
+    soundedHighlightRef.current = highlight;
+    if (highlight === previous) return;
+    const aimedAway = aimedAwayRef.current;
+    if (highlight !== null && highlight !== HUB_TARGET) aimedAwayRef.current = true;
+    const bloomedAt = bloomedAtRef.current;
+    if (!isOpen || isExiting || closingRef.current || bloomedAt === null) return;
+    const note = noteForHighlight(highlight, aimedAway, performance.now() - bloomedAt, sounds);
+    if (note) playRadialSound(note);
+    // `sounds` is rebuilt every render; its two values are what matter.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlight, isOpen, isExiting, sounds.open, sounds.hover]);
   const [folderStack, setFolderStack] = useState<{ label: string, apps: AppItem[] }[]>([]);
   const [isLoadingRecents, setIsLoadingRecents] = useState(false);
   /**
@@ -3702,6 +3772,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
               shortcuts={shortcutDock}
               systemStatus={systemStatus}
               onLaunch={(item) => onClose(item.id, item)}
+              onShortcutHover={sounds.hover ? playDockHover : undefined}
               onOpenPanel={(panel) => {
                 /**
                  * The wheel comes down FIRST and only then is the panel asked for — the same order

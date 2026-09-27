@@ -33,6 +33,7 @@ import {
   Monitor,
   Mouse,
   Pencil,
+  Play,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -82,6 +83,14 @@ import { radialCrowding } from '../utils/workspaceRadial';
 import { startMenuAppIdToLaunchCommand } from '../utils/windowsLaunchCommand';
 import { openExternalSiteUrl } from '../utils/openExternalSiteUrl';
 import {
+  RADIAL_SOUNDS,
+  normalizeRadialSound,
+  previewRadialSound,
+  resolveRadialSounds,
+  type RadialSoundId,
+} from '../utils/radialSound';
+import { SoundTryWheel } from './SoundTryWheel';
+import {
   dropEntriesFrom,
   guessPathKind,
   isNonWebScheme,
@@ -89,7 +98,7 @@ import {
   type DropPayload,
   type InspectedDropPath,
 } from '../utils/droppedShortcut';
-import { WheelPreview, MENU_RADIUS_RANGE } from './WheelPreview';
+import { WheelPreview, MENU_RADIUS_RANGE, PLACEHOLDERS } from './WheelPreview';
 import { DockShortcutsManager } from './DockShortcuts';
 import { DockPositionPicker } from './DockPositionPicker';
 import { WorkspaceFileEditor, type WorkspaceFileEditorHandle } from './WorkspaceFileEditor';
@@ -198,7 +207,7 @@ interface SettingItem {
   group: string;
   title: string;
   description?: string;
-  kind: 'bool' | 'range' | 'segmented' | 'select' | 'dockPosition' | 'open' | 'action' | 'color' | 'mouseButton';
+  kind: 'bool' | 'range' | 'segmented' | 'select' | 'dockPosition' | 'open' | 'action' | 'color' | 'mouseButton' | 'widget';
   enabled?: boolean;
   value?: string;
   min?: number;
@@ -212,6 +221,11 @@ interface SettingItem {
    */
   choices?: Array<{ value: string; label: string; hint?: string; help?: string }>;
   current?: string;
+  /**
+   * `widget` only: something to use rather than set — the practice wheel — drawn full width under
+   * the row's copy, the way the dock picker is.
+   */
+  widget?: React.ReactNode;
   /** `dockPosition` only: the other dock's region, drawn faint so a shared corner is a choice. */
   occupied?: { position: DockPosition; label: string };
   /**
@@ -225,6 +239,11 @@ interface SettingItem {
   keywords?: string;
   onToggle?: () => void;
   onChange?: (value: number | string) => void;
+  /**
+   * `select` only: puts a play button on every option, for lists whose choices are heard rather
+   * than read. Pressing it previews that option without choosing it.
+   */
+  onPreview?: (value: string) => void;
   onOpen?: () => void;
   onRun?: () => void;
   actionLabel?: string;
@@ -875,6 +894,20 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
     const triggerAllowsHold = mouseTriggerAllowsHold(config.mouseTriggerButton ?? DEFAULT_MOUSE_TRIGGER);
     const numberLaunchOn = config.radialNumberLaunch === true;
     const backKey = normalizeBackKey(config.radialBackKey);
+    const soundsOn = config.radialSounds !== false;
+    const openSoundOn = config.radialOpenSound !== false;
+    const hoverSoundOn = config.radialHoverSound !== false;
+    const openSoundId = normalizeRadialSound(config.radialOpenSoundId, 'thump');
+    const hoverSoundId = normalizeRadialSound(config.radialHoverSoundId, 'sub-tick');
+    const soundChoices = RADIAL_SOUNDS.map((sound) => ({ value: sound.id, label: sound.name }));
+    const soundName = (id: RadialSoundId) => RADIAL_SOUNDS.find((sound) => sound.id === id)?.name ?? id;
+    const sounds = resolveRadialSounds(config);
+    /** What the practice wheel says it does, which depends on which of the two notes are on. */
+    const tryDescription = sounds.open && sounds.hover
+      ? `Move around the wheel: items play ${soundName(sounds.hover)}, and aiming back at the center plays ${soundName(sounds.open)}. Click the wheel to open it again.`
+      : sounds.hover
+        ? `Move around the wheel to hear ${soundName(sounds.hover)} on every item.`
+        : `Aim out and back at the center, or click the wheel to open it again, to hear ${soundName(openSoundId)}.`;
 
     /**
      * Turning off the last trigger would leave no way in, so the other one comes on in the same
@@ -1178,6 +1211,85 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
           kind: 'bool', enabled: config.showWorkspacePill !== false,
           onToggle: () => update('showWorkspacePill', config.showWorkspacePill === false),
         },
+        /**
+         * The master switch, then one switch per moment with its own pick beneath it. Withdrawn
+         * rather than disabled while off, like the docks' rows: a sound picker for a sound that
+         * will never play is a control that does nothing.
+         */
+        {
+          key: 'sounds', configKey: 'radialSounds', group: 'Sound', title: 'Sound effects',
+          description: 'Short bass notes as the wheel opens and as you move between items.',
+          keywords: 'sound audio click tick bass thump feedback haptic noise mute effects',
+          kind: 'bool', enabled: soundsOn,
+          onToggle: () => update('radialSounds', !soundsOn),
+        },
+        ...(soundsOn ? ([
+          {
+            key: 'openSound', configKey: 'radialOpenSound', group: 'Sound', title: 'When the wheel opens',
+            description: 'One note as the wheel blooms open, and again when you aim back at the center.',
+            keywords: 'open launch launcher appear start sound',
+            kind: 'bool', enabled: openSoundOn,
+            /** Turning it on plays the note once, so the switch answers with the thing it switched on. */
+            onToggle: () => {
+              update('radialOpenSound', !openSoundOn);
+              if (!openSoundOn) previewRadialSound(openSoundId);
+            },
+          },
+          ...(openSoundOn ? ([{
+            key: 'openSoundId', configKey: 'radialOpenSoundId', group: 'Sound', title: 'Opening sound',
+            description: 'Press play beside a name to hear it before choosing.',
+            kind: 'select', current: openSoundId, choices: soundChoices,
+            onPreview: (value: string) => previewRadialSound(value as RadialSoundId),
+            onChange: (value: number | string) => {
+              update('radialOpenSoundId', value as RadialSoundId);
+              previewRadialSound(value as RadialSoundId);
+            },
+          }] as SettingItem[]) : []),
+          {
+            key: 'hoverSound', configKey: 'radialHoverSound', group: 'Sound', title: 'When moving between items',
+            description: 'A note each time the highlight moves to a different item.',
+            keywords: 'hover highlight select item move aim sound',
+            kind: 'bool', enabled: hoverSoundOn,
+            onToggle: () => {
+              update('radialHoverSound', !hoverSoundOn);
+              if (!hoverSoundOn) previewRadialSound(hoverSoundId);
+            },
+          },
+          ...(hoverSoundOn ? ([{
+            key: 'hoverSoundId', configKey: 'radialHoverSoundId', group: 'Sound', title: 'Hover sound',
+            description: 'Press play beside a name to hear it before choosing.',
+            kind: 'select', current: hoverSoundId, choices: soundChoices,
+            onPreview: (value: string) => previewRadialSound(value as RadialSoundId),
+            onChange: (value: number | string) => {
+              update('radialHoverSoundId', value as RadialSoundId);
+              previewRadialSound(value as RadialSoundId);
+            },
+          }] as SettingItem[]) : []),
+          /**
+           * Last, under the picks it plays: choosing a sound and then feeling it at the speed a
+           * sweep across the wheel produces are one task. Only while there is a note to hear.
+           */
+          ...(openSoundOn || hoverSoundOn ? ([{
+            key: 'soundTry', group: 'Sound', title: 'Try it',
+            description: tryDescription,
+            keywords: 'try test practice preview listen hear demo wheel',
+            kind: 'widget',
+            widget: (
+              <SoundTryWheel
+                apps={previewApps.length ? previewApps : PLACEHOLDERS}
+                sounds={sounds}
+                hoverColor={config.radialHoverColor ?? '#FFFFFF'}
+                targeting={
+                  config.radialSelectionMode === 'cursor' && config.radialInstantActivate !== 'dwell'
+                    ? 'cursor'
+                    : 'area'
+                }
+                labelledBy="soundTry-label"
+                describedBy="soundTry-desc"
+              />
+            ),
+          }] as SettingItem[]) : []),
+        ] as SettingItem[]) : []),
         {
           key: 'radialPlacement', configKey: 'radialPlacement', group: 'Position', title: 'Where it opens',
           /**
@@ -1557,7 +1669,7 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
         },
       ],
     };
-  }, [config, gameMode, statusDock, shortcutDock, theme, apps, update, setConfig, updateRow, canUpdate, onReset, deleteWorkspace, reorderWorkspaces]);
+  }, [config, gameMode, statusDock, shortcutDock, theme, apps, previewApps, update, setConfig, updateRow, canUpdate, onReset, deleteWorkspace, reorderWorkspaces]);
 
   const trimmedQuery = query.trim().toLowerCase();
   const activeMeta = sectionsList.find((section) => section.id === sectionId) || SECTIONS[0];
@@ -1966,7 +2078,7 @@ function SettingRow({
 
   return (
     <div
-      className={`zs-row${item.kind === 'range' ? ' is-slider' : ''}${item.kind === 'dockPosition' ? ' is-picker' : ''}${item.kind === 'open' ? ' is-openable' : ''}`
+      className={`zs-row${item.kind === 'range' ? ' is-slider' : ''}${item.kind === 'dockPosition' || item.kind === 'widget' ? ' is-picker' : ''}${item.kind === 'open' ? ' is-openable' : ''}`
         + `${reorderable ? ' is-reorderable' : ''}${isDragging ? ' is-dragging' : ''}`
         + `${dropEdge === 'above' ? ' is-drop-above' : ''}${dropEdge === 'below' ? ' is-drop-below' : ''}`}
       onClick={item.kind === 'open' ? item.onOpen : undefined}
@@ -2118,6 +2230,8 @@ function SettingRow({
           </Collapse>
         )}
       </AnimatePresence>
+
+      {item.kind === 'widget' && <div className="zs-row-widget">{item.widget}</div>}
 
       {item.kind === 'dockPosition' && (
         <DockPositionPicker
@@ -2470,6 +2584,13 @@ function SelectSettingControl({ item, describedBy }: { item: SettingItem; descri
    * make this an effect that runs every time anything in the panel changes.
    */
   const activeHelp = choices[activeIndex]?.help;
+  /** Choices that are heard — sounds — play as the arrows land on them, the keyboard's play button. */
+  const activeValue = choices[activeIndex]?.value;
+  useEffect(() => {
+    if (isOpen && byKeyboard && activeValue !== undefined) item.onPreview?.(activeValue);
+    // `item` is rebuilt every render; only a move of the highlight should play anything.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, byKeyboard, activeValue]);
   useEffect(() => {
     if (!isOpen || !byKeyboard) return;
     setHelpFor(activeHelp ? activeIndex : null);
@@ -2659,6 +2780,25 @@ function SelectSettingControl({ item, describedBy }: { item: SettingItem; descri
                 }}
                 onClick={() => commit(index)}
               >
+                {item.onPreview && (
+                  /*
+                    A span for the same reason as the help mark below: nothing focusable may live
+                    inside an option. The keyboard path is the highlight itself, which previews as
+                    the arrows move it.
+                  */
+                  <span
+                    className="zs-select-play"
+                    role="presentation"
+                    aria-hidden="true"
+                    title={`Play ${choice.label}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      item.onPreview?.(choice.value);
+                    }}
+                  >
+                    <Play size={11} strokeWidth={2.2} />
+                  </span>
+                )}
                 <b>{choice.label}</b>
                 {choice.hint && choice.hint !== choice.label && <small>{choice.hint}</small>}
                 {choice.help && (

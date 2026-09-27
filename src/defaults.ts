@@ -347,6 +347,12 @@ export const DEFAULT_UI_CONFIG: UIConfig = {
   showLabels: true,
   alwaysShowAppLabels: false,
   showWorkspacePill: true,
+  /** On, both of them, with a different note for each so the two moments never sound alike. */
+  radialSounds: true,
+  radialOpenSound: true,
+  radialOpenSoundId: 'thump',
+  radialHoverSound: true,
+  radialHoverSoundId: 'sub-tick',
   showBattery: false,
   showWeather: false,
   clockPosition: "top-center",

@@ -448,6 +448,57 @@
 .zs-row.is-slider .zs-slider { grid-column: 1 / -1; }
 .zs-row.is-picker { grid-template-columns: minmax(0, 1fr) auto; row-gap: var(--zn-3); }
 .zs-row.is-picker .zs-dockpick { grid-column: 1 / -1; }
+.zs-row.is-picker .zs-row-widget { grid-column: 1 / -1; min-width: 0; }
+
+/* ── Practice wheel (Appearance → Sound) ────────────────────────────────────
+   Dark in both themes, like the wheel it stands in for. The tiles and hub share one transform
+   recipe — centre on the point, then `--zn-tf` — so the bloom below can interpolate it function by
+   function instead of falling back to matrices. */
+.zs-trywheel {
+  position: relative; overflow: hidden; user-select: none; touch-action: none;
+  border-radius: var(--zn-r-control); border: 1px solid var(--zn-line);
+  background: radial-gradient(circle at 50% var(--zs-ring-y, 50%), #1c1e23 0%, #0c0d10 72%);
+  outline: none;
+}
+.zs-trywheel:focus-visible { box-shadow: 0 0 0 2px var(--zn-focus); }
+.zs-trywheel-ring { position: absolute; left: 0; right: 0; top: 0; pointer-events: none; }
+.zs-trywheel-hub,
+.zs-trywheel-tile {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%) var(--zn-tf);
+  transition: transform .12s var(--zn-ease), background-color .09s ease-out, border-color .09s ease-out, color .09s ease-out;
+}
+.zs-trywheel-hub {
+  border-radius: 50%; border: 2px solid rgba(255, 255, 255, .3); background: rgba(10, 11, 14, .92);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), 0 8px 22px rgba(0, 0, 0, .42);
+}
+.zs-trywheel-tile {
+  display: grid; place-items: center;
+  border: 1px solid rgba(255, 255, 255, .26); background: #0e0f12; color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 0 0 1px rgba(0, 0, 0, .5), 0 6px 16px rgba(0, 0, 0, .4);
+}
+.zs-trywheel-tile img { width: 70%; height: 70%; object-fit: contain; }
+/* The wheel's own bloom — its duration and curve — replayed by a click. `backwards`, not `both`:
+   once it has run the tiles must be back on their own transform, or the lit tile could not grow. */
+.zs-trywheel-ring.is-blooming .zs-trywheel-tile { animation: zs-trywheel-bloom 220ms cubic-bezier(.2, .82, .28, 1) backwards; }
+.zs-trywheel-ring.is-blooming .zs-trywheel-hub { animation: zs-trywheel-hub-bloom 220ms cubic-bezier(.2, .82, .28, 1) backwards; }
+@keyframes zs-trywheel-bloom { from { transform: translate(-50%, -50%) translate(0px, 0px) scale(.45); opacity: 0; } }
+@keyframes zs-trywheel-hub-bloom { from { transform: translate(-50%, -50%) scale(.82); opacity: 0; } }
+/* The lit item's name, where the wheel keeps its pill. Always in the tree so it can be a live
+   region; hidden while nothing is lit. */
+.zs-trywheel-name {
+  position: absolute; left: 50%; bottom: var(--zn-2); transform: translateX(-50%);
+  max-width: calc(100% - var(--zn-6)); overflow: hidden; text-overflow: ellipsis;
+  padding: 5px 10px; border-radius: 999px; white-space: nowrap; pointer-events: none;
+  background: rgba(4, 5, 7, .92); border: 1px solid rgba(255, 255, 255, .14);
+  font: 500 11px/1 var(--font-radial); color: rgba(255, 255, 255, .75);
+}
+.zs-trywheel-name:empty { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .zs-trywheel-hub, .zs-trywheel-tile { transition: none; }
+  .zs-trywheel-ring.is-blooming .zs-trywheel-tile,
+  .zs-trywheel-ring.is-blooming .zs-trywheel-hub { animation: none; }
+}
 
 /* ── Workspaces as cards ────────────────────────────────────────────────────
    Each card previews the wheel: the real icons in the real positions. The grid adapts to
@@ -809,6 +860,19 @@
 .zs-select-help:hover { color: var(--zn-text); }
 /* Hover reaches the mark long before the pointer is on the 13px glyph itself. */
 .zs-select-option.is-active .zs-select-help { color: var(--zn-text-2); }
+
+/* The play button on a list of sounds. It leads the row so it sits in one column whatever the name's
+   length, and it is a round target of its own: the rest of the option chooses, this only listens. */
+.zs-select-play {
+  flex: none; display: inline-grid; place-items: center;
+  width: 22px; height: 22px; margin-inline-start: calc(var(--zn-1) * -1);
+  border-radius: 999px; color: var(--zn-text-2);
+  box-shadow: inset 0 0 0 1px var(--zn-line-strong);
+  transition: background-color .15s var(--zn-ease), color .15s var(--zn-ease);
+}
+.zs-select-play > svg { margin-inline-start: 1px; fill: currentColor; }
+.zs-select-play:hover { background: var(--zn-solid); color: var(--zn-on-solid); box-shadow: none; }
+.zs-select-play:active { transform: scale(.92); }
 
 /* The bubble it opens. Under the popup and in the shell, not inside the list, because the list
    scrolls and would clip it — same portal and same measured coordinates as the popup itself.
