@@ -21,7 +21,7 @@ window.ROVYL = {
     "mouseButton": "middle",
     "mouseMode": "click",
     "theme": "black",
-    "version": "1.17.1",
+    "version": "1.17.2",
     "activeWorkspace": 0,
     "centerLabel": "Center",
     "handsFree": false,

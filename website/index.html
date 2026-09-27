@@ -65,6 +65,7 @@
   <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5"/></symbol>
   <symbol id="i-dot" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></symbol>
 </defs></svg>
 
 <!-- ══ Header ════════════════════════════════════════════════════════════ -->
@@ -121,12 +122,21 @@
     <div class="pill" id="pill" aria-hidden="true"><b id="pillName">Main</b><span id="pillChip">Center</span></div>
     <figcaption class="stage-hint" id="stageHint" aria-hidden="true">Point to aim</figcaption>
     <div class="stage-ctl">
-      <button class="hf" id="soundFx" type="button" role="switch" aria-checked="false" data-sound-switch>
-        <span class="toggle" aria-hidden="true"></span>Sound
+      <button class="stage-more" id="stageMore" type="button" aria-label="Wheel options"
+        aria-haspopup="true" aria-expanded="false" aria-controls="stageMenu" title="Wheel options">
+        <svg class="ico" aria-hidden="true"><use href="#i-more"/></svg>
       </button>
-      <button class="hf" id="handsFree" type="button" role="switch" aria-checked="false">
-        <span class="toggle" aria-hidden="true"></span>Launch without clicking
-      </button>
+      <div class="stage-menu" id="stageMenu" role="group" aria-label="Wheel options" hidden>
+        <button class="hf" id="soundFx" type="button" role="switch" aria-checked="false" data-sound-switch>
+          <span class="hf-label">Sound</span><span class="toggle" aria-hidden="true"></span>
+        </button>
+        <button class="hf" id="wedgesFx" type="button" role="switch" aria-checked="false">
+          <span class="hf-label">Visible wedges</span><span class="toggle" aria-hidden="true"></span>
+        </button>
+        <button class="hf" id="handsFree" type="button" role="switch" aria-checked="false">
+          <span class="hf-label">Launch without clicking</span><span class="toggle" aria-hidden="true"></span>
+        </button>
+      </div>
     </div>
   </figure>
 </section>
@@ -273,7 +283,7 @@
         <h4>Settings</h4>
         <div class="win-search"><svg class="ico"><use href="#i-search"/></svg>Search</div>
         <ul class="win-nav" id="winNav"></ul>
-        <div class="win-foot"><span class="win-foot-brand"><span class="brand-mark is-sm"></span>Rovyl</span><em id="setVersion">1.17.1</em></div>
+        <div class="win-foot"><span class="win-foot-brand"><span class="brand-mark is-sm"></span>Rovyl</span><em id="setVersion">1.17.2</em></div>
       </aside>
       <div class="win-main" id="winMain"></div>
     </div>

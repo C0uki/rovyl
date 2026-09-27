@@ -120,6 +120,9 @@
   const cards = [...document.querySelectorAll('.ws-strip .ws')];
   const hfSwitch = document.getElementById('handsFree');
   const soundSwitch = document.getElementById('soundFx');
+  const wedgeSwitch = document.getElementById('wedgesFx');
+  const moreButton = document.getElementById('stageMore');
+  const optionsMenu = document.getElementById('stageMenu');
   const SOUND = window.RovylSound || null;
   if (!stage || !wheel || !SPACES.length) return;
 
@@ -132,10 +135,11 @@
   /* The app always opens on the home launcher when more than one workspace is
      on; a single workspace skips straight to its shortcuts. */
   const PICKER = SPACES.length > 1;
-  /* Area targeting with "Visible wedges" on: the shares are drawn. Off, the aim
-     is identical and only the icon lights, so there is nothing to draw. */
-  const AREA = LOOK.selectionMode !== 'cursor' && LOOK.areaWedges === true
-    && !!sectors && !!window.RovylSectors;
+  /* Area targeting can draw its shares - the seams and the lit gradient - or
+     not: the app's "Visible wedges". Off, the aim is identical and only the icon
+     lights. The stage's options menu switches it, starting from the config. */
+  const CAN_WEDGE = LOOK.selectionMode !== 'cursor' && !!sectors && !!window.RovylSectors;
+  let wedgesOn = CAN_WEDGE && LOOK.areaWedges === true;
 
   /* The app's own appearance settings, honoured rather than guessed at. */
   stage.style.setProperty('--hover', LOOK.hoverColor || '#ffffff');
@@ -349,7 +353,10 @@
        nearest edge would squeeze the whole fade into a few pixels and read as a
        hard rim. The wedge keeps the monitor's proportion instead and runs off
        the frame, as it runs off the screen. */
-    if (AREA) {
+    if (!wedgesOn) {
+      if (sectors) sectors.replaceChildren();
+      wedges = [];
+    } else {
       wedges = RovylSectors.draw(sectors, {
         count: slices.length,
         inner: Math.max(deadZone(), hubSize / 2 + 8),
@@ -426,8 +433,8 @@
     hub.style.setProperty('--hub-s', open ? '1' : '0.2');
     hub.style.setProperty('--hub-o', open ? '1' : '0');
     scrim.classList.toggle('is-on', open);
-    if (AREA) {
-      sectors.classList.toggle('is-on', open && !firing);
+    if (CAN_WEDGE) {
+      sectors.classList.toggle('is-on', wedgesOn && open && !firing);
       wedges.forEach((wedge, i) => { wedge.style.opacity = open && i === active ? '1' : '0'; });
     }
     /* Appearance → Workspace name: the pill can be switched off. */
@@ -467,7 +474,7 @@
       slice.root.classList.add(i === index ? 'is-fired' : 'is-faded');
     });
     scrim.classList.remove('is-on');
-    if (AREA) sectors.classList.remove('is-on');
+    if (CAN_WEDGE) sectors.classList.remove('is-on');
   }
 
   /* ── The unattended loop ────────────────────────────────────────────────
@@ -637,6 +644,65 @@
   if (hfSwitch) {
     setHandsFree(handsFree);
     hfSwitch.addEventListener('click', () => setHandsFree(!handsFree));
+  }
+
+  /* ── Visible wedges ─────────────────────────────────────────────────────
+     The app's Appearance switch of the same name: the seams between the
+     shares, and the gradient that fills the one being aimed at. Redrawn, not
+     just hidden, so a wedge switched on mid-gesture is the right size. */
+  function syncWedgeSwitch() {
+    if (!wedgeSwitch) return;
+    wedgeSwitch.setAttribute('aria-checked', String(wedgesOn));
+    wedgeSwitch.querySelector('.toggle').classList.toggle('is-on', wedgesOn);
+  }
+
+  function setWedges(on) {
+    wedgesOn = CAN_WEDGE && on;
+    measure();
+    paint();
+    syncWedgeSwitch();
+  }
+
+  if (wedgeSwitch) {
+    if (!CAN_WEDGE) {
+      wedgeSwitch.hidden = true;
+    } else {
+      syncWedgeSwitch();
+      wedgeSwitch.addEventListener('click', () => setWedges(!wedgesOn));
+    }
+  }
+
+  /* ── The options menu ───────────────────────────────────────────────────
+     The three switches are the page's, not the product's, so they wait behind
+     one button in the corner instead of sitting over the wheel. It stays open
+     while they are flipped - trying one usually means trying the next - and
+     closes on Escape or a press anywhere else. */
+  function setMenu(open) {
+    if (!moreButton || !optionsMenu) return;
+    optionsMenu.hidden = !open;
+    moreButton.setAttribute('aria-expanded', String(open));
+    moreButton.classList.toggle('is-open', open);
+  }
+
+  if (moreButton && optionsMenu) {
+    setMenu(false);
+    moreButton.addEventListener('click', () => {
+      const opening = optionsMenu.hidden;
+      setMenu(opening);
+      if (opening) {
+        const first = optionsMenu.querySelector('button:not([hidden])');
+        if (first) first.focus({ preventScroll: true });
+      }
+    });
+    document.addEventListener('pointerdown', (event) => {
+      if (!optionsMenu.hidden && !moreButton.parentElement.contains(event.target)) setMenu(false);
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || optionsMenu.hidden) return;
+      const inside = moreButton.parentElement.contains(document.activeElement);
+      setMenu(false);
+      if (inside) moreButton.focus({ preventScroll: true });
+    });
   }
 
   /* ── Sound ──────────────────────────────────────────────────────────────

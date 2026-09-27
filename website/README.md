@@ -123,13 +123,18 @@ the workspace's name once inside it, as the app's does. There is no switcher
 widget on the page because there is none in the product. With a single
 workspace the hero drops the launcher level on its own.
 
-The wedges are drawn only when the config has Area targeting with **Visible
-wedges** on (`areaWedges` in `workspaces.js`); off, the aim is the same and only
-the icon lights, exactly as in the app.
+The stage carries three switches that are the page's own rather than the
+product's, behind one ⋯ button in its top-right corner so they never sit over
+the wheel: **Sound** (see below), **Visible wedges**, and **Launch without
+clicking**. The menu stays open while they are flipped and closes on Escape or
+a press anywhere else.
 
-The stage carries two controls that are the page's own rather than the
-product's: **Sound** (see below), and **Launch without clicking**. Flip the
-second and the demo behaves the way the app does with
+**Visible wedges** is the app's Appearance switch of the same name: the seams
+between the shares and the gradient that fills the one being aimed at. It
+starts from the config (`areaWedges` in `workspaces.js`); off, the aim is the
+same and only the icon lights, exactly as in the app.
+
+Flip **Launch without clicking** and the demo behaves the way the app does with
 `radialInstantActivate: 'dwell'`: the pointer stops existing, the aim alone
 lights a target, and holding that aim opens it. Nothing is clicked, which is the
 only way to explain a hands-free gesture. It uses the app's shipped hover time
