@@ -1181,21 +1181,36 @@ if (!gotTheLock) {
    * focus, and it must not start an installer over the running app.
    */
 } else {
-  app.on("second-instance", () => {
-    diagLog("Second instance launch detected — focusing existing window.");
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      try {
-        windowBuriedPassive = false;
-        if (mainWindow.isMinimized()) mainWindow.restore();
-        mainWindow.setOpacity(1);
-        applyMousePolicyAfterReveal(mainWindow);
-        mainWindow.setSkipTaskbar(false);
-        mainWindow.show();
-        mainWindow.focus();
-      } catch (e) {
-        console.error("second-instance focus failed:", e);
-      }
+  app.on("second-instance", (_event, argv) => {
+    /**
+     * The other race this lock exists for: the login item coming up AFTER a manual launch. That
+     * duplicate carries the login argument, and a login start belongs in the tray — it must not
+     * put Settings over the desktop the user is only just signing in to.
+     */
+    if (Array.isArray(argv) && argv.includes(LOGIN_LAUNCH_ARG)) {
+      diagLog("Second instance was the login-item duplicate — staying in the tray.");
+      return;
     }
+    diagLog("Second instance launch detected — opening Settings on the running instance.");
+    /**
+     * The full reveal, not a hand-rolled show()+focus(). This handler used to show the window
+     * itself and skip the renderer entirely, which is the shape of the dead-taskbar-icon bug:
+     * launching Rovyl while it sat in the tray put an empty window on screen — the renderer had
+     * closed its panel on hide-to-tray and was never told "open-settings", so clicking the
+     * taskbar button just refocused a windowful of nothing. And when the window object was gone,
+     * the old `isDestroyed()` guard made every launch a silent no-op. `ensureMainWindow` rebuilds
+     * the window if needed; `openSettingsFromMainProcess` is the same entry point the tray uses.
+     */
+    Promise.resolve()
+      .then(async () => {
+        await app.whenReady();
+        await ensureMainWindow();
+        openSettingsFromMainProcess();
+      })
+      .catch((e) => {
+        diagLog(`[SecondInstance] reveal failed: ${e.message}`);
+        console.error("second-instance reveal failed:", e);
+      });
   });
 }
 
@@ -4905,8 +4920,9 @@ app.whenReady().then(async () => {
     }
   });
 
-  // 2. Create Window
-  mainWindow = await createWindow();
+  // 2. Create Window — through `ensureMainWindow`, so a `second-instance` arriving mid-startup
+  // joins this same creation instead of racing it with a second window.
+  mainWindow = await ensureMainWindow();
 
   /**
    * And the wheel's window, warm from the start.
