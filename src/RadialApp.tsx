@@ -86,6 +86,8 @@ export default function RadialApp() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const isMenuOpenRef = useRef(isMenuOpen);
   isMenuOpenRef.current = isMenuOpen;
+  /** Has a wheel ever been on screen in this renderer? Nothing is parked before the first one. */
+  const hasShownWheelRef = useRef(false);
 
   const [menuPosition, setMenuPosition] = useState<Coordinates>({ x: 0, y: 0 });
   const [radialClientSize, setRadialClientSize] = useState(() => ({
@@ -667,6 +669,30 @@ export default function RadialApp() {
       window.removeEventListener('resize', applyPendingGeometry);
     };
   }, []);
+
+  /**
+   * Main parks the overlay window off the desktop the moment the wheel closes, so the launcher
+   * leaves the screen on the click rather than on whatever frame this renderer manages next — a
+   * launch that starts half a dozen processes can starve that frame for seconds. This is the other
+   * half of the deal: once the closed state is painted the surface is empty, and the idle box can
+   * come back to the desktop without the wheel coming with it.
+   */
+  useEffect(() => {
+    if (isMenuOpen) {
+      hasShownWheelRef.current = true;
+      return;
+    }
+    /** The overlay boots closed; nothing has been parked yet, so there is nothing to answer. */
+    if (!hasShownWheelRef.current) return;
+    let settle = 0;
+    const frame = requestAnimationFrame(() => {
+      settle = window.setTimeout(() => window.electron?.notifyRadialCleared?.(), 0);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (settle) window.clearTimeout(settle);
+    };
+  }, [isMenuOpen]);
 
   /* ------------------------------------------------------------------ */
 

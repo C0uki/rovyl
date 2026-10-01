@@ -109,6 +109,12 @@ contextBridge.exposeInMainWorld("electron", {
 
   /** The wheel is finished: main returns the overlay to an invisible, click-through idle box. */
   closeRadial: () => ipcRenderer.send("close-radial"),
+  /**
+   * The wheel has been painted away. Main parks the window off the desktop on every close so the
+   * launcher leaves the screen on the click rather than on the next frame the renderer manages to
+   * produce; this is what tells it the surface is empty and the idle box can come back.
+   */
+  notifyRadialCleared: () => ipcRenderer.send("radial-cleared"),
   /** Main took the wheel down without being asked (Settings opened over it, quit). */
   onRadialHidden: (callback) => {
     const listener = () => callback();

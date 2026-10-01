@@ -1933,7 +1933,82 @@ function syncOverlayParkedForSettings(settingsWindow) {
   applyOverlayIdleBounds();
 }
 
-/** Back to an invisible, click-through box on the desktop. */
+/**
+ * How long main waits for the overlay renderer to say it has painted the wheel away before it puts
+ * the idle box back on the desktop regardless.
+ *
+ * Generous on purpose: the wait only matters in the case the park exists for — a launch that has
+ * just put five or six processes on the CPU — and nothing is on screen while it runs.
+ */
+const OVERLAY_CLEAR_RESTORE_MS = 4000;
+let overlayClearPending = false;
+let overlayClearTimer = null;
+
+/**
+ * Take the wheel off the screen with the WINDOW, and let the renderer catch up afterwards.
+ *
+ * The idle box is centred on the same point the wheel is drawn around, so returning to it hides
+ * nothing — until this, the wheel left the screen only when the renderer painted an empty frame.
+ * That paint is the first thing to go when the machine is busy, and a launch is precisely when it
+ * is: measured against a .bat that starts six processes, a fully drawn wheel was still on screen a
+ * second after main had logged the close, and a macro that keeps the machine busy keeps it there
+ * for as long as it runs. Nothing downstream of the click should be able to hold the wheel up.
+ *
+ * Parking the HWND off the desktop is a window-manager move, so it lands whether or not the
+ * renderer ever gets a frame in. It is NOT a `hide()`: a hidden window has no compositor surface,
+ * and the opening handshake needs one to paint its zero-alpha frame into.
+ */
+function parkOverlayUntilCleared(anchorScreenPoint) {
+  const win = overlayWindow;
+  if (!win || win.isDestroyed()) return;
+  const side = smallModeBounds(radialTargetDisplay(anchorScreenPoint).bounds).width;
+  try {
+    win.setBounds(overlayParkedBounds(side));
+  } catch (e) {
+    /* ignore */
+  }
+  overlayClearPending = true;
+  if (overlayClearTimer) clearTimeout(overlayClearTimer);
+  overlayClearTimer = setTimeout(
+    () => restoreOverlayAfterClear(anchorScreenPoint),
+    OVERLAY_CLEAR_RESTORE_MS,
+  );
+  overlayClearTimer.unref?.();
+}
+
+/**
+ * The overlay is empty again (the renderer said so, or it ran out of time): idle geometry is safe.
+ *
+ * Throttling is switched on here rather than at the close, because it is what would stop the
+ * renderer producing the very frame this is waiting for.
+ */
+function restoreOverlayAfterClear(anchorScreenPoint) {
+  if (!overlayClearPending) return;
+  overlayClearPending = false;
+  if (overlayClearTimer) {
+    clearTimeout(overlayClearTimer);
+    overlayClearTimer = null;
+  }
+  /** A new gesture already owns the bounds: the open set them itself. */
+  if (radialOpen) return;
+  applyOverlayIdleBounds(anchorScreenPoint);
+  try {
+    overlayWindow?.webContents?.setBackgroundThrottling(true);
+  } catch (e) {
+    /* ignore */
+  }
+}
+
+/** An open claims the bounds: whatever the last close is still waiting for no longer applies. */
+function cancelOverlayClearRestore() {
+  overlayClearPending = false;
+  if (overlayClearTimer) {
+    clearTimeout(overlayClearTimer);
+    overlayClearTimer = null;
+  }
+}
+
+/** Back to an invisible, click-through box on the desktop — parked until the wheel is painted away. */
 function collapseOverlayToIdle(anchorScreenPoint) {
   const wasOpen = radialOpen;
   radialOpen = false;
@@ -1944,14 +2019,13 @@ function collapseOverlayToIdle(anchorScreenPoint) {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   try {
     overlayWindow.setIgnoreMouseEvents(true);
-    applyOverlayIdleBounds(anchorScreenPoint);
+    parkOverlayUntilCleared(anchorScreenPoint);
     overlayWindow.setAlwaysOnTop(true, "screen-saver", 1);
     if (!overlayWindow.isVisible()) overlayWindow.showInactive();
-    overlayWindow.webContents.setBackgroundThrottling(true);
   } catch (e) {
     /* ignore */
   }
-  if (wasOpen) diagLog("[RadialClose] wheel closed; overlay back to idle");
+  if (wasOpen) diagLog("[RadialClose] wheel closed; overlay parked until it is painted away");
   scheduleIdleMemoryCleanup(2000);
 }
 
@@ -2132,6 +2206,7 @@ function showMenuAtCursor(source = "shortcut") {
   void ensureOverlayWindow().then((win) => {
     if (!win || win.isDestroyed()) return;
     cancelIdleMemoryCleanup();
+    cancelOverlayClearRestore();
     const radialOpenStartedAt = Date.now();
 
     /**
@@ -9038,6 +9113,16 @@ ipcMain.handle("get-startup-apps", async () => {
  */
 ipcMain.on("close-radial", () => {
   collapseOverlayToIdle();
+});
+
+/**
+ * The overlay renderer has painted the wheel away, so the parked window can go back to idle.
+ *
+ * The fallback timer in `parkOverlayUntilCleared` covers a renderer that never answers; this is the
+ * normal path, and on an idle machine it arrives within a frame of the close.
+ */
+ipcMain.on("radial-cleared", () => {
+  restoreOverlayAfterClear();
 });
 
 /**

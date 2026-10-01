@@ -578,6 +578,8 @@ export interface ElectronAPI {
    * and conflating them is exactly what made one HWND serve two jobs in the first place.
    */
   closeRadial?: () => void;
+  /** The overlay has painted the wheel away, so the window main parked on the close can come back. */
+  notifyRadialCleared?: () => void;
   /** Main took the overlay down without being asked (game mode, quit, a gesture that never landed). */
   onRadialHidden?: (callback: () => void) => () => void;
   /** The config file changed on disk; the payload is the whole blob, as `getFullConfig` returns it. */
