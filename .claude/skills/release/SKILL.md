@@ -14,7 +14,7 @@ Run everything from the repo root (`C:\Git\rovyl`) in PowerShell. Stop and repor
 ## 1. Preflight
 
 - `git fetch origin` and confirm the branch is `main` and not behind `origin/main`.
-- `git status --porcelain`: the only allowed uncommitted changes are `backend/rovyl-helper.exe` and `resources/bin/rovyl-helper.exe` (the build regenerates them). Anything else → stop and ask the user whether to commit it first.
+- `git status --porcelain` must come back empty. Anything uncommitted → stop and ask the user whether to commit it first. (The two `rovyl-helper.exe` build artifacts are gitignored and will not show up.)
 - `gh auth status` must succeed.
 
 ## 2. Pick the version
@@ -31,8 +31,6 @@ git add package.json package-lock.json
 git commit -m "chore: bump the version to <next>" -m "Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 git push origin main
 ```
-
-Do not commit the `rovyl-helper.exe` files as part of this commit.
 
 ## 4. Check, build, publish
 

@@ -15,6 +15,11 @@ dist-ssr
 
 # Build outputs
 build/icon.ico
+# Compiled from backend/native-helper/rovyl-helper.cs by scripts/build-native-helper.cjs,
+# which runs first in `npm run build`/`dist`. csc stamps a fresh MVID every compile, so a
+# tracked copy is dirty after every build and the committed bytes are never the shipped ones.
+backend/rovyl-helper.exe
+resources/bin/rovyl-helper.exe
 build-out*
 release
 diagnostic.log
