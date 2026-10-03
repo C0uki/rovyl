@@ -212,7 +212,7 @@ export const IconPicker: React.FC<IconPickerProps> = ({
       </p>
 
       <div
-        className={`${gridClass} overflow-y-auto overflow-x-hidden pr-0.5 custom-scrollbar content-start ${compact ? 'min-h-0 max-h-[232px] pb-1' : 'flex-1 pb-2'}`}
+        className={`${gridClass} overflow-y-auto overflow-x-hidden pr-0.5 zs-stable-gutter content-start ${compact ? 'min-h-0 max-h-[232px] pb-1' : 'flex-1 pb-2'}`}
         style={gridStyle}
         onScroll={handleScroll}
       >

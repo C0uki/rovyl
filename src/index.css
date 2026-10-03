@@ -25,6 +25,34 @@
   *::-webkit-scrollbar-corner { background: transparent; }
 }
 
+/* ── Stable scrollbar gutters ───────────────────────────────────────────────
+   A classic scrollbar is 9px of layout, not paint. A box that gains one while
+   the user is looking at it therefore re-lays out everything inside it: turning
+   "Sound effects" on adds four rows, the Sound page crosses its scroll
+   threshold, and the whole column snaps 9px narrower — and, on a window wide
+   enough for `.zs-canvas` to be centred, half of that sideways as well. Every
+   container whose content can change height while it is on screen reserves the
+   gutter up front, so the bar arrives in space that was already empty and
+   nothing under it moves.
+
+   Declared per container rather than as `*`, because `scrollbar-gutter` applies
+   to any scroll container and `overflow: hidden` makes one: most boxes here are
+   hidden in order to clip or to ellipsize, and reserving 9px inside each of
+   those would cut their text short instead. A box that only scrolls in one
+   state declares it beside that state (`.zs-workspace-items`, once the
+   workbench splits), and `.zs-stable-gutter` is the opt-in for scrollers built
+   out of utility classes. */
+.zs-scroll,
+.zs-editor-body,
+.zs-icon-modal-body,
+.zs-app-list,
+.zs-installed-apps,
+.zs-select-list,
+.zs-fault,
+.zs-stable-gutter {
+  scrollbar-gutter: stable;
+}
+
 /* ══ Zenith surface tokens ═════════════════════════════════════════════════
    The Radial Modal / QuickAccess language carried over to the product's opaque
    surfaces (titlebar + Settings). Zenith's "accent" is absence of colour: solid
@@ -1446,7 +1474,7 @@
 .zs-add-panel { margin-bottom: var(--zn-3); padding: var(--zn-3); border: 1px solid var(--zn-line); border-radius: var(--zn-r-control); background: var(--zn-sunken); }
 .zs-add-panel-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--zn-2); margin-bottom: var(--zn-2); }
 .zs-search.is-manager-search { flex: 1 1 180px; min-width: 140px; background: var(--zn-surface); }
-.zs-installed-apps { min-height: 132px; max-height: min(320px, 38vh); overflow-y: auto; padding-right: 2px; scrollbar-gutter: stable; overscroll-behavior: contain; }
+.zs-installed-apps { min-height: 132px; max-height: min(320px, 38vh); overflow-y: auto; padding-right: 2px; overscroll-behavior: contain; }
 .zs-installed-apps > button {
   width: 100%; min-height: 42px; display: grid; grid-template-columns: 28px minmax(0, 1fr) 20px; align-items: center; gap: var(--zn-2); padding: 5px var(--zn-2);
   color: var(--zn-text-2); border: 0; border-radius: var(--zn-r-chip); background: transparent; cursor: pointer; text-align: left;
