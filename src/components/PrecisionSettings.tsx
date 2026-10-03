@@ -2086,6 +2086,24 @@ function SettingRow({
     return () => window.clearTimeout(timer);
   }, [confirming]);
 
+  /**
+   * WHAT THE PRESS LANDS ON
+   *
+   * The row, not the control sitting in it. A switch is 36x20 at the right edge of a row that is
+   * the width of the canvas, so hitting it is the one precise movement this panel used to ask for
+   * — while the words beside it, which are the part being read, did nothing. The press is taken
+   * by the row and `.zs-row-control` stops the bubble, so a hit on the switch itself still counts
+   * once and not twice.
+   *
+   * Only `bool` and `open` join in: they are the two kinds whose row has a single unambiguous
+   * action. A select, a slider or a segmented control has no "the" action to give the copy.
+   */
+  const onRowPress = item.kind === 'open'
+    ? item.onOpen
+    : item.kind === 'bool'
+      ? item.onToggle
+      : undefined;
+
   const dragProps = reorderable
     ? {
         draggable: armed,
@@ -2122,9 +2140,10 @@ function SettingRow({
   return (
     <div
       className={`zs-row${item.kind === 'range' ? ' is-slider' : ''}${item.kind === 'dockPosition' || item.kind === 'widget' ? ' is-picker' : ''}${item.kind === 'open' ? ' is-openable' : ''}`
+        + `${onRowPress ? ' is-pressable' : ''}`
         + `${reorderable ? ' is-reorderable' : ''}${isDragging ? ' is-dragging' : ''}`
         + `${dropEdge === 'above' ? ' is-drop-above' : ''}${dropEdge === 'below' ? ' is-drop-below' : ''}`}
-      onClick={item.kind === 'open' ? item.onOpen : undefined}
+      onClick={onRowPress}
       {...dragProps}
     >
       {reorderable && (
@@ -5523,7 +5542,18 @@ function WorkspaceManager({
                           <div className="zs-ide-options-head">
                             <div><b>IDE integration</b><small>Recent projects and automated terminal commands.</small></div>
                           </div>
-                          <div className="zs-ide-toggle-row">
+                          {/*
+                            Pressable rows, like every `.zs-row` in the panel: the copy is what is
+                            being read, so it is what takes the press. The switch stops the bubble
+                            so a hit on the switch itself is one toggle and not two, and the second
+                            row only takes a press while it has one to give — its switch is
+                            disabled without recents, and a row that toggled a disabled switch
+                            would be a way around it.
+                          */}
+                          <div
+                            className="zs-ide-toggle-row is-pressable"
+                            onClick={() => updateItem(index, { hasRecents: !item.hasRecents })}
+                          >
                             <div><b id={`ide-recents-${item.id}`}>Show recent folders</b><small>Open the IDE as a submenu containing its recent projects.</small></div>
                             <button
                               type="button"
@@ -5531,10 +5561,18 @@ function WorkspaceManager({
                               aria-checked={Boolean(item.hasRecents)}
                               aria-labelledby={`ide-recents-${item.id}`}
                               className="zs-switch"
-                              onClick={() => updateItem(index, { hasRecents: !item.hasRecents })}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                updateItem(index, { hasRecents: !item.hasRecents });
+                              }}
                             ><i /></button>
                           </div>
-                          <div className="zs-ide-toggle-row">
+                          <div
+                            className={`zs-ide-toggle-row${item.hasRecents ? ' is-pressable' : ''}`}
+                            onClick={item.hasRecents
+                              ? () => updateItem(index, { openTerminalForRecents: !item.openTerminalForRecents })
+                              : undefined}
+                          >
                             <div><b id={`ide-terminal-${item.id}`}>Open terminal for recent folders</b><small>Starts a terminal in the selected project directory.</small></div>
                             <button
                               type="button"
@@ -5543,7 +5581,10 @@ function WorkspaceManager({
                               aria-labelledby={`ide-terminal-${item.id}`}
                               className="zs-switch"
                               disabled={!item.hasRecents}
-                              onClick={() => updateItem(index, { openTerminalForRecents: !item.openTerminalForRecents })}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                updateItem(index, { openTerminalForRecents: !item.openTerminalForRecents });
+                              }}
                             ><i /></button>
                           </div>
                           <div className="zs-ide-commands">
