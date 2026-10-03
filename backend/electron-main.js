@@ -4059,15 +4059,11 @@ app.whenReady().then(async () => {
       currentSettings.shortcutTriggerMode === "hold" ? "hold" : "toggle",
     mouseTriggerButton:
       normalizeMouseTrigger(currentSettings.mouseTriggerButton) || DEFAULT_MOUSE_TRIGGER,
-    performanceMode: false,
   };
   try {
     const cp = path.join(app.getPath("userData"), "config-v2.json");
     if (fs.existsSync(cp)) {
       const fc = JSON.parse(fs.readFileSync(cp, "utf-8"));
-      if (typeof fc.performanceMode === "boolean") {
-        cachedRadialFlags.performanceMode = fc.performanceMode;
-      }
       if (typeof fc.enableMouseTrigger === "boolean") {
         cachedRadialFlags.enableMouseTrigger = fc.enableMouseTrigger;
       }
@@ -4093,9 +4089,6 @@ app.whenReady().then(async () => {
       if (ui) {
         // Authoritative UI state lives in config-v2.json — win over stale settings.json (fixes shortcut/sync races).
         applyUiConfigToCurrentSettings(ui);
-        if (typeof ui.performanceMode === "boolean") {
-          cachedRadialFlags.performanceMode = ui.performanceMode;
-        }
         if (typeof ui.enableMouseTrigger === "boolean") {
           cachedRadialFlags.enableMouseTrigger = ui.enableMouseTrigger;
         }
@@ -4340,9 +4333,6 @@ app.whenReady().then(async () => {
 
   const applyPersistedFullConfigSideEffects = (payload) => {
     if (!payload || typeof payload !== "object") return;
-    if (typeof payload.performanceMode === "boolean") {
-      cachedRadialFlags.performanceMode = payload.performanceMode;
-    }
     if (typeof payload.enableMouseTrigger === "boolean") {
       cachedRadialFlags.enableMouseTrigger = payload.enableMouseTrigger;
     }
@@ -4361,9 +4351,6 @@ app.whenReady().then(async () => {
       saveSettings({});
       if (typeof ui.openAtLogin === "boolean") {
         syncLoginItemSettings(ui.openAtLogin);
-      }
-      if (typeof ui.performanceMode === "boolean") {
-        cachedRadialFlags.performanceMode = ui.performanceMode;
       }
       if (typeof ui.enableMouseTrigger === "boolean") {
         cachedRadialFlags.enableMouseTrigger = ui.enableMouseTrigger;

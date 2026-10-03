@@ -2411,18 +2411,8 @@
   color: rgba(255, 255, 255, 0.6);
 }
 
-/* `performanceMode` and the wheel's closing state already retune `.zn-radial-pill`,
-   which the stack carries — so the docks leave on the same curve as everything else. */
-
-/* `performanceMode`: same drawing, no overshoot and shorter. */
-.zn-radial--fast .zn-radial-slice,
-.zn-radial--fast .zn-radial-hub,
-.zn-radial--fast .zn-radial-label,
-.zn-radial--fast .zn-radial-pill {
-  --zn-ease: ease-out;
-  --zn-dur: 110ms;
-  --zn-dur-op: 90ms;
-}
+/* The wheel's closing state already retunes `.zn-radial-pill`, which the stack carries —
+   so the docks leave on the same curve as everything else. */
 
 /* Closing is always shorter than opening — waiting for the exit reads as lag. */
 .zn-radial--closing .zn-radial-slice,
@@ -2462,8 +2452,6 @@
   transition: opacity 130ms ease-out;
 }
 
-.zn-radial--fast .zn-radial-sectors { --zn-dur-op: 90ms; }
-.zn-radial--fast .zn-radial-sector { transition-duration: 70ms; }
 .zn-radial--closing .zn-radial-sectors { --zn-dur-op: 100ms; }
 
 @media (prefers-reduced-motion: reduce) {

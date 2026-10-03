@@ -45,10 +45,9 @@ export const translations = {
     presence: 'Presence',
     workspaces: 'Workspaces',
     workspacesDesc: 'Contexts and their shortcuts.',
-    performance: 'Performance',
     updates: 'Updates',
     advanced: 'Advanced',
-    advancedDesc: 'Performance, protection, and data.',
+    advancedDesc: 'Protection, shortcuts, and data.',
     settings: 'Settings',
     searchSettings: 'Search settings',
     language: 'Language',
@@ -150,12 +149,6 @@ export const translations = {
     weather: 'Weather',
     clock: 'Clock',
 
-    // Performance & Optimization
-    precisionMode: 'Precision mode',
-    precisionModeDesc: 'Zero-latency mode prioritizing instant input responsiveness.',
-    strictOffline: 'Strict offline mode',
-    strictOfflineDesc: 'Disable external web requests (weather, favicons, updates) for 100% offline privacy.',
-
     // Alerts
     confirmReset: 'Are you sure you want to reset all settings to defaults?',
   },
@@ -176,10 +169,9 @@ export const translations = {
     presence: 'Presencia',
     workspaces: 'Espacios de trabajo',
     workspacesDesc: 'Contextos y sus accesos directos.',
-    performance: 'Rendimiento',
     updates: 'Actualizaciones',
     advanced: 'Avanzado',
-    advancedDesc: 'Rendimiento, protección y datos.',
+    advancedDesc: 'Protección, atajos y datos.',
     settings: 'Ajustes',
     searchSettings: 'Buscar ajustes',
     language: 'Idioma',
@@ -281,12 +273,6 @@ export const translations = {
     weather: 'Tiempo',
     clock: 'Reloj',
 
-    // Performance & Optimization
-    precisionMode: 'Modo precisión',
-    precisionModeDesc: 'Modo sin latencia que prioriza la respuesta inmediata a la entrada.',
-    strictOffline: 'Modo sin conexión estricto',
-    strictOfflineDesc: 'Desactiva las peticiones web externas (tiempo, iconos, actualizaciones) para una privacidad total.',
-
     // Alerts
     confirmReset: '¿Seguro que quieres restablecer todos los ajustes a sus valores predeterminados?',
   },
@@ -307,10 +293,9 @@ export const translations = {
     presence: '呈现',
     workspaces: '工作区',
     workspacesDesc: '各个场景及其快捷方式。',
-    performance: '性能',
     updates: '更新',
     advanced: '高级',
-    advancedDesc: '性能、保护与数据。',
+    advancedDesc: '保护、快捷方式与数据。',
     settings: '设置',
     searchSettings: '搜索设置',
     language: '语言',
@@ -412,12 +397,6 @@ export const translations = {
     weather: '天气',
     clock: '时钟',
 
-    // Performance & Optimization
-    precisionMode: '精准模式',
-    precisionModeDesc: '零延迟模式，优先保证输入的即时响应。',
-    strictOffline: '严格离线模式',
-    strictOfflineDesc: '停用所有外部网络请求（天气、网站图标、更新），实现完全离线的隐私保护。',
-
     // Alerts
     confirmReset: '确定要将所有设置恢复为默认值吗？',
   },
@@ -438,10 +417,9 @@ export const translations = {
     presence: 'Presença',
     workspaces: 'Espaços de trabalho',
     workspacesDesc: 'Contextos e seus atalhos.',
-    performance: 'Desempenho',
     updates: 'Atualizações',
     advanced: 'Avançado',
-    advancedDesc: 'Desempenho, proteção e dados.',
+    advancedDesc: 'Proteção, atalhos e dados.',
     settings: 'Configurações',
     searchSettings: 'Buscar configurações',
     language: 'Idioma',
@@ -543,12 +521,6 @@ export const translations = {
     weather: 'Clima',
     clock: 'Relógio',
 
-    // Performance & Optimization
-    precisionMode: 'Modo precisão',
-    precisionModeDesc: 'Modo sem latência que prioriza a resposta imediata à entrada.',
-    strictOffline: 'Modo offline estrito',
-    strictOfflineDesc: 'Desativa as requisições externas (clima, favicons, atualizações) para privacidade total.',
-
     // Alerts
     confirmReset: 'Tem certeza de que deseja redefinir todas as configurações para os valores padrão?',
   },
@@ -569,10 +541,9 @@ export const translations = {
     presence: 'Отображение',
     workspaces: 'Рабочие пространства',
     workspacesDesc: 'Контексты и их ярлыки.',
-    performance: 'Производительность',
     updates: 'Обновления',
     advanced: 'Дополнительно',
-    advancedDesc: 'Производительность, защита и данные.',
+    advancedDesc: 'Защита, быстрые клавиши и данные.',
     settings: 'Настройки',
     searchSettings: 'Поиск по настройкам',
     language: 'Язык',
@@ -674,12 +645,6 @@ export const translations = {
     weather: 'Погода',
     clock: 'Часы',
 
-    // Performance & Optimization
-    precisionMode: 'Режим точности',
-    precisionModeDesc: 'Режим без задержек: мгновенный отклик на ввод в приоритете.',
-    strictOffline: 'Строгий офлайн-режим',
-    strictOfflineDesc: 'Отключает все внешние запросы (погода, значки сайтов, обновления) ради полной приватности.',
-
     // Alerts
     confirmReset: 'Сбросить все настройки к значениям по умолчанию?',
   },
@@ -700,10 +665,9 @@ export const translations = {
     presence: 'Präsenz',
     workspaces: 'Arbeitsbereiche',
     workspacesDesc: 'Kontexte und ihre Verknüpfungen.',
-    performance: 'Leistung',
     updates: 'Updates',
     advanced: 'Erweitert',
-    advancedDesc: 'Leistung, Schutz und Daten.',
+    advancedDesc: 'Schutz, Tastenkürzel und Daten.',
     settings: 'Einstellungen',
     searchSettings: 'Einstellungen durchsuchen',
     language: 'Sprache',
@@ -805,12 +769,6 @@ export const translations = {
     weather: 'Wetter',
     clock: 'Uhr',
 
-    // Performance & Optimization
-    precisionMode: 'Präzisionsmodus',
-    precisionModeDesc: 'Latenzfreier Modus, der sofortige Eingabereaktion priorisiert.',
-    strictOffline: 'Strikter Offline-Modus',
-    strictOfflineDesc: 'Deaktiviert externe Webzugriffe (Wetter, Favicons, Updates) für vollständige Offline-Privatsphäre.',
-
     // Alerts
     confirmReset: 'Möchtest du wirklich alle Einstellungen auf die Standardwerte zurücksetzen?',
   },
@@ -830,10 +788,9 @@ export const translations = {
     presence: 'المظهر والخلفية',
     workspaces: 'مساحات العمل',
     workspacesDesc: 'سياقات العمل وقوائم التطبيقات.',
-    performance: 'الأداء والسرعة',
     updates: 'التحديثات',
     advanced: 'خيارات متقدمة',
-    advancedDesc: 'الأداء الفائق، الحماية، والبيانات.',
+    advancedDesc: 'الحماية، الاختصارات، والبيانات.',
     settings: 'الإعدادات',
     searchSettings: 'البحث في الإعدادات',
     language: 'اللغة / Language',
@@ -934,12 +891,6 @@ export const translations = {
     battery: 'البطارية',
     weather: 'الطقس',
     clock: 'الساعة',
-
-    // Performance & Optimization
-    precisionMode: 'وضع الدقة الفائقة',
-    precisionModeDesc: 'نمط استجابة سريع بدون أي تأخير في حركة المؤشر.',
-    strictOffline: 'الوضع المحلي الصارم',
-    strictOfflineDesc: 'إيقاف كافة اتصالات الإنترنت الخارجية (الطقس، الأيقونات، التحديثات) لضمان أقصى خصوصية.',
 
     // Alerts
     confirmReset: 'هل أنت متأكد من رغبتك في استعادة الإعدادات الافتراضية؟',

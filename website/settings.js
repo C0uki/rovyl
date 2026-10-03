@@ -180,8 +180,6 @@
     statusDockBattery: true,
     statusDockClock: true,
 
-    performanceMode: false,
-    strictOfflineMode: false,
     gameMode: false,
     gameScope: 'list',
     gameAutoDetect: false,
@@ -225,7 +223,7 @@
   /* ── Defaults ───────────────────────────────────────────────────────────
      What `DEFAULT_UI_CONFIG` holds for the keys the panel offers a revert on.
      Only these: the app derives the revert from `configKey`, and a row without one
-     (the shortcut, Precision mode, Fullscreen protection, the docks' own rows) is
+     (the shortcut, Fullscreen protection, the docks' own rows) is
      never offered it. One rule for every row, so a row that stops matching cannot
      go on claiming it is at its default. */
   const DEFAULTS = {
@@ -256,7 +254,6 @@
     radialPlacement: 'center',
     backdropOpacity: 0.9,
     statusDock: false,
-    strictOfflineMode: false,
     radialInstantActivate: 'off',
     radialInstantSensitivity: 'medium',
     radialInstantDwellMs: 400,
@@ -273,7 +270,7 @@
     { id: 'spaces', label: 'Workspaces', icon: 'i-stack', caption: 'Contexts and their shortcuts.' },
     { id: 'trigger', label: 'Activation', icon: 'i-mouse', caption: 'How and where the wheel appears.' },
     { id: 'sound', label: 'Sound', icon: 'i-volume', caption: 'Notes for opening and moving around the wheel.' },
-    { id: 'advanced', label: 'Advanced', icon: 'i-shield', caption: 'Performance, protection, and data.' },
+    { id: 'advanced', label: 'Advanced', icon: 'i-shield', caption: 'Protection, shortcuts, and data.' },
     { id: 'appearance', label: 'Appearance', icon: 'i-palette', caption: 'Shape, presence, and theme.' },
     { id: 'general', label: 'General', icon: 'i-cog', caption: 'Core Rovyl behavior.' },
   ];
@@ -520,11 +517,6 @@
 
     const numberLaunch = S.radialNumberLaunch;
     return [
-      { group: 'Performance', title: 'Precision mode', desc: 'Prioritize immediate response and reduce visual effects.',
-        kind: 'bool', key: 'performanceMode' },
-      { group: 'Performance', title: 'Strict offline mode',
-        desc: 'Disable external web requests (weather, favicons, updates) for 100% offline privacy.',
-        kind: 'bool', key: 'strictOfflineMode' },
       { group: 'Protection', title: 'Fullscreen protection', desc: 'Prevent accidental openings during games and videos.',
         kind: 'bool', key: 'gameMode' },
       ...(S.gameMode ? [

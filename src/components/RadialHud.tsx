@@ -76,7 +76,6 @@ interface HudStatusStripProps {
   align: HudAlign;
   showBattery: boolean;
   showWeather: boolean;
-  performanceMode: boolean;
   batteryLevel: number | null;
   weather: { temp: number; condition: string } | null;
 }
@@ -85,12 +84,11 @@ const HudStatusStrip: React.FC<HudStatusStripProps> = ({
   align,
   showBattery,
   showWeather,
-  performanceMode,
   batteryLevel,
   weather,
 }) => {
   const showBatteryChip = showBattery && batteryLevel !== null;
-  const showWeatherChip = showWeather && !performanceMode && !!weather;
+  const showWeatherChip = showWeather && !!weather;
   if (!showBatteryChip && !showWeatherChip) return null;
 
   return (
@@ -164,7 +162,7 @@ export function hudStatusVisible(
 ): boolean {
   return (
     (config.showBattery && batteryLevel !== null) ||
-    (config.showWeather && !config.performanceMode && !!weather)
+    (config.showWeather && !!weather)
   );
 }
 
@@ -207,7 +205,6 @@ export const RadialHud: React.FC<RadialHudProps> = ({
           align={align}
           showBattery={config.showBattery}
           showWeather={config.showWeather}
-          performanceMode={config.performanceMode}
           batteryLevel={batteryLevel}
           weather={weather}
         />

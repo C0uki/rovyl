@@ -504,7 +504,7 @@ export interface ScreenDocksProps {
   onMute: () => void;
   /** A shortcut icon came under the pointer — the wheel's hover note, when that is switched on. */
   onShortcutHover?: () => void;
-  /** `performanceMode` and the closing state come from the wheel's own classes; nothing else is needed. */
+  /** The closing state comes from the wheel's own classes; nothing else is needed. */
   reduceMotion?: boolean;
 }
 

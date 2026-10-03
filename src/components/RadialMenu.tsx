@@ -412,8 +412,6 @@ const PARK_STRAY_MARGIN_PX = 140;
  * the launcher being slow.
  */
 const LAUNCH_ECHO_MS = 520;
-/** `performanceMode` shortens everything else on the wheel; the echo follows the same rule. */
-const LAUNCH_ECHO_FAST_MS = 340;
 
 interface RadialMenuItemProps {
   app: AppItem;
@@ -1479,7 +1477,6 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
   const [launchEcho, setLaunchEcho] = useState<{ index: number; key: number } | null>(null);
   const launchEchoTimerRef = useRef<number | null>(null);
   const launchEchoSeqRef = useRef(0);
-  const launchEchoMs = config.performanceMode ? LAUNCH_ECHO_FAST_MS : LAUNCH_ECHO_MS;
 
   /**
    * The `onClose` the rest of the file uses. Confirming a launchable target now draws the echo and
@@ -1541,9 +1538,9 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
         /** Cleared BEFORE dispatching: the `isOpen` effect that follows has nothing left to cancel. */
         launchEchoTimerRef.current = null;
         fireNow();
-      }, launchEchoMs);
+      }, LAUNCH_ECHO_MS);
     },
-    [onCloseNow, cancelDwell, launchEchoMs, dismissWithAnimation],
+    [onCloseNow, cancelDwell, dismissWithAnimation],
   );
 
   /**
@@ -3240,8 +3237,8 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
       });
     }
 
-    // Real Weather Logic (wttr.in) with 10-minute cache (disabled if strictOfflineMode)
-    if (config.showWeather && !config.strictOfflineMode) {
+    // Real Weather Logic (wttr.in) with 10-minute cache
+    if (config.showWeather) {
       const loc = config.weatherLocation || '';
       const now = Date.now();
       const cacheValid = weatherCache.data &&
@@ -3587,7 +3584,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
   const centerFired = launchEcho?.index === -1;
   /** The scrim lifts across the echo: the wave ends over the bare desktop, with no cut. */
   const echoStyle = echoActive
-    ? ({ ['--zn-echo-ms' as string]: `${launchEchoMs}ms` } as React.CSSProperties)
+    ? ({ ['--zn-echo-ms' as string]: `${LAUNCH_ECHO_MS}ms` } as React.CSSProperties)
     : null;
 
 
@@ -3718,7 +3715,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
   return (
     <div
       data-zenith-radial-modal="true"
-      className={`fixed inset-0 z-[70] ${config.performanceMode ? 'zn-radial--fast' : ''} ${isOpen && !isExiting ? '' : 'zn-radial--closing'} ${directionMode ? 'zn-radial--nocursor' : ''}`}
+      className={`fixed inset-0 z-[70] ${isOpen && !isExiting ? '' : 'zn-radial--closing'} ${directionMode ? 'zn-radial--nocursor' : ''}`}
       style={{
         visibility: (isOpen || isExiting) ? 'visible' : 'hidden',
         pointerEvents: (isOpen && !isExiting) ? 'auto' : 'none',
@@ -3932,7 +3929,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                     height: `${hubDiameter + 6}px`,
                     borderRadius: '50%',
                     border: `2px solid ${radialHoverColor}`,
-                    ['--zn-echo-ms' as string]: `${launchEchoMs}ms`,
+                    ['--zn-echo-ms' as string]: `${LAUNCH_ECHO_MS}ms`,
                   }}
                   aria-hidden
                 />
@@ -3943,7 +3940,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                     height: `${hubDiameter + 6}px`,
                     borderRadius: '50%',
                     border: `2px solid ${radialHoverColor}`,
-                    ['--zn-echo-ms' as string]: `${launchEchoMs}ms`,
+                    ['--zn-echo-ms' as string]: `${LAUNCH_ECHO_MS}ms`,
                   }}
                   aria-hidden
                 />
@@ -3990,7 +3987,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                 ['--zn-op' as string]: echoActive && !centerFired ? 0 : bloom && !isExiting ? 1 : 0,
                 ['--zn-dur' as string]: isExiting ? '120ms' : '160ms',
                 ...(echoActive && !centerFired ? { ['--zn-dur-op' as string]: '140ms' } : null),
-                ...(centerFired ? { ['--zn-echo-ms' as string]: `${launchEchoMs}ms` } : null),
+                ...(centerFired ? { ['--zn-echo-ms' as string]: `${LAUNCH_ECHO_MS}ms` } : null),
               }}
               onMouseDown={(e) => e.stopPropagation()}
               onMouseUp={(e) => e.stopPropagation()}
@@ -4232,7 +4229,7 @@ const RadialMenuInner: React.FC<RadialMenuProps> = ({
                     dwellKey={dwellTick && dwellTick.index === index ? dwellTick.key : undefined}
                     /** Outside the echo it is `undefined` across the whole wheel — no tile loses its memo over this. */
                     echo={launchEcho ? (launchEcho.index === index ? 'fired' : 'faded') : undefined}
-                    echoMs={launchEcho ? launchEchoMs : undefined}
+                    echoMs={launchEcho ? LAUNCH_ECHO_MS : undefined}
                     onClick={handleAppClick}
                   />
                 );

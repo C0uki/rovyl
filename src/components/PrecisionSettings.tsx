@@ -305,7 +305,7 @@ const SECTIONS: Array<{ id: SectionId; label: string; caption: string; icon: Luc
   { id: 'spaces', label: 'Workspaces', caption: 'Contexts and their shortcuts.', icon: SquareStack },
   { id: 'trigger', label: 'Activation', caption: 'How and where the wheel appears.', icon: Mouse },
   { id: 'sound', label: 'Sound', caption: 'Notes for opening and moving around the wheel.', icon: Volume2 },
-  { id: 'advanced', label: 'Advanced', caption: 'Performance, protection, and data.', icon: Shield },
+  { id: 'advanced', label: 'Advanced', caption: 'Protection, shortcuts, and data.', icon: Shield },
   { id: 'appearance', label: 'Appearance', caption: 'Shape, presence, and theme.', icon: Palette },
   { id: 'general', label: 'General', caption: 'Core Rovyl behavior.', icon: Settings },
 ];
@@ -1520,18 +1520,6 @@ export const PrecisionSettings: React.FC<PrecisionSettingsProps> = ({
         },
       ],
       advanced: [
-        {
-          key: 'performance', group: 'Performance', title: 'Precision mode',
-          description: 'Prioritize immediate response and reduce visual effects.',
-          kind: 'bool', enabled: config.performanceMode,
-          onToggle: () => update('performanceMode', !config.performanceMode),
-        },
-        {
-          key: 'strictOffline', configKey: 'strictOfflineMode', group: 'Performance', title: t('strictOffline'),
-          description: t('strictOfflineDesc'),
-          kind: 'bool', enabled: Boolean(config.strictOfflineMode),
-          onToggle: () => update('strictOfflineMode', !config.strictOfflineMode),
-        },
         {
           key: 'game', group: 'Protection', title: 'Fullscreen protection',
           description: 'Prevent accidental openings during games and videos.',

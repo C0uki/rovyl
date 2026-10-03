@@ -307,7 +307,6 @@ export const DEFAULT_UI_CONFIG: UIConfig = {
   menuRadius: 140,
   iconSize: 64,
   fixedPosition: true,
-  strictOfflineMode: false,
   /**
    * The main screen, which is where every wheel has opened until now. Following the pointer is a
    * better default for two monitors and a worse one for the person who put the wheel somewhere on
@@ -416,7 +415,6 @@ export const DEFAULT_UI_CONFIG: UIConfig = {
    */
   openAtLogin: true,
   language: "en",
-  performanceMode: false,
   mainStartMenuDiscoveryDone: false,
 };
 

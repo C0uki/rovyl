@@ -230,8 +230,6 @@ export interface UIConfig {
    * chose a POINT, which is the part that is gone.
    */
   fixedPosition: boolean;
-  /** Strict offline mode disables all external internet requests (weather, remote favicons, updates). */
-  strictOfflineMode?: boolean;
   /**
    * Which monitor the wheel is born on.
    * 'primary' — always the main screen, wherever the hand is (default, and what shipped).
@@ -463,7 +461,6 @@ export interface UIConfig {
    */
   mouseTriggerButton?: string;
   language: "en" | "ar" | "pt" | "es" | "fr" | "de" | "it" | "ja" | "zh" | "ko" | "ru";
-  performanceMode: boolean; // New: Strict performance mode for zero-lag
   /**
    * Start Menu discovery already ran or Main was saved with custom apps — do not import shortcuts again at startup.
    * Persisted in config-v2.json (localStorage can be cleared after a reboot).
