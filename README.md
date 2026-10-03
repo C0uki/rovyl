@@ -187,10 +187,10 @@ budget. If one fails, the contract was broken, not the test.
 ## Links
 
 - **Download** — [latest release](https://github.com/arshit09/rovyl/releases/latest)
-- **Website and docs** — [rovyl-red.vercel.app](https://rovyl-red.vercel.app)
-- **All releases** — [github.com/arshit09/rovyl/releases](https://github.com/arshit09/rovyl/releases)
+- **Website and docs** — [rovyl.arshitvaghasiya.com](https://rovyl.arshitvaghasiya.com)
+- **All releases** — [github.com/arshit09/rovyl/releases](https://github.com/arshit09/rovyl/releases), or the [changelog](https://rovyl.arshitvaghasiya.com/changelog)
 - **Upstream** — [HenryCauan/rovyl](https://github.com/HenryCauan/rovyl)
-- **Privacy policy** — [rovyl-red.vercel.app/privacy](https://rovyl-red.vercel.app/privacy)
+- **Privacy policy** — [rovyl.arshitvaghasiya.com/privacy](https://rovyl.arshitvaghasiya.com/privacy)
 
 ## License
 

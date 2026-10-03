@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en" data-zn-theme="black">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Changelog - Rovyl</title>
+<meta name="description" content="Every Rovyl release and what changed in it, read straight from the GitHub releases.">
+<meta name="theme-color" content="#151515">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&family=Space+Grotesk:wght@300..700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* The doc column, as on Privacy and Docs - the release notes are prose. */
+  .doc { max-width: 720px; margin-inline: auto; padding: clamp(48px, 9vh, 88px) clamp(16px, 4vw, 32px) 64px; }
+  .doc h1 { font: 600 clamp(28px, 5vw, 40px)/1.08 var(--font-display); letter-spacing: -.032em; }
+  .doc .lede { margin-top: var(--zn-4); color: var(--zn-text-2); text-align: left; }
+  .doc .back { margin-bottom: var(--zn-6); }
+  /* Links inside a release note read as prose; the page's own controls - the
+     version anchors, the jump chips, the row under each note - do not. */
+  .rel-body a, .state a { color: var(--zn-text); text-decoration: underline; text-decoration-color: var(--zn-line-strong); text-underline-offset: 3px; }
+  .rel-body a:hover, .state a:hover { text-decoration-color: var(--zn-text-2); }
+
+  /* Jump list, same chips as the Docs contents row. */
+  .rail { display: flex; flex-wrap: wrap; gap: var(--zn-2); margin-top: var(--zn-6); }
+  .rail a { padding: 5px 10px; border: 1px solid var(--zn-line); border-radius: 999px; color: var(--zn-text-2); font: 500 12.5px/1 var(--font-display); font-variant-numeric: tabular-nums; text-decoration: none; }
+  .rail a:hover { color: var(--zn-text); border-color: var(--zn-line-strong); }
+  .rail:empty { display: none; }
+
+  /* One release. */
+  .rel { padding: var(--zn-10) 0; border-top: 1px solid var(--zn-line); scroll-margin-top: 80px; }
+  .rel:first-child { border-top: 0; }
+  .rel-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--zn-3); }
+  .rel-head h2 { font: 600 24px/1.1 var(--font-display); letter-spacing: -.024em; font-variant-numeric: tabular-nums; }
+  .rel-head h2 a { color: inherit; text-decoration: none; }
+  .rel-head time { color: var(--zn-text-3); font-size: 12.5px; }
+  .badge {
+    padding: 3px 8px; border: 1px solid var(--zn-line-strong); border-radius: 999px;
+    color: var(--zn-text-2); font-size: 11px; font-weight: 500; letter-spacing: .03em; text-transform: uppercase;
+  }
+  .badge.is-latest { color: var(--zn-on-solid); border-color: var(--zn-solid); background: var(--zn-solid); }
+
+  /* The rendered release note. Headings in a body outrank nothing, so they stay small. */
+  .rel-body { margin-top: var(--zn-5); }
+  .rel-body h3 { margin: 0 0 var(--zn-2); font: 600 16px/1.35 var(--font-display); letter-spacing: -.018em; color: var(--zn-text); }
+  .rel-body h4 { margin: var(--zn-6) 0 var(--zn-2); font: 600 12px/1.3 var(--font-ui); letter-spacing: .02em; text-transform: uppercase; color: var(--zn-text-3); }
+  .rel-body p { margin: var(--zn-3) 0; color: var(--zn-text-2); font-size: 14px; line-height: 1.65; }
+  .rel-body b, .rel-body strong { color: var(--zn-text); font-weight: 550; }
+  .rel-body ul { margin: var(--zn-3) 0; padding-left: 18px; list-style: disc; }
+  .rel-body li { margin: 6px 0; color: var(--zn-text-2); font-size: 14px; line-height: 1.65; }
+  .rel-body li::marker { color: var(--zn-text-3); }
+  .rel-body hr { margin: var(--zn-6) 0; border: 0; border-top: 1px solid var(--zn-line); }
+  .rel-body code {
+    padding: 1px 5px; border: 1px solid var(--zn-line); border-radius: 5px; background: var(--zn-sunken);
+    color: var(--zn-text); font: 12.5px/1.5 ui-monospace, "Cascadia Code", SFMono-Regular, Consolas, monospace;
+    overflow-wrap: anywhere;
+  }
+  .rel-body .empty { color: var(--zn-text-3); font-size: 13.5px; }
+
+  .rel-links { display: flex; flex-wrap: wrap; align-items: center; gap: var(--zn-3); margin-top: var(--zn-6); }
+  .rel-links .btn em { color: var(--zn-text-3); font-style: normal; font-variant-numeric: tabular-nums; }
+  .rel-links a:not(.btn) { color: var(--zn-text-3); font-size: 12.5px; text-decoration: none; }
+  .rel-links a:not(.btn):hover { color: var(--zn-text); }
+
+  /* Loading and failure both say the same thing: nothing is here yet. */
+  .state { padding: var(--zn-10) 0; color: var(--zn-text-3); font-size: 13.5px; }
+  .state a { color: var(--zn-text-2); }
+</style>
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true" focusable="false"><defs>
+  <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5m7 7-7-7 7-7"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/></symbol>
+</defs></svg>
+
+<header class="nav" id="nav">
+  <a class="nav-brand" href="index.html" aria-label="Rovyl, home">
+    <img class="brand-icon" src="assets/app-icon.svg" alt="" width="22" height="22">
+    <span class="brand-word">Rovyl</span>
+  </a>
+  <div class="nav-actions">
+    <a class="btn is-primary" href="https://github.com/arshit09/rovyl/releases/latest">Download</a>
+  </div>
+</header>
+
+<main class="doc">
+  <a class="btn is-quiet back" href="index.html"><svg class="ico" aria-hidden="true"><use href="#i-arrow-left"/></svg>Back</a>
+
+  <h1>Changelog</h1>
+  <p class="lede">Every Rovyl release and what changed in it. This page reads the releases from
+  GitHub when you open it, so it is never behind the product.</p>
+
+  <nav class="rail" id="rail" aria-label="Versions"></nav>
+
+  <div id="log" aria-live="polite" aria-busy="true">
+    <p class="state">Loading releases…</p>
+  </div>
+</main>
+
+<footer class="foot">
+  <a class="nav-brand" href="index.html"><img class="brand-icon" src="assets/app-icon.svg" alt="" width="22" height="22"><span class="brand-word">Rovyl</span></a>
+  <nav aria-label="Footer">
+    <a href="https://github.com/arshit09/rovyl">GitHub</a>
+    <a href="https://github.com/arshit09/rovyl/releases">Releases</a>
+    <a href="index.html">Home</a>
+    <a href="privacy.html">Privacy</a>
+    <a href="docs.html">Docs</a>
+  </nav>
+</footer>
+
+<script src="changelog.js"></script>
+<script>
+  const nav = document.getElementById('nav');
+  const sync = () => nav.classList.toggle('is-stuck', window.scrollY > 8);
+  sync();
+  window.addEventListener('scroll', sync, { passive: true });
+</script>
+</body>
+</html>

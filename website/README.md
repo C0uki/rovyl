@@ -13,7 +13,10 @@ website/
 ├── settings.js    the settings panel, working: six sections, live controls
 ├── sound.js       the wheel's sound effects, synthesized as in the app
 ├── workspaces.js  GENERATED - the real workspaces and appearance config
-├── vercel.json    clean URLs + cache headers
+├── changelog.html the release history - no release notes live in this repo
+├── changelog.js   renders whatever GitHub's releases say, at page load
+├── functions/
+│   └── api/releases.js       Pages Function: GitHub's releases, cached at the edge
 ├── tools/
 │   └── sync-workspaces.mjs   regenerates workspaces.js + assets/icons/
 └── assets/
@@ -74,13 +77,43 @@ Open `index.html` in a browser, or serve the folder:
 npx serve website
 ```
 
+## The changelog page writes itself
+
+`changelog.html` ships with no release notes in it. `changelog.js` asks
+`/api/releases` when the page opens and renders what comes back, so publishing a
+GitHub release publishes the changelog entry - there is nothing here to update
+afterwards.
+
+`functions/api/releases.js` is what answers that path: a Cloudflare Pages
+Function that calls the GitHub API and caches the answer at the edge for ten
+minutes. The page could call GitHub itself, and does when the function is absent
+(serving the folder locally, or opening the file off disk), but GitHub
+rate-limits anonymous callers at 60 requests an hour **per IP** - which is one
+shared office network away from a changelog that will not load. One cached copy
+serves everyone instead.
+
+Two ends of each release note are GitHub's rather than the page's: the date on
+the first line, which the page prints itself, and everything from the `---`
+before **Install:** onwards, which tells the reader to download the `.exe`
+"below" - true under a GitHub release, not here. Both are cut, and the page
+offers its own download button built from the release's assets. Keep writing
+releases the way they are written now and this needs no attention; move the
+installer instructions above that rule and they will show up on the page.
+
 ## Deploy
 
-Point a static host at this folder. `vercel.json` is already here; Vercel needs
-**Root Directory** set to `website` and no build command. The app links to the
-site through `src/constants/siteUrls.ts` - keep `ZENITH_LAUNCHER_SITE_URL` and
-the deployed domain in step. The docs link (`ZENITH_LAUNCHER_DOCS_URL`, behind the
-workspace file editor's help button) points at `rovyl.arshitvaghasiya.com/docs`.
+Cloudflare Pages, connected to this repository: **Root directory** `website`, no
+build command, nothing to install - what is in the folder is what is served.
+Clean URLs (`/privacy`, not `/privacy.html`) are Pages' own behaviour and the
+security headers come from the zone's rules, so no host configuration file lives
+in here. `functions/` needs no wiring either; the directory *is* the routing
+table.
+
+The app links to the site through `src/constants/siteUrls.ts`. The docs link
+(`ZENITH_LAUNCHER_DOCS_URL`, behind the workspace file editor's help button)
+points at `rovyl.arshitvaghasiya.com/docs`, which is this site.
+`ZENITH_LAUNCHER_SITE_URL` is a different thing despite the name - sign-in and
+the licence API, which are hosted apart from this folder.
 
 ## Why it looks the way it does
 
