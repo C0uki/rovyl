@@ -18,15 +18,9 @@
   .doc .lede { margin-top: var(--zn-4); color: var(--zn-text-2); text-align: left; }
   .doc .back { margin-bottom: var(--zn-6); }
   /* Links inside a release note read as prose; the page's own controls - the
-     version anchors, the jump chips, the row under each note - do not. */
+     version anchors, the row under each note - do not. */
   .rel-body a, .state a { color: var(--zn-text); text-decoration: underline; text-decoration-color: var(--zn-line-strong); text-underline-offset: 3px; }
   .rel-body a:hover, .state a:hover { text-decoration-color: var(--zn-text-2); }
-
-  /* Jump list, same chips as the Docs contents row. */
-  .rail { display: flex; flex-wrap: wrap; gap: var(--zn-2); margin-top: var(--zn-6); }
-  .rail a { padding: 5px 10px; border: 1px solid var(--zn-line); border-radius: 999px; color: var(--zn-text-2); font: 500 12.5px/1 var(--font-display); font-variant-numeric: tabular-nums; text-decoration: none; }
-  .rail a:hover { color: var(--zn-text); border-color: var(--zn-line-strong); }
-  .rail:empty { display: none; }
 
   /* One release. */
   .rel { padding: var(--zn-10) 0; border-top: 1px solid var(--zn-line); scroll-margin-top: 80px; }
@@ -81,7 +75,9 @@
     <span class="brand-word">Rovyl</span>
   </a>
   <div class="nav-actions">
-    <a class="btn is-primary" href="https://github.com/arshit09/rovyl/releases/latest">Download</a>
+    <a class="btn is-primary" href="https://github.com/arshit09/rovyl/releases/latest">
+      <svg class="ico" aria-hidden="true"><use href="#i-download"/></svg>Download
+    </a>
   </div>
 </header>
 
@@ -89,10 +85,7 @@
   <a class="btn is-quiet back" href="index.html"><svg class="ico" aria-hidden="true"><use href="#i-arrow-left"/></svg>Back</a>
 
   <h1>Changelog</h1>
-  <p class="lede">Every Rovyl release and what changed in it. This page reads the releases from
-  GitHub when you open it, so it is never behind the product.</p>
-
-  <nav class="rail" id="rail" aria-label="Versions"></nav>
+  <p class="lede">What's new in Rovyl.</p>
 
   <div id="log" aria-live="polite" aria-busy="true">
     <p class="state">Loading releases…</p>

@@ -18,7 +18,6 @@
   const FALLBACK = `https://api.github.com/repos/${REPO}/releases?per_page=100`;
 
   const log = document.getElementById('log');
-  const rail = document.getElementById('rail');
   if (!log) return;
 
   /* ── Markdown ───────────────────────────────────────────────────────────
@@ -151,13 +150,6 @@
 
     log.innerHTML = releases.map((r) => card(r, r === latest)).join('');
     log.setAttribute('aria-busy', 'false');
-
-    rail.innerHTML = releases
-      .map((r) => {
-        const v = (r.tag_name || r.name || '').replace(/^v/, '');
-        return `<a href="#${encodeURIComponent(`v${v}`)}">${esc(v)}</a>`;
-      })
-      .join('');
 
     // The hash was resolved against an empty page, so honour it now.
     if (location.hash.length > 1) {
