@@ -189,7 +189,7 @@
     radialNumberLaunch: false,
     radialNumberLabels: true,
     radialBackKey: 'Q',
-    showSettingsCorner: false,
+    showSettingsCorner: true,
     settingsCorner: 'top-right',
 
     /* Where the app's panel opens. */
@@ -260,7 +260,7 @@
     radialNumberLaunch: false,
     radialNumberLabels: true,
     radialBackKey: 'Q',
-    showSettingsCorner: false,
+    showSettingsCorner: true,
     settingsCorner: 'top-right',
   };
 

@@ -357,10 +357,12 @@ export const DEFAULT_UI_CONFIG: UIConfig = {
   showWeather: false,
   clockPosition: "top-center",
   /**
-   * Off: it paints something over the desktop that was never there, and it costs the overlay its
-   * cheap box (see `showSettingsCorner`). Whoever wants a visible way into Settings turns it on.
+   * On, in the top-right corner: Settings has no other visible door. The trigger key is the only
+   * other way in, and somebody who has forgotten it has no way to be told it — so the gear is
+   * worth what it costs, which is the overlay's cheap box (it opens over the whole monitor, so
+   * that a corner is the screen's corner and not a point floating off the wheel on a diagonal).
    */
-  showSettingsCorner: false,
+  showSettingsCorner: true,
   settingsCorner: "top-right",
   gameMode: {
     enabled: false,
